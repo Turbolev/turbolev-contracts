@@ -1,0 +1,4 @@
+*.sol linguist-language=Solidity
+*.md linguist-documentation
+docs/** linguist-documentation
+

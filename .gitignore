@@ -1,0 +1,47 @@
+# Compiler files
+cache/
+out/
+broadcast/
+
+# Ignores development broadcast logs
+!/broadcast
+/broadcast/*/31337/
+/broadcast/**/dry-run/
+
+# Docs
+docs/
+
+# Dotenv file
+.env
+
+# Node modules
+node_modules/
+
+# VS Code
+.vscode/
+
+# IntelliJ IDEA
+.idea/
+
+# macOS
+.DS_Store
+
+# Yarn
+.yarn/
+.pnp.*
+
+# Coverage
+coverage/
+coverage.json
+lcov.info
+
+# TypeChain
+typechain/
+typechain-types/
+
+# Hardhat
+artifacts/
+cache_hardhat/
+
+# Foundry
+lib/
