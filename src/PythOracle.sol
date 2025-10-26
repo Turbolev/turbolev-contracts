@@ -50,6 +50,22 @@ contract PythOracle is
     uint256 public cacheDuration;
 
     // ========================================================================
+    // CRITICAL FIX: Oracle Price Validation
+    // ========================================================================
+
+    /// @notice Maximum confidence interval ratio in bps (500 = 5%)
+    uint256 public maxConfidenceRatioBps;
+
+    /// @notice Maximum price change percentage in bps (1000 = 10%)
+    uint256 public maxPriceChangeBps;
+
+    /// @notice Minimum time between price updates (seconds) for circuit breaker
+    uint256 public minPriceUpdateInterval;
+
+    /// @notice Last validated prices for circuit breaker
+    mapping(bytes32 => CachedPrice) public lastValidPrices;
+
+    // ========================================================================
     // EVENTS
     // ========================================================================
 
@@ -79,6 +95,19 @@ contract PythOracle is
         uint256 publishTime
     );
 
+    event PriceValidationConfigUpdated(
+        uint256 maxConfidenceRatioBps,
+        uint256 maxPriceChangeBps,
+        uint256 minPriceUpdateInterval
+    );
+
+    event CircuitBreakerTriggered(
+        bytes32 indexed priceFeedId,
+        int256 oldPrice,
+        int256 newPrice,
+        uint256 changePercent
+    );
+
     // ========================================================================
     // ERRORS
     // ========================================================================
@@ -89,6 +118,9 @@ contract PythOracle is
     error InvalidPrice();
     error InsufficientUpdateFee();
     error RefundFailed();
+    error ConfidenceIntervalTooHigh();
+    error PriceChangeTooLarge();
+    error InvalidValidationConfig();
 
     // ========================================================================
     // CONSTRUCTOR / INITIALIZER
@@ -121,6 +153,11 @@ contract PythOracle is
         pyth = IPyth(_pyth);
         maxPriceAge = _maxPriceAge;
         cacheDuration = 60; // Default: 1 minute
+
+        // CRITICAL FIX: Initialize validation parameters
+        maxConfidenceRatioBps = 500; // 5% max confidence interval
+        maxPriceChangeBps = 1000; // 10% max price change
+        minPriceUpdateInterval = 1; // 1 second minimum between updates
 
         emit PythOracleInitialized(_pyth, _maxPriceAge);
     }
@@ -210,6 +247,7 @@ contract PythOracle is
      * @param priceUpdate Price update data from Pyth (required if price is stale)
      * @return price Price in int256 format (scaled to 18 decimals)
      * @return publishTime When price was published
+     * @dev CRITICAL FIX: Added price validation with confidence check and circuit breaker
      */
     function getPriceNoOlderThan(
         bytes32 priceFeedId,
@@ -221,15 +259,13 @@ contract PythOracle is
         whenNotPaused
         returns (int256 price, uint256 publishTime)
     {
+        PythStructs.Price memory pythPrice;
+
         // Try to get price no older than maxAge
         try pyth.getPriceNoOlderThan(priceFeedId, maxAge) returns (
-            PythStructs.Price memory pythPrice
+            PythStructs.Price memory _pythPrice
         ) {
-            // Success - price is fresh enough
-            return (
-                _scalePrice(pythPrice.price, pythPrice.expo),
-                pythPrice.publishTime
-            );
+            pythPrice = _pythPrice;
         } catch {
             // Price is stale - need to update
             // Update price feeds first
@@ -245,15 +281,24 @@ contract PythOracle is
             }
 
             // Now get the fresh price
-            PythStructs.Price memory pythPrice = pyth.getPriceNoOlderThan(
-                priceFeedId,
-                maxAge
-            );
-            return (
-                _scalePrice(pythPrice.price, pythPrice.expo),
-                pythPrice.publishTime
-            );
+            pythPrice = pyth.getPriceNoOlderThan(priceFeedId, maxAge);
         }
+
+        // CRITICAL FIX: Validate price before returning
+        _validatePrice(priceFeedId, pythPrice);
+
+        int256 scaledPrice = _scalePrice(pythPrice.price, pythPrice.expo);
+
+        // Update last valid price for future circuit breaker checks
+        lastValidPrices[priceFeedId] = CachedPrice({
+            price: pythPrice.price,
+            conf: pythPrice.conf,
+            expo: pythPrice.expo,
+            publishTime: pythPrice.publishTime,
+            cachedAt: block.timestamp
+        });
+
+        return (scaledPrice, pythPrice.publishTime);
     }
 
     /**
@@ -394,6 +439,73 @@ contract PythOracle is
         }
     }
 
+    /**
+     * @notice Validate price against confidence interval and circuit breaker
+     * @param priceFeedId Price feed ID
+     * @param pythPrice Pyth price data
+     * @dev CRITICAL FIX: Prevents oracle manipulation and flash crashes
+     */
+    function _validatePrice(
+        bytes32 priceFeedId,
+        PythStructs.Price memory pythPrice
+    ) internal {
+        // 1. Validate confidence interval
+        // Confidence should be small relative to price
+        if (pythPrice.price != 0 && maxConfidenceRatioBps > 0) {
+            uint256 priceAbs = pythPrice.price > 0
+                ? uint256(uint64(pythPrice.price))
+                : uint256(uint64(-pythPrice.price));
+            uint256 confidenceRatio = (uint256(uint64(pythPrice.conf)) *
+                10000) / priceAbs;
+
+            if (confidenceRatio > maxConfidenceRatioBps) {
+                revert ConfidenceIntervalTooHigh();
+            }
+        }
+
+        // 2. Circuit breaker: Check price deviation from last valid price
+        CachedPrice memory lastPrice = lastValidPrices[priceFeedId];
+
+        if (lastPrice.cachedAt > 0 && maxPriceChangeBps > 0) {
+            // Check if enough time has passed (avoid false positives on legitimate volatility)
+            if (
+                block.timestamp >= lastPrice.cachedAt + minPriceUpdateInterval
+            ) {
+                // Calculate price change percentage
+                int256 lastPriceScaled = _scalePrice(
+                    lastPrice.price,
+                    lastPrice.expo
+                );
+                int256 newPriceScaled = _scalePrice(
+                    pythPrice.price,
+                    pythPrice.expo
+                );
+
+                if (lastPriceScaled > 0) {
+                    uint256 priceChange;
+                    if (newPriceScaled > lastPriceScaled) {
+                        priceChange = uint256(newPriceScaled - lastPriceScaled);
+                    } else {
+                        priceChange = uint256(lastPriceScaled - newPriceScaled);
+                    }
+
+                    uint256 changePercent = (priceChange * 10000) /
+                        uint256(lastPriceScaled);
+
+                    if (changePercent > maxPriceChangeBps) {
+                        emit CircuitBreakerTriggered(
+                            priceFeedId,
+                            lastPriceScaled,
+                            newPriceScaled,
+                            changePercent
+                        );
+                        revert PriceChangeTooLarge();
+                    }
+                }
+            }
+        }
+    }
+
     // ========================================================================
     // ADMIN FUNCTIONS
     // ========================================================================
@@ -428,6 +540,32 @@ contract PythOracle is
         uint256 oldDuration = cacheDuration;
         cacheDuration = _cacheDuration;
         emit CacheDurationUpdated(oldDuration, _cacheDuration);
+    }
+
+    /**
+     * @notice Update price validation configuration
+     * @param _maxConfidenceRatioBps Maximum confidence interval ratio in bps
+     * @param _maxPriceChangeBps Maximum price change in bps
+     * @param _minPriceUpdateInterval Minimum time between price updates
+     * @dev CRITICAL FIX: Allow admin to adjust validation parameters
+     */
+    function setPriceValidationConfig(
+        uint256 _maxConfidenceRatioBps,
+        uint256 _maxPriceChangeBps,
+        uint256 _minPriceUpdateInterval
+    ) external onlyOwner {
+        if (_maxConfidenceRatioBps > 5000) revert InvalidValidationConfig(); // Max 50%
+        if (_maxPriceChangeBps > 5000) revert InvalidValidationConfig(); // Max 50%
+
+        maxConfidenceRatioBps = _maxConfidenceRatioBps;
+        maxPriceChangeBps = _maxPriceChangeBps;
+        minPriceUpdateInterval = _minPriceUpdateInterval;
+
+        emit PriceValidationConfigUpdated(
+            _maxConfidenceRatioBps,
+            _maxPriceChangeBps,
+            _minPriceUpdateInterval
+        );
     }
 
     /**

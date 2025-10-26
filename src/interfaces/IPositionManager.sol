@@ -26,8 +26,22 @@ interface IPositionManager {
     /**
      * @notice Close position (user initiated)
      * @param positionId Position ID
+     * @param deadline Deadline timestamp (MEDIUM-02 FIX)
      */
-    function closePosition(uint64 positionId) external;
+    function closePosition(uint64 positionId, uint256 deadline) external;
+
+    /**
+     * @notice Add margin to existing position
+     * @param positionId Position ID
+     * @param marginAmount Amount of margin to add
+     * @param priceUpdate Pyth price update data (REFACTOR: check liquidation)
+     * @dev HIGH-04 FIX: Allows users to add collateral to avoid liquidation
+     */
+    function addMargin(
+        uint64 positionId,
+        uint256 marginAmount,
+        bytes[] calldata priceUpdate
+    ) external payable;
 
     /**
      * @notice Backend force close position
@@ -40,4 +54,54 @@ interface IPositionManager {
         uint256 closePrice,
         bool isLiquidation
     ) external;
+
+    /**
+     * @notice Add a backend address
+     * @param backend Backend address to add
+     */
+    function addBackend(address backend) external;
+
+    /**
+     * @notice Remove a backend address
+     * @param backend Backend address to remove
+     */
+    function removeBackend(address backend) external;
+
+    /**
+     * @notice Check if an address is a backend
+     * @param account Address to check
+     * @return bool True if address is a backend
+     */
+    function isBackend(address account) external view returns (bool);
+
+    /**
+     * @notice Get all backend addresses
+     * @return address[] Array of backend addresses
+     */
+    function getBackends() external view returns (address[] memory);
+
+    /**
+     * @notice Get number of backends
+     * @return uint256 Number of backend addresses
+     */
+    function getBackendCount() external view returns (uint256);
+
+    /**
+     * @notice Get remaining hold time for a position
+     * @param positionId Position ID
+     * @return remainingTime Remaining time in seconds
+     */
+    function getRemainingHoldTime(
+        uint64 positionId
+    ) external view returns (uint256 remainingTime);
+
+    /**
+     * @notice Check if position can be closed
+     * @param positionId Position ID
+     * @return canClose Whether position can be closed
+     * @return reason Reason if cannot close
+     */
+    function canClosePosition(
+        uint64 positionId
+    ) external view returns (bool canClose, string memory reason);
 }

@@ -8,6 +8,8 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "./PythOracle.sol";
 import "./libraries/PositionLib.sol";
+import "./interfaces/IVaultManager.sol";
+import "./interfaces/IAssetVault.sol";
 
 /**
  * @title SettlementEngine
@@ -53,6 +55,9 @@ contract SettlementEngine is
     /// @notice PythOracle contract address
     address public pythOracle;
 
+    /// @notice Max profit cap in bps (200 = 2% of vault USD value)
+    uint16 public maxProfitCapBps;
+
     // ========================================================================
     // STRUCTS
     // ========================================================================
@@ -64,6 +69,7 @@ contract SettlementEngine is
         int256 pnl;
         int256 vaultPnL;
         uint8 finalState;
+        uint256 excessProfit; // Profit above cap (Phase 3)
     }
 
     // ========================================================================
@@ -100,6 +106,16 @@ contract SettlementEngine is
         address indexed oldAddress,
         address indexed newAddress
     );
+
+    event ProfitCapped(
+        uint64 indexed positionId,
+        uint256 originalProfit,
+        uint256 cappedProfit,
+        uint256 excessProfit,
+        uint256 timestamp
+    );
+
+    event MaxProfitCapBpsUpdated(uint16 oldBps, uint16 newBps);
 
     // ========================================================================
     // ERRORS
@@ -142,10 +158,11 @@ contract SettlementEngine is
         __UUPSUpgradeable_init();
 
         // Default config
-        houseEdgeBps = 500; // 5%
+        houseEdgeBps = 200; // 2% (changed from 500 = 5%)
         winMultiplierBps = 19500; // 1.95x
         minBetAmount = 0.001 ether; // 0.001 MON
         maxBetAmount = 1000 ether; // 1000 MON
+        maxProfitCapBps = 200; // 2% of vault USD value (Phase 3)
     }
 
     // ========================================================================
@@ -216,15 +233,48 @@ contract SettlementEngine is
             payout = remaining > liquidationFee
                 ? remaining - liquidationFee
                 : 0;
-            fee = liquidationFee;
+            fee = liquidationFee; // Now flat 2% (calculated from PositionLib)
         } else if (won) {
             // Won: User gets collateral + profit - house edge
             uint256 profit = uint256(pnl);
-            uint256 grossPayout = position.amount + profit;
 
-            // Apply house edge
-            fee = (profit * houseEdgeBps) / 10000;
+            // Apply profit cap (Phase 3)
+            // Cap 1: 3× collateral (stored in position at open time)
+            uint256 cap1 = position.maxProfitCap; // 3× collateral
+
+            // Cap 2: 2% of vault token value (at settlement time)
+            uint256 cap2 = _calculateVaultCap(position.tokenAddress);
+
+            // Use minimum of two caps
+            uint256 maxProfit = cap1;
+            if (cap2 > 0 && cap2 < cap1) {
+                maxProfit = cap2;
+            }
+
+            uint256 cappedProfit = profit;
+            uint256 excessProfit = 0;
+
+            if (profit > maxProfit) {
+                cappedProfit = maxProfit;
+                excessProfit = profit - maxProfit;
+
+                emit ProfitCapped(
+                    position.positionId,
+                    profit,
+                    cappedProfit,
+                    excessProfit,
+                    block.timestamp
+                );
+            }
+
+            uint256 grossPayout = position.amount + cappedProfit;
+
+            // Apply house edge on capped profit
+            fee = (cappedProfit * houseEdgeBps) / 10000;
             payout = grossPayout - fee;
+
+            // Store excess profit in result
+            result.excessProfit = excessProfit;
         } else {
             // Lost: User gets collateral minus loss
             uint256 absLoss = uint256(-pnl); // pnl is negative when user loses
@@ -272,7 +322,8 @@ contract SettlementEngine is
                 fee: fee,
                 pnl: pnl,
                 vaultPnL: vaultPnL,
-                finalState: finalState
+                finalState: finalState,
+                excessProfit: 0 // Will be set if profit was capped
             });
     }
 
@@ -387,11 +438,62 @@ contract SettlementEngine is
     }
 
     /**
+     * @notice Set max profit cap in basis points
+     * @param _maxProfitCapBps New max profit cap (max 1000 = 10%)
+     */
+    function setMaxProfitCapBps(uint16 _maxProfitCapBps) external onlyOwner {
+        if (_maxProfitCapBps > 1000) revert InvalidConfig(); // Max 10%
+        uint16 oldBps = maxProfitCapBps;
+        maxProfitCapBps = _maxProfitCapBps;
+        emit MaxProfitCapBpsUpdated(oldBps, _maxProfitCapBps);
+    }
+
+    /**
      * @notice Authorize upgrade (UUPS pattern)
      */
     function _authorizeUpgrade(
         address newImplementation
     ) internal override onlyOwner {}
+
+    // ========================================================================
+    // TRADING CAP FUNCTIONS (Phase 3)
+    // ========================================================================
+
+    /**
+     * @notice Calculate vault-based cap (2% of vault token value)
+     * @param tokenAddress Collateral token address
+     * @return vaultCap 2% of vault liquidity in tokens (0 if not available)
+     * @dev Used at settlement time to compare with 3× collateral cap
+     */
+    function _calculateVaultCap(
+        address tokenAddress
+    ) internal view returns (uint256) {
+        if (vaultManager == address(0)) {
+            return 0; // No vault manager
+        }
+
+        // Get vault address
+        address vaultAddress = IVaultManager(vaultManager).getVault(
+            tokenAddress
+        );
+        if (vaultAddress == address(0)) {
+            return 0; // Vault not found
+        }
+
+        // Get vault total liquidity (in token amount, NOT USD)
+        IAssetVault.VaultInfo memory vaultInfo = IAssetVault(vaultAddress)
+            .getVaultInfo();
+        uint256 vaultLiquidity = vaultInfo.totalLiquidity;
+
+        if (vaultLiquidity == 0) {
+            return 0;
+        }
+
+        // Calculate 2% of vault liquidity (in token amount)
+        uint256 vaultCap = (vaultLiquidity * maxProfitCapBps) / 10000;
+
+        return vaultCap;
+    }
 
     // ========================================================================
     // VIEW FUNCTIONS

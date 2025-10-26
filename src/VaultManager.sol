@@ -5,6 +5,7 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol"; // HIGH FIX: For emergency withdrawal
 import "./interfaces/IAssetVault.sol";
 import "./AssetVault.sol";
 
@@ -37,6 +38,9 @@ contract VaultManager is Ownable, ReentrancyGuard, Pausable {
     /// @notice Mapping: token address => vault address
     mapping(address => address) public vaults;
 
+    /// @notice Mapping: price feed ID => vault address (to prevent duplicates)
+    mapping(bytes32 => address) public vaultsByPriceFeed;
+
     /// @notice Array of all vault token addresses
     address[] public supportedTokens;
 
@@ -68,6 +72,20 @@ contract VaultManager is Ownable, ReentrancyGuard, Pausable {
         address indexed newAddress
     );
 
+    // HIGH FIX: Emergency withdrawal events
+    event EmergencyWithdrawNative(
+        address indexed to,
+        uint256 amount,
+        uint256 timestamp
+    );
+
+    event EmergencyWithdrawToken(
+        address indexed token,
+        address indexed to,
+        uint256 amount,
+        uint256 timestamp
+    );
+
     // ========================================================================
     // ERRORS
     // ========================================================================
@@ -78,6 +96,8 @@ contract VaultManager is Ownable, ReentrancyGuard, Pausable {
     error NotAuthorized();
     error NotPositionManager();
     error NotSettlementEngine();
+    error DuplicatePriceFeedId();
+    error InvalidAmount(); // HIGH FIX: For validation checks
 
     // ========================================================================
     // MODIFIERS
@@ -112,6 +132,7 @@ contract VaultManager is Ownable, ReentrancyGuard, Pausable {
     /**
      * @notice Create new vault for a token
      * @param tokenAddress Token address (address(0) for native token)
+     * @param tokenPriceFeedId Pyth price feed ID for token (for USD conversion)
      * @param maxPayoutBps Max payout in bps
      * @param perBetUtilBps Per bet utilization in bps
      * @param maxUtilizationBps Max utilization in bps
@@ -121,6 +142,7 @@ contract VaultManager is Ownable, ReentrancyGuard, Pausable {
      */
     function createVault(
         address tokenAddress,
+        bytes32 tokenPriceFeedId,
         uint16 maxPayoutBps,
         uint16 perBetUtilBps,
         uint16 maxUtilizationBps,
@@ -129,11 +151,17 @@ contract VaultManager is Ownable, ReentrancyGuard, Pausable {
     ) external onlyOwner returns (address vaultAddress) {
         if (vaults[tokenAddress] != address(0)) revert VaultAlreadyExists();
 
+        // Validate that price feed ID is not already used by another vault
+        if (vaultsByPriceFeed[tokenPriceFeedId] != address(0)) {
+            revert DuplicatePriceFeedId();
+        }
+
         // Deploy new vault directly (non-upgradeable)
         AssetVault vault = new AssetVault(
             tokenAddress,
             address(this),
             positionManager,
+            tokenPriceFeedId,
             maxPayoutBps,
             perBetUtilBps,
             maxUtilizationBps,
@@ -145,6 +173,7 @@ contract VaultManager is Ownable, ReentrancyGuard, Pausable {
 
         // Register vault
         vaults[tokenAddress] = vaultAddress;
+        vaultsByPriceFeed[tokenPriceFeedId] = vaultAddress;
         supportedTokens.push(tokenAddress);
         isValidVault[vaultAddress] = true;
 
@@ -168,6 +197,17 @@ contract VaultManager is Ownable, ReentrancyGuard, Pausable {
         vaultAddress = vaults[tokenAddress];
         if (vaultAddress == address(0)) revert VaultNotFound();
         return vaultAddress;
+    }
+
+    /**
+     * @notice Get vault address by price feed ID
+     * @param priceFeedId Pyth price feed ID
+     * @return vaultAddress Vault address (address(0) if not found)
+     */
+    function getVaultByPriceFeed(
+        bytes32 priceFeedId
+    ) external view returns (address vaultAddress) {
+        return vaultsByPriceFeed[priceFeedId];
     }
 
     /**
@@ -210,13 +250,15 @@ contract VaultManager is Ownable, ReentrancyGuard, Pausable {
      * @param tokenAddress Token address
      * @param positionSize Position size
      * @param leverage Leverage multiplier
+     * @param priceFeedId Pyth price feed ID of asset being bet on
      * @return canOpen Whether position can be opened
      * @return reason Reason if cannot open
      */
     function checkPositionRisk(
         address tokenAddress,
         uint256 positionSize,
-        uint8 leverage
+        uint8 leverage,
+        bytes32 priceFeedId
     ) external view returns (bool canOpen, string memory reason) {
         address vaultAddress = vaults[tokenAddress];
         if (vaultAddress == address(0)) {
@@ -224,7 +266,11 @@ contract VaultManager is Ownable, ReentrancyGuard, Pausable {
         }
 
         return
-            IAssetVault(vaultAddress).checkPositionRisk(positionSize, leverage);
+            IAssetVault(vaultAddress).checkPositionRisk(
+                positionSize,
+                leverage,
+                priceFeedId
+            );
     }
 
     /**
@@ -232,25 +278,46 @@ contract VaultManager is Ownable, ReentrancyGuard, Pausable {
      * @param tokenAddress Token address
      * @param amount Collateral amount
      * @param positionSize Position size
+     * @param priceFeedId Pyth price feed ID of asset being bet on
+     * @param direction Position direction (1=LONG, 2=SHORT)
+     * @dev HIGH FIX: Check vault existence BEFORE accepting payment to prevent stuck funds
      */
     function depositFromBet(
         address tokenAddress,
         uint256 amount,
-        uint256 positionSize
+        uint256 positionSize,
+        bytes32 priceFeedId,
+        uint8 direction
     ) external payable onlyPositionManager {
+        // HIGH FIX: Validate vault exists BEFORE accepting any payment
         address vaultAddress = vaults[tokenAddress];
         if (vaultAddress == address(0)) revert VaultNotFound();
 
+        // HIGH FIX: Additional validation - ensure vault is actually a contract
+        if (vaultAddress.code.length == 0) revert VaultNotFound();
+
         // Forward call to vault
         if (tokenAddress == address(0)) {
-            // Native token
+            // Native token - msg.value should match amount
+            if (msg.value != amount) revert InvalidAmount();
+
             IAssetVault(vaultAddress).depositFromBet{value: msg.value}(
                 amount,
-                positionSize
+                positionSize,
+                priceFeedId,
+                direction
             );
         } else {
-            // ERC20 - vault will handle transfer
-            IAssetVault(vaultAddress).depositFromBet(amount, positionSize);
+            // ERC20 - no native token should be sent
+            if (msg.value != 0) revert InvalidAmount();
+
+            // Vault will handle transfer from PositionManager
+            IAssetVault(vaultAddress).depositFromBet(
+                amount,
+                positionSize,
+                priceFeedId,
+                direction
+            );
         }
     }
 
@@ -274,26 +341,38 @@ contract VaultManager is Ownable, ReentrancyGuard, Pausable {
     /**
      * @notice Update vault P&L
      * @param tokenAddress Token address
+     * @param positionId Position ID (for tracking)
      * @param collateral Collateral amount
      * @param vaultPnL Vault P&L
      * @param fee Fee collected
      * @param positionSize Position size
+     * @param excessProfit Excess profit from capped trades
+     * @param priceFeedId Pyth price feed ID of the asset
+     * @param direction Position direction (1=LONG, 2=SHORT)
      */
     function updateVaultPnLWithLeverage(
         address tokenAddress,
+        uint64 positionId,
         uint256 collateral,
         int256 vaultPnL,
         uint256 fee,
-        uint256 positionSize
+        uint256 positionSize,
+        uint256 excessProfit,
+        bytes32 priceFeedId,
+        uint8 direction
     ) external onlyPositionManager {
         address vaultAddress = vaults[tokenAddress];
         if (vaultAddress == address(0)) revert VaultNotFound();
 
         IAssetVault(vaultAddress).updateVaultPnL(
+            positionId,
             collateral,
             vaultPnL,
             fee,
-            positionSize
+            positionSize,
+            excessProfit,
+            priceFeedId,
+            direction
         );
     }
 
@@ -380,6 +459,48 @@ contract VaultManager is Ownable, ReentrancyGuard, Pausable {
         _unpause();
     }
 
+    /**
+     * @notice Emergency: Withdraw stuck native tokens
+     * @param to Recipient address
+     * @param amount Amount to withdraw
+     * @dev HIGH FIX: Allows recovery of stuck funds if depositFromBet fails
+     */
+    function emergencyWithdrawNative(
+        address payable to,
+        uint256 amount
+    ) external onlyOwner {
+        if (to == address(0)) revert InvalidAddress();
+        if (amount == 0) revert InvalidAmount();
+        if (address(this).balance < amount) revert InvalidAmount();
+
+        (bool success, ) = to.call{value: amount}("");
+        require(success, "Transfer failed");
+
+        emit EmergencyWithdrawNative(to, amount, block.timestamp);
+    }
+
+    /**
+     * @notice Emergency: Withdraw stuck ERC20 tokens
+     * @param token Token address
+     * @param to Recipient address
+     * @param amount Amount to withdraw
+     * @dev HIGH FIX: Allows recovery of stuck ERC20 tokens
+     */
+    function emergencyWithdrawToken(
+        address token,
+        address to,
+        uint256 amount
+    ) external onlyOwner {
+        if (token == address(0)) revert InvalidAddress();
+        if (to == address(0)) revert InvalidAddress();
+        if (amount == 0) revert InvalidAmount();
+
+        IERC20 tokenContract = IERC20(token);
+        require(tokenContract.transfer(to, amount), "Transfer failed");
+
+        emit EmergencyWithdrawToken(token, to, amount, block.timestamp);
+    }
+
     // ========================================================================
     // VIEW FUNCTIONS
     // ========================================================================
@@ -433,5 +554,115 @@ contract VaultManager is Ownable, ReentrancyGuard, Pausable {
             total += info.totalLiquidity;
         }
         return total;
+    }
+
+    // ========================================================================
+    // GRADUATION FUNCTIONS (Phase 2)
+    // ========================================================================
+
+    /**
+     * @notice Get all graduated vaults
+     * @return graduated Array of graduated vault addresses
+     */
+    function getGraduatedVaults()
+        external
+        view
+        returns (address[] memory graduated)
+    {
+        uint256 count = 0;
+
+        // Count graduated vaults
+        for (uint256 i = 0; i < supportedTokens.length; i++) {
+            address vaultAddr = vaults[supportedTokens[i]];
+            IAssetVault.VaultInfo memory info = IAssetVault(vaultAddr)
+                .getVaultInfo();
+            if (info.isGraduated) {
+                count++;
+            }
+        }
+
+        // Collect graduated vaults
+        graduated = new address[](count);
+        uint256 index = 0;
+
+        for (uint256 i = 0; i < supportedTokens.length; i++) {
+            address vaultAddr = vaults[supportedTokens[i]];
+            IAssetVault.VaultInfo memory info = IAssetVault(vaultAddr)
+                .getVaultInfo();
+            if (info.isGraduated) {
+                graduated[index] = vaultAddr;
+                index++;
+            }
+        }
+
+        return graduated;
+    }
+
+    /**
+     * @notice Get total USD value across all vaults
+     * @return totalUSD Total value in USD (18 decimals)
+     */
+    function getTotalValueUSD() external view returns (uint256 totalUSD) {
+        for (uint256 i = 0; i < supportedTokens.length; i++) {
+            address vaultAddr = vaults[supportedTokens[i]];
+            totalUSD += IAssetVault(vaultAddr).getVaultValueUSD();
+        }
+        return totalUSD;
+    }
+
+    /**
+     * @notice Set Pyth Oracle for a vault
+     * @param tokenAddress Token address
+     * @param pythOracle PythOracle contract address
+     */
+    function setVaultPythOracle(
+        address tokenAddress,
+        address pythOracle
+    ) external onlyOwner {
+        address vaultAddress = vaults[tokenAddress];
+        if (vaultAddress == address(0)) revert VaultNotFound();
+
+        IAssetVault(vaultAddress).setPythOracle(pythOracle);
+    }
+
+    /**
+     * @notice Set graduation threshold for a vault
+     * @param tokenAddress Token address
+     * @param threshold New threshold in token amount (same decimals as token)
+     */
+    function setVaultGraduationThreshold(
+        address tokenAddress,
+        uint256 threshold
+    ) external onlyOwner {
+        address vaultAddress = vaults[tokenAddress];
+        if (vaultAddress == address(0)) revert VaultNotFound();
+
+        IAssetVault(vaultAddress).setGraduationThreshold(threshold);
+    }
+
+    // ========================================================================
+    // HIGH FIX: Emergency View Functions
+    // ========================================================================
+
+    /**
+     * @notice Get balance of native tokens in VaultManager
+     * @return balance Native token balance
+     * @dev HIGH FIX: Allows checking if funds are stuck
+     */
+    function getNativeBalance() external view returns (uint256 balance) {
+        return address(this).balance;
+    }
+
+    /**
+     * @notice Get balance of ERC20 tokens in VaultManager
+     * @param token Token address
+     * @return balance Token balance
+     * @dev HIGH FIX: Allows checking if ERC20 tokens are stuck
+     */
+    function getTokenBalance(
+        address token
+    ) external view returns (uint256 balance) {
+        if (token == address(0)) revert InvalidAddress();
+        return IERC20(token).balanceOf(address(this));
     }
 }
