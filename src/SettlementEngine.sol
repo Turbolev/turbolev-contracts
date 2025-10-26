@@ -6,6 +6,8 @@ import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol
 import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import "./PythOracle.sol";
+import "./libraries/PositionLib.sol";
 
 /**
  * @title SettlementEngine
@@ -42,27 +44,26 @@ contract SettlementEngine is
     /// @notice Maximum bet amount (wei)
     uint256 public maxBetAmount;
 
-    /// @notice BinaryBet contract address
-    address public binaryBetContract;
+    /// @notice PositionManager contract address
+    address public positionManager;
 
     /// @notice VaultManager contract address
     address public vaultManager;
 
-    /// @notice Settlement history
-    SettlementRecord[] public settlementHistory;
+    /// @notice PythOracle contract address
+    address public pythOracle;
 
     // ========================================================================
     // STRUCTS
     // ========================================================================
 
-    struct SettlementRecord {
-        uint64 positionId;
-        address user;
-        uint256 amount;
+    struct SettlementResult {
+        bool won;
         uint256 payout;
         uint256 fee;
-        bool won;
-        uint256 timestamp;
+        int256 pnl;
+        int256 vaultPnL;
+        uint8 finalState;
     }
 
     // ========================================================================
@@ -86,11 +87,16 @@ contract SettlementEngine is
         uint256 maxBetAmount
     );
 
-    event BinaryBetContractUpdated(
+    event PositionManagerUpdated(
         address indexed oldAddress,
         address indexed newAddress
     );
     event VaultManagerUpdated(
+        address indexed oldAddress,
+        address indexed newAddress
+    );
+
+    event PythOracleUpdated(
         address indexed oldAddress,
         address indexed newAddress
     );
@@ -102,7 +108,17 @@ contract SettlementEngine is
     error InvalidConfig();
     error InvalidAmount();
     error InvalidAddress();
-    error NotBinaryBet();
+    error NotPositionManager();
+    error InvalidOraclePrice();
+
+    // ========================================================================
+    // MODIFIERS
+    // ========================================================================
+
+    modifier onlyPositionManager() {
+        if (msg.sender != positionManager) revert NotPositionManager();
+        _;
+    }
 
     // ========================================================================
     // CONSTRUCTOR / INITIALIZER
@@ -137,80 +153,6 @@ contract SettlementEngine is
     // ========================================================================
 
     /**
-     * @notice Calculate payout for position
-     * @param amount Bet amount
-     * @param direction Bet direction (not used in current formula)
-     * @param openPrice Open price (not used in current formula)
-     * @param closePrice Close price (not used in current formula)
-     * @return payout Net payout to user
-     */
-    function calculatePayout(
-        uint256 amount,
-        uint8 direction,
-        uint256 openPrice,
-        uint256 closePrice
-    ) external view whenNotPaused returns (uint256 payout) {
-        // Simplified: Does not consider direction, openPrice, closePrice
-        // Assume user wins, calculate payout
-
-        // Gross payout = amount * multiplier
-        uint256 grossPayout = (amount * winMultiplierBps) / 10000;
-
-        // House edge = grossPayout * houseEdge%
-        uint256 houseEdge = (grossPayout * houseEdgeBps) / 10000;
-
-        // Net payout = grossPayout - houseEdge
-        payout = grossPayout - houseEdge;
-
-        return payout;
-    }
-
-    /**
-     * @notice Calculate full settlement details
-     * @param amount Bet amount
-     * @param direction Bet direction
-     * @param openPrice Open price
-     * @param closePrice Close price
-     * @return won True if user won
-     * @return payout Net payout
-     * @return fee House edge fee
-     */
-    function calculateSettlement(
-        uint256 amount,
-        uint8 direction,
-        uint256 openPrice,
-        uint256 closePrice
-    )
-        external
-        view
-        whenNotPaused
-        returns (bool won, uint256 payout, uint256 fee)
-    {
-        // Determine win/loss
-        // direction: 1 = BET_DIRECTION_LONG, 2 = BET_DIRECTION_SHORT
-        if (direction == 1) {
-            won = closePrice > openPrice; // LONG wins if price goes up
-        } else if (direction == 2) {
-            won = closePrice < openPrice; // SHORT wins if price goes down
-        } else {
-            won = false;
-        }
-
-        if (won) {
-            // User wins
-            uint256 grossPayout = (amount * winMultiplierBps) / 10000;
-            fee = (grossPayout * houseEdgeBps) / 10000;
-            payout = grossPayout - fee;
-        } else {
-            // User loses
-            payout = 0;
-            fee = amount; // Vault keeps all
-        }
-
-        return (won, payout, fee);
-    }
-
-    /**
      * @notice Calculate potential payout (for display)
      * @param amount Bet amount
      * @return potentialPayout Max possible payout
@@ -225,46 +167,146 @@ contract SettlementEngine is
     }
 
     /**
-     * @notice Record settlement (called by BinaryBet)
-     * @param positionId Position ID
-     * @param user User address
-     * @param amount Bet amount
-     * @param payout Net payout
-     * @param fee House edge fee
-     * @param won True if user won
+     * @notice Process settlement logic with synthetic leverage
+     * @dev Main settlement function - calculates payout, fees, and P&L
+     * @param position Position data
+     * @param closePrice Close price
+     * @param isLiquidation True if this is a liquidation
+     * @return result Settlement result with all calculated values
      */
-    function recordSettlement(
-        uint64 positionId,
-        address user,
-        uint256 amount,
-        uint256 payout,
-        uint256 fee,
-        bool won
-    ) external nonReentrant {
-        if (msg.sender != binaryBetContract) revert NotBinaryBet();
-
-        // Record settlement
-        settlementHistory.push(
-            SettlementRecord({
-                positionId: positionId,
-                user: user,
-                amount: amount,
-                payout: payout,
-                fee: fee,
-                won: won,
-                timestamp: block.timestamp
-            })
+    function processSettlement(
+        PositionLib.Position memory position,
+        uint256 closePrice,
+        bool isLiquidation
+    )
+        external
+        onlyPositionManager
+        whenNotPaused
+        returns (SettlementResult memory result)
+    {
+        // Calculate P&L with leverage
+        (int256 pnl, ) = PositionLib.calculateUnrealizedPnL(
+            position,
+            closePrice
         );
 
+        // Determine win/loss
+        bool won = !isLiquidation && pnl > 0;
+
+        // Calculate liquidation fee if applicable
+        uint256 liquidationFee = 0;
+        if (isLiquidation) {
+            uint256 liquidationFeeBps = PositionLib.calculateLiquidationFee(
+                position.leverage
+            );
+            liquidationFee = (position.amount * liquidationFeeBps) / 10000;
+        }
+
+        // Calculate final payout/settlement
+        uint256 payout = 0;
+        uint256 fee = 0;
+
+        if (isLiquidation) {
+            // Liquidation: User gets remaining collateral minus liquidation fee (if any)
+            // Remaining = collateral - abs(loss) - liquidation fee
+            uint256 absLoss = pnl < 0 ? uint256(-pnl) : 0;
+            uint256 remaining = position.amount > absLoss
+                ? position.amount - absLoss
+                : 0;
+            payout = remaining > liquidationFee
+                ? remaining - liquidationFee
+                : 0;
+            fee = liquidationFee;
+        } else if (won) {
+            // Won: User gets collateral + profit - house edge
+            uint256 profit = uint256(pnl);
+            uint256 grossPayout = position.amount + profit;
+
+            // Apply house edge
+            fee = (profit * houseEdgeBps) / 10000;
+            payout = grossPayout - fee;
+        } else {
+            // Lost: User gets collateral minus loss
+            uint256 absLoss = uint256(-pnl); // pnl is negative when user loses
+
+            if (absLoss >= position.amount) {
+                // Loss exceeds collateral - user gets nothing
+                payout = 0;
+                fee = position.amount; // Vault keeps all collateral
+            } else {
+                // Loss is less than collateral - user gets remaining
+                payout = position.amount - absLoss;
+                fee = absLoss; // Vault keeps the loss amount
+            }
+        }
+
+        // Vault P&L = -user P&L (vault loses when user wins, gains when user loses)
+        int256 vaultPnL = -pnl;
+
+        // Determine final state
+        uint8 finalState;
+        if (isLiquidation) {
+            finalState = PositionLib.POSITION_STATE_LIQUIDATED;
+        } else {
+            finalState = won
+                ? PositionLib.POSITION_STATE_WON
+                : PositionLib.POSITION_STATE_LOST;
+        }
+
+        // Emit settlement event
         emit SettlementProcessed(
-            positionId,
-            user,
-            amount,
+            position.positionId,
+            position.user,
+            position.amount,
             payout,
             fee,
             won,
             block.timestamp
         );
+
+        // Return result
+        return
+            SettlementResult({
+                won: won,
+                payout: payout,
+                fee: fee,
+                pnl: pnl,
+                vaultPnL: vaultPnL,
+                finalState: finalState
+            });
+    }
+
+    /**
+     * @notice Get settlement price with price update (no older than maxAge)
+     * @dev Used by PositionManager to get fresh price from oracle
+     * @param priceFeedId Pyth price feed ID
+     * @param maxAge Maximum acceptable price age in seconds (e.g., 5)
+     * @param priceUpdate Price update data from Pyth
+     * @return closePrice Price from oracle (converted to uint256)
+     * @return publishTime When price was published
+     */
+    function getSettlementPriceWithUpdate(
+        bytes32 priceFeedId,
+        uint256 maxAge,
+        bytes[] calldata priceUpdate
+    )
+        external
+        payable
+        whenNotPaused
+        returns (uint256 closePrice, uint256 publishTime)
+    {
+        if (pythOracle == address(0)) revert InvalidAddress();
+
+        (int256 price, uint256 pubTime) = PythOracle(payable(pythOracle))
+            .getPriceNoOlderThan{value: msg.value}(
+            priceFeedId,
+            maxAge,
+            priceUpdate
+        );
+
+        // Convert to uint256 (price should always be positive for assets)
+        if (price <= 0) revert InvalidOraclePrice();
+        return (uint256(price), pubTime);
     }
 
     // ========================================================================
@@ -303,13 +345,11 @@ contract SettlementEngine is
     /**
      * @notice Set BinaryBet contract address
      */
-    function setBinaryBetContract(
-        address _binaryBetContract
-    ) external onlyOwner {
-        if (_binaryBetContract == address(0)) revert InvalidAddress();
-        address oldAddress = binaryBetContract;
-        binaryBetContract = _binaryBetContract;
-        emit BinaryBetContractUpdated(oldAddress, _binaryBetContract);
+    function setPositionManager(address _positionManager) external onlyOwner {
+        if (_positionManager == address(0)) revert InvalidAddress();
+        address oldAddress = positionManager;
+        positionManager = _positionManager;
+        emit PositionManagerUpdated(oldAddress, _positionManager);
     }
 
     /**
@@ -320,6 +360,16 @@ contract SettlementEngine is
         address oldAddress = vaultManager;
         vaultManager = _vaultManager;
         emit VaultManagerUpdated(oldAddress, _vaultManager);
+    }
+
+    /**
+     * @notice Set PythOracle address
+     */
+    function setPythOracle(address _pythOracle) external onlyOwner {
+        if (_pythOracle == address(0)) revert InvalidAddress();
+        address oldAddress = pythOracle;
+        pythOracle = _pythOracle;
+        emit PythOracleUpdated(oldAddress, _pythOracle);
     }
 
     /**
@@ -375,22 +425,6 @@ contract SettlementEngine is
             maxBetAmount,
             paused()
         );
-    }
-
-    /**
-     * @notice Get settlement history count
-     */
-    function getSettlementHistoryCount() external view returns (uint256) {
-        return settlementHistory.length;
-    }
-
-    /**
-     * @notice Get settlement record
-     */
-    function getSettlementRecord(
-        uint256 index
-    ) external view returns (SettlementRecord memory) {
-        return settlementHistory[index];
     }
 
     /**

@@ -6,22 +6,27 @@ import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol
 import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./libraries/PositionLib.sol";
+import "./interfaces/IAssetManager.sol";
+import "./interfaces/IVaultManager.sol";
+import "./interfaces/ISettlementEngine.sol";
 
 /**
- * @title BinaryBet
- * @notice Core betting contract for binary options (LONG/SHORT) - Upgradeable
- * @dev Migrated from binary_bet.move with native token (MON) support
+ * @title PositionManager
+ * @notice Core position management contract for binary options (LONG/SHORT) - Upgradeable
+ * @dev Migrated from binary_bet.move with multi-collateral support
  *
  * Features:
- * - Open positions with LONG/SHORT direction using native token
+ * - Open positions with LONG/SHORT direction using multiple collateral tokens
  * - Close positions with settlement
  * - State management to avoid race conditions
- * - Backend price validation (oracle removed)
+ * - Backend price validation (oracle integration ready)
  * - Liquidation checking
  * - UUPS Upgradeable pattern
  */
-contract BinaryBet is
+contract PositionManager is
     Initializable,
     OwnableUpgradeable,
     ReentrancyGuardUpgradeable,
@@ -39,6 +44,9 @@ contract BinaryBet is
 
     /// @notice Vault manager address
     address public vaultManager;
+
+    /// @notice Asset manager address
+    address public assetManager;
 
     /// @notice Backend address (for sending prices)
     address public backend;
@@ -63,29 +71,40 @@ contract BinaryBet is
     uint8 public maxLeverage;
 
     // ========================================================================
+    // CONSTANTS
+    // ========================================================================
+
+    /// @notice Maximum price age for oracle price (5 seconds)
+    uint256 public constant PRICE_MAX_AGE = 5;
+
+    // ========================================================================
     // EVENTS
     // ========================================================================
 
-    event BetOpened(
+    event PositionOpened(
         uint64 indexed positionId,
         address indexed user,
+        address tokenAddress,
+        bytes32 priceFeedId,
         uint256 amount,
         uint8 leverage,
         uint8 direction,
         uint256 openPrice,
         uint256 liquidationPrice,
         uint256 positionSize,
-        uint256 timestamp
+        uint256 openTimestamp,
+        uint256 pricePublishTime
     );
 
-    event BetClosed(
+    event PositionClosed(
         uint64 indexed positionId,
         address indexed user,
         bool won,
         uint256 payout,
         uint256 closePrice,
         int256 pnl,
-        uint256 timestamp
+        uint256 closeTimestamp,
+        uint256 pricePublishTime
     );
 
     event BetLiquidated(
@@ -104,6 +123,10 @@ contract BinaryBet is
         address indexed newAddress
     );
     event VaultManagerUpdated(
+        address indexed oldAddress,
+        address indexed newAddress
+    );
+    event AssetManagerUpdated(
         address indexed oldAddress,
         address indexed newAddress
     );
@@ -130,6 +153,10 @@ contract BinaryBet is
     error InvalidAddress();
     error TransferFailed();
     error InvalidMaintenanceMarginRatio();
+    error AssetNotSupported();
+    error AssetNotEnabled();
+    error InvalidPriceFeedId();
+    error InvalidCollateralToken();
 
     // ========================================================================
     // CONSTRUCTOR / INITIALIZER
@@ -144,13 +171,18 @@ contract BinaryBet is
      * @notice Initialize contract (replaces constructor)
      * @param initialOwner Owner address
      * @param _backend Backend address
+     * @param _assetManager Asset manager address
      */
     function initialize(
         address initialOwner,
-        address _backend
+        address _backend,
+        address _assetManager
     ) public initializer {
-        if (initialOwner == address(0) || _backend == address(0))
-            revert InvalidAddress();
+        if (
+            initialOwner == address(0) ||
+            _backend == address(0) ||
+            _assetManager == address(0)
+        ) revert InvalidAddress();
 
         __Ownable_init(initialOwner);
         __ReentrancyGuard_init();
@@ -158,6 +190,7 @@ contract BinaryBet is
         __UUPSUpgradeable_init();
 
         backend = _backend;
+        assetManager = _assetManager;
         nextPositionId = 1;
 
         // Set default leverage limits and maintenance margin
@@ -181,21 +214,24 @@ contract BinaryBet is
     // ========================================================================
 
     /**
-     * @notice Open position (LONG/SHORT) with native token and leverage
+     * @notice Open position (LONG/SHORT) with leverage
+     * @param collateralToken Token to use as collateral (address(0) for native token)
+     * @param priceFeedId Pyth price feed ID of the asset being bet on
+     * @param collateralAmount Amount of collateral (for ERC20, ignored for native token)
      * @param leverage Leverage multiplier (1-100x)
      * @param direction 1 = LONG (predict price increase), 2 = SHORT (predict price decrease)
-     * @param openPrice Open price from backend
+     * @param priceUpdate Pyth price update data (required for fresh price)
      * @return positionId Position ID
      */
     function openPosition(
+        address collateralToken,
+        bytes32 priceFeedId,
+        uint256 collateralAmount,
         uint8 leverage,
         uint8 direction,
-        uint256 openPrice
+        bytes[] calldata priceUpdate
     ) external payable nonReentrant whenNotPaused returns (uint64 positionId) {
-        uint256 amount = msg.value; // Collateral amount
-
         // Validate inputs
-        if (amount == 0) revert InvalidAmount();
         if (leverage < minLeverage || leverage > maxLeverage)
             revert InvalidLeverage();
         if (
@@ -204,28 +240,103 @@ contract BinaryBet is
         ) {
             revert InvalidDirection();
         }
+        if (priceFeedId == bytes32(0)) revert InvalidPriceFeedId();
+
+        // Get price from oracle via SettlementEngine with price update
+        if (settlementEngine == address(0)) revert InvalidAddress();
+
+        uint256 amount;
+        uint256 openPrice;
+        uint256 pricePublishTime;
+
+        // Handle collateral based on token type
+        if (collateralToken == address(0)) {
+            // Native token: msg.value includes both collateral + oracle fee
+            // First get price with oracle fee
+            (openPrice, pricePublishTime) = ISettlementEngine(settlementEngine)
+                .getSettlementPriceWithUpdate{value: msg.value}(
+                priceFeedId,
+                PRICE_MAX_AGE,
+                priceUpdate
+            );
+
+            // Amount is what was sent minus what was used for oracle
+            // The oracle call will refund excess, so we check balance
+            amount = address(this).balance;
+            if (amount == 0) revert InvalidAmount();
+        } else {
+            // ERC20 token: msg.value is only for oracle fee
+            amount = collateralAmount;
+            if (amount == 0) revert InvalidAmount();
+
+            // Get price with oracle fee from msg.value
+            (openPrice, pricePublishTime) = ISettlementEngine(settlementEngine)
+                .getSettlementPriceWithUpdate{value: msg.value}(
+                priceFeedId,
+                PRICE_MAX_AGE,
+                priceUpdate
+            );
+
+            // Transfer ERC20 from user to this contract
+            IERC20(collateralToken).transferFrom(
+                msg.sender,
+                address(this),
+                amount
+            );
+        }
+
         if (openPrice == 0) revert InvalidPrice();
+
+        // Validate collateral vault exists
+        if (vaultManager != address(0)) {
+            if (
+                !IVaultManager(vaultManager).isVaultSupported(collateralToken)
+            ) {
+                revert InvalidCollateralToken();
+            }
+        }
+
+        // Validate asset is supported and enabled
+        if (assetManager != address(0)) {
+            if (!IAssetManager(assetManager).isAssetSupported(priceFeedId)) {
+                revert AssetNotSupported();
+            }
+            if (!IAssetManager(assetManager).isAssetEnabled(priceFeedId)) {
+                revert AssetNotEnabled();
+            }
+        }
 
         // Calculate position size (for risk check)
         uint256 positionSize = amount * leverage;
 
         // Check risk limits với VaultManager (check against position size, not just collateral)
         if (vaultManager != address(0)) {
-            (bool canOpen, string memory reason) = IVaultManager(vaultManager)
-                .checkPositionRisk(positionSize);
+            (bool canOpen, ) = IVaultManager(vaultManager).checkPositionRisk(
+                collateralToken,
+                positionSize,
+                leverage
+            );
             if (!canOpen) revert RiskLimitExceeded();
         }
 
-        // Transfer native token (collateral) to VaultManager
+        // Transfer collateral to VaultManager
         if (vaultManager != address(0)) {
-            (bool success, ) = vaultManager.call{value: amount}(
-                abi.encodeWithSignature(
-                    "depositFromBet(uint256,uint256)",
+            if (collateralToken == address(0)) {
+                // Native token
+                IVaultManager(vaultManager).depositFromBet{value: amount}(
+                    collateralToken,
                     amount,
                     positionSize
-                )
-            );
-            if (!success) revert TransferFailed();
+                );
+            } else {
+                // ERC20 token - approve and transfer
+                IERC20(collateralToken).approve(vaultManager, amount);
+                IVaultManager(vaultManager).depositFromBet(
+                    collateralToken,
+                    amount,
+                    positionSize
+                );
+            }
         }
 
         // Create position with leverage
@@ -234,7 +345,8 @@ contract BinaryBet is
 
         pos.positionId = positionId;
         pos.user = msg.sender;
-        pos.tokenAddress = address(0); // Native token
+        pos.tokenAddress = collateralToken; // Collateral token
+        pos.priceFeedId = priceFeedId; // Pyth price feed ID of asset being bet on
         pos.amount = amount; // Collateral
         pos.leverage = leverage;
         pos.direction = direction;
@@ -258,16 +370,19 @@ contract BinaryBet is
         // Add to user's positions
         userPositions[msg.sender].push(positionId);
 
-        emit BetOpened(
+        emit PositionOpened(
             positionId,
             msg.sender,
+            collateralToken,
+            priceFeedId,
             amount,
             leverage,
             direction,
             openPrice,
             pos.liquidationPrice,
             positionSize,
-            block.timestamp
+            block.timestamp,
+            pricePublishTime
         );
 
         return positionId;
@@ -276,12 +391,12 @@ contract BinaryBet is
     /**
      * @notice Close position (user initiated)
      * @param positionId Position ID
-     * @param closePrice Close price from backend
+     * @param priceUpdate Pyth price update data (required for fresh price)
      */
     function closePosition(
         uint64 positionId,
-        uint256 closePrice
-    ) external nonReentrant whenNotPaused {
+        bytes[] calldata priceUpdate
+    ) external payable nonReentrant whenNotPaused {
         PositionLib.Position storage pos = positions[positionId];
 
         // Validate
@@ -289,6 +404,16 @@ contract BinaryBet is
         if (pos.user != msg.sender) revert NotPositionOwner();
         if (pos.state != PositionLib.POSITION_STATE_OPEN)
             revert PositionNotOpen();
+
+        // Get close price from oracle via SettlementEngine with price update
+        if (settlementEngine == address(0)) revert InvalidAddress();
+        (uint256 closePrice, uint256 pricePublishTime) = ISettlementEngine(
+            settlementEngine
+        ).getSettlementPriceWithUpdate{value: msg.value}(
+            pos.priceFeedId,
+            PRICE_MAX_AGE,
+            priceUpdate
+        );
         if (closePrice == 0) revert InvalidPrice();
 
         // Check liquidation
@@ -297,26 +422,37 @@ contract BinaryBet is
         }
 
         // Process settlement
-        _processSettlement(positionId, closePrice, false);
+        _processSettlement(positionId, closePrice, false, pricePublishTime);
     }
 
     /**
      * @notice Backend force close position (for liquidation or expiry)
      * @param positionId Position ID
-     * @param closePrice Close price
      * @param isLiquidation True if this is a liquidation
+     * @param priceUpdate Pyth price update data (required for fresh price)
      */
     function backendClosePosition(
         uint64 positionId,
-        uint256 closePrice,
-        bool isLiquidation
-    ) external nonReentrant {
+        bool isLiquidation,
+        bytes[] calldata priceUpdate
+    ) external payable nonReentrant {
         if (msg.sender != backend) revert NotBackend();
 
         PositionLib.Position storage pos = positions[positionId];
         if (pos.user == address(0)) revert PositionNotFound();
         if (pos.state != PositionLib.POSITION_STATE_OPEN)
             revert PositionNotOpen();
+
+        // Get close price from oracle via SettlementEngine with price update
+        if (settlementEngine == address(0)) revert InvalidAddress();
+        (uint256 closePrice, uint256 pricePublishTime) = ISettlementEngine(
+            settlementEngine
+        ).getSettlementPriceWithUpdate{value: msg.value}(
+            pos.priceFeedId,
+            PRICE_MAX_AGE,
+            priceUpdate
+        );
+        if (closePrice == 0) revert InvalidPrice();
 
         if (isLiquidation) {
             uint256 liquidationFeeBps = PositionLib.calculateLiquidationFee(
@@ -334,7 +470,12 @@ contract BinaryBet is
         }
 
         // Process settlement
-        _processSettlement(positionId, closePrice, isLiquidation);
+        _processSettlement(
+            positionId,
+            closePrice,
+            isLiquidation,
+            pricePublishTime
+        );
     }
 
     // ========================================================================
@@ -343,83 +484,48 @@ contract BinaryBet is
 
     /**
      * @notice Process settlement logic with synthetic leverage
+     * @dev Delegates to SettlementEngine for settlement calculation
      */
     function _processSettlement(
         uint64 positionId,
         uint256 closePrice,
-        bool isLiquidation
+        bool isLiquidation,
+        uint256 pricePublishTime
     ) internal {
         PositionLib.Position storage pos = positions[positionId];
 
-        // Calculate P&L with leverage
-        (int256 pnl, int256 pnlPercentage) = PositionLib.calculateUnrealizedPnL(
+        // Call SettlementEngine to process settlement
+        if (settlementEngine == address(0)) revert InvalidAddress();
+
+        // Process settlement and get result
+        bytes memory callData = abi.encodeWithSelector(
+            ISettlementEngine.processSettlement.selector,
             pos,
-            closePrice
+            closePrice,
+            isLiquidation
+        );
+        (bool success, bytes memory returnData) = settlementEngine.call(
+            callData
+        );
+        if (!success) revert SettlementFailed();
+
+        // Decode result - declare variables first
+        bool won;
+        uint256 payout;
+        uint256 fee;
+        int256 pnl;
+        int256 vaultPnL;
+        uint8 finalState;
+
+        (won, payout, fee, pnl, vaultPnL, finalState) = abi.decode(
+            returnData,
+            (bool, uint256, uint256, int256, int256, uint8)
         );
 
-        // Determine win/loss
-        bool won = !isLiquidation && pnl > 0;
-
-        // Calculate liquidation fee if applicable
-        uint256 liquidationFee = 0;
-        if (isLiquidation) {
-            uint256 liquidationFeeBps = PositionLib.calculateLiquidationFee(
-                pos.leverage
-            );
-            liquidationFee = (pos.amount * liquidationFeeBps) / 10000;
-        }
-
-        // Calculate final payout/settlement
-        uint256 payout = 0;
-        uint256 fee = 0;
-
-        if (isLiquidation) {
-            // Liquidation: User gets remaining collateral minus liquidation fee (if any)
-            // Remaining = collateral - abs(loss) - liquidation fee
-            uint256 absLoss = pnl < 0 ? uint256(-pnl) : 0;
-            uint256 remaining = pos.amount > absLoss ? pos.amount - absLoss : 0;
-            payout = remaining > liquidationFee
-                ? remaining - liquidationFee
-                : 0;
-            fee = liquidationFee;
-        } else if (won) {
-            // Won: User gets collateral + profit - house edge
-            uint256 profit = uint256(pnl);
-            uint256 grossPayout = pos.amount + profit;
-
-            // Apply house edge from SettlementEngine
-            if (settlementEngine != address(0)) {
-                (, uint16 houseEdgeBps, , , ) = ISettlementEngine(
-                    settlementEngine
-                ).getSettlementConfig();
-                fee = (profit * houseEdgeBps) / 10000;
-                payout = grossPayout - fee;
-            } else {
-                payout = grossPayout;
-            }
-
-            // Record settlement
-            if (settlementEngine != address(0)) {
-                ISettlementEngine(settlementEngine).recordSettlement(
-                    positionId,
-                    pos.user,
-                    pos.amount,
-                    payout,
-                    fee,
-                    won
-                );
-            }
-        } else {
-            // Lost: User loses collateral (payout = 0)
-            payout = 0;
-            fee = pos.amount; // Vault keeps all collateral
-        }
-
-        // Update vault P&L (vault gains/losses opposite of user)
+        // Update vault P&L
         if (vaultManager != address(0)) {
-            // Vault P&L = -user P&L (vault loses when user wins, gains when user loses)
-            int256 vaultPnL = -pnl;
             IVaultManager(vaultManager).updateVaultPnLWithLeverage(
+                pos.tokenAddress, // Collateral token
                 pos.amount,
                 vaultPnL,
                 fee,
@@ -429,28 +535,27 @@ contract BinaryBet is
 
         // Execute payout if user has any payout
         if (payout > 0 && vaultManager != address(0)) {
-            IVaultManager(vaultManager).executePayout(pos.user, payout);
+            IVaultManager(vaultManager).executePayout(
+                pos.tokenAddress, // Collateral token
+                pos.user,
+                payout
+            );
         }
 
         // Update position state
         pos.closePrice = closePrice;
-        if (isLiquidation) {
-            pos.state = PositionLib.POSITION_STATE_LIQUIDATED;
-        } else {
-            pos.state = won
-                ? PositionLib.POSITION_STATE_WON
-                : PositionLib.POSITION_STATE_LOST;
-        }
+        pos.state = finalState;
         pos.lastModifiedTimestamp = block.timestamp;
 
-        emit BetClosed(
+        emit PositionClosed(
             positionId,
             pos.user,
             won,
             payout,
             closePrice,
             pnl,
-            block.timestamp
+            block.timestamp,
+            pricePublishTime
         );
     }
 
@@ -476,6 +581,16 @@ contract BinaryBet is
         address oldAddress = vaultManager;
         vaultManager = _vaultManager;
         emit VaultManagerUpdated(oldAddress, _vaultManager);
+    }
+
+    /**
+     * @notice Set asset manager address
+     */
+    function setAssetManager(address _assetManager) external onlyOwner {
+        if (_assetManager == address(0)) revert InvalidAddress();
+        address oldAddress = assetManager;
+        assetManager = _assetManager;
+        emit AssetManagerUpdated(oldAddress, _assetManager);
     }
 
     /**
@@ -540,6 +655,12 @@ contract BinaryBet is
     function _authorizeUpgrade(
         address newImplementation
     ) internal override onlyOwner {}
+
+    // ========================================================================
+    // BACKEND VALIDATION FUNCTIONS
+    // ========================================================================
+
+    // Legacy functions removed - now using priceFeedId directly
 
     // ========================================================================
     // VIEW FUNCTIONS
@@ -629,57 +750,4 @@ contract BinaryBet is
 // INTERFACES
 // ========================================================================
 
-interface ISettlementEngine {
-    function calculatePayout(
-        uint256 amount,
-        uint8 direction,
-        uint256 openPrice,
-        uint256 closePrice
-    ) external view returns (uint256);
-
-    function recordSettlement(
-        uint64 positionId,
-        address user,
-        uint256 amount,
-        uint256 payout,
-        uint256 fee,
-        bool won
-    ) external;
-
-    function getSettlementConfig()
-        external
-        view
-        returns (
-            uint16 houseEdgeBps,
-            uint16 winMultiplierBps,
-            uint256 minBetAmount,
-            uint256 maxBetAmount,
-            bool paused
-        );
-}
-
-interface IVaultManager {
-    function checkPositionRisk(
-        uint256 amount
-    ) external view returns (bool canOpen, string memory reason);
-
-    function depositFromBet(
-        uint256 amount,
-        uint256 positionSize
-    ) external payable;
-
-    function executePayout(address user, uint256 amount) external;
-
-    function updateVaultPnL(
-        uint256 betAmount,
-        bool userWon,
-        uint256 payout
-    ) external;
-
-    function updateVaultPnLWithLeverage(
-        uint256 collateral,
-        int256 vaultPnL,
-        uint256 fee,
-        uint256 positionSize
-    ) external;
-}
+// ISettlementEngine interface moved to separate file
