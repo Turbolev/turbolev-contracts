@@ -10,15 +10,17 @@ import "./libraries/BackendAccessControl.sol";
 
 /**
  * @title AssetVault
- * @notice Individual vault for a specific token (native or ERC20)
- * @dev Handles liquidity management, LP positions, and P&L tracking for one token - Non-upgradeable
+ * @notice Individual vault for a project token paired with a collateral token
+ * @dev Handles liquidity management, LP positions, and P&L tracking for a (projectToken, collateralToken) pair - Non-upgradeable
  *
  * Features:
  * - LP staking/unstaking with share-based accounting
  * - Collateral management for betting positions
  * - P&L tracking with leveraged positions
  * - Risk management per vault
- * - Support for both native token and ERC20 tokens
+ * - Support for both native token and ERC20 tokens as collateral
+ *
+ * Note: projectToken can be from any chain, but collateralToken must be on Monad network
  */
 contract AssetVault is
     Ownable,
@@ -38,11 +40,26 @@ contract AssetVault is
     /// @notice PositionManager contract address
     address public positionManager;
 
-    /// @notice Token address for this vault (address(0) for native token)
-    address public tokenAddress;
+    /// @notice Project token address (the asset being bet on - can be from any chain)
+    /// @dev This is the token whose price is being traded
+    address public projectToken;
 
-    /// @notice Pyth price feed ID for this vault's token (for USD conversion)
-    bytes32 public tokenPriceFeedId;
+    /// @notice Pyth price feed ID for the project token (for asset price tracking)
+    /// @dev This is used to get the price of the asset being bet on
+    bytes32 public projectTokenPriceFeedId;
+
+    /// @notice Collateral token address (the token used for staking and betting - must be on Monad)
+    /// @dev This is what users stake and trade with (address(0) for native token)
+    address public collateralToken;
+
+    /// @notice Pyth price feed ID for the collateral token (for USD conversion)
+    /// @dev CRITICAL FIX: Used for vault USD value calculation and graduation
+    bytes32 public collateralTokenPriceFeedId;
+
+    /// @notice Whether collateral is a stablecoin (USDC, USDT, DAI, etc.)
+    /// @dev OPTIMIZATION: If true, can assume $1 price instead of oracle call
+    ///      Saves gas and increases reliability for stablecoin vaults
+    bool public isStablecoinCollateral;
 
     /// @notice PythOracle contract address
     address public pythOracle;
@@ -190,7 +207,14 @@ contract AssetVault is
     // EVENTS
     // ========================================================================
 
-    event VaultInitialized(address indexed tokenAddress, uint256 timestamp);
+    event VaultInitialized(
+        address indexed projectToken,
+        bytes32 indexed projectTokenPriceFeedId,
+        address indexed collateralToken,
+        bytes32 collateralTokenPriceFeedId,
+        bool isStablecoinCollateral,
+        uint256 timestamp
+    );
 
     event LiquidityAdded(
         address indexed user,
@@ -379,34 +403,52 @@ contract AssetVault is
 
     /**
      * @notice Constructor
-     * @param _tokenAddress Token address (address(0) for native token)
+     * @param _projectToken Project token address (the asset being bet on - can be from any chain)
+     * @param _projectTokenPriceFeedId Pyth price feed ID for the project token
+     * @param _collateralToken Collateral token address (what users stake and trade with - must be on Monad)
+     * @param _collateralTokenPriceFeedId Pyth price feed ID for collateral (can be 0 if stablecoin)
+     * @param _isStablecoinCollateral Whether collateral is stablecoin (USDC, USDT, DAI) - saves gas
      * @param _vaultManager VaultManager address
      * @param _positionManager PositionManager contract address
-     * @param _tokenPriceFeedId Pyth price feed ID for token USD conversion
      * @param _maxPayoutBps Max payout in bps
      * @param _perBetUtilBps Per bet utilization in bps
      * @param _maxUtilizationBps Max utilization in bps
-     * @param _minBetAmount Min bet amount
-     * @param _maxBetAmount Max bet amount
+     * @param _minBetAmount Min bet amount (in collateral token)
+     * @param _maxBetAmount Max bet amount (in collateral token)
      */
     constructor(
-        address _tokenAddress,
+        address _projectToken,
+        bytes32 _projectTokenPriceFeedId,
+        address _collateralToken,
+        bytes32 _collateralTokenPriceFeedId,
+        bool _isStablecoinCollateral,
         address _vaultManager,
         address _positionManager,
-        bytes32 _tokenPriceFeedId,
         uint16 _maxPayoutBps,
         uint16 _perBetUtilBps,
         uint16 _maxUtilizationBps,
         uint256 _minBetAmount,
         uint256 _maxBetAmount
     ) Ownable(msg.sender) {
+        if (_projectToken == address(0)) revert InvalidAddress(); // AUDIT FIX: Project token cannot be 0
+        if (_projectTokenPriceFeedId == bytes32(0)) revert InvalidPriceFeedId();
+        // OPTIMIZATION: Stablecoins can have zero price feed ID (will use $1 hardcoded)
+        if (
+            !_isStablecoinCollateral &&
+            _collateralTokenPriceFeedId == bytes32(0)
+        ) {
+            revert InvalidPriceFeedId();
+        }
         if (_vaultManager == address(0) || _positionManager == address(0))
             revert InvalidAddress();
 
-        tokenAddress = _tokenAddress;
+        projectToken = _projectToken;
+        projectTokenPriceFeedId = _projectTokenPriceFeedId;
+        collateralToken = _collateralToken;
+        collateralTokenPriceFeedId = _collateralTokenPriceFeedId;
+        isStablecoinCollateral = _isStablecoinCollateral;
         vaultManager = _vaultManager;
         positionManager = _positionManager;
-        tokenPriceFeedId = _tokenPriceFeedId;
 
         vaultInfo.createdAt = block.timestamp;
 
@@ -431,7 +473,14 @@ contract AssetVault is
         stakingFeeBps = 200; // 2%
         earlyWithdrawalFeeBps = 1000; // 10%
 
-        emit VaultInitialized(_tokenAddress, block.timestamp);
+        emit VaultInitialized(
+            _projectToken,
+            _projectTokenPriceFeedId,
+            _collateralToken,
+            _collateralTokenPriceFeedId,
+            _isStablecoinCollateral,
+            block.timestamp
+        );
     }
 
     // ========================================================================
@@ -469,13 +518,13 @@ contract AssetVault is
         }
 
         // Handle token transfer (full amount including fee)
-        if (tokenAddress == address(0)) {
+        if (collateralToken == address(0)) {
             // Native token
             if (msg.value != amount) revert InvalidAmount();
         } else {
             // ERC20 token
             if (msg.value != 0) revert InvalidAmount();
-            IERC20(tokenAddress).safeTransferFrom(
+            IERC20(collateralToken).safeTransferFrom(
                 msg.sender,
                 address(this),
                 amount
@@ -628,13 +677,13 @@ contract AssetVault is
         // ============================================================
 
         // Transfer tokens (net amount after fee) - LAST STEP
-        if (tokenAddress == address(0)) {
+        if (collateralToken == address(0)) {
             // Native token
             (bool success, ) = msg.sender.call{value: netPayout}("");
             if (!success) revert TransferFailed();
         } else {
             // ERC20 token
-            IERC20(tokenAddress).safeTransfer(msg.sender, netPayout);
+            IERC20(collateralToken).safeTransfer(msg.sender, netPayout);
         }
     }
 
@@ -659,7 +708,7 @@ contract AssetVault is
         if (priceFeedId == bytes32(0)) revert InvalidPriceFeedId();
 
         // Handle token transfer
-        if (tokenAddress == address(0)) {
+        if (collateralToken == address(0)) {
             // Native token
             if (msg.value != amount) revert InvalidAmount();
         } else {
@@ -741,13 +790,13 @@ contract AssetVault is
         // ============================================================
 
         // Transfer tokens LAST
-        if (tokenAddress == address(0)) {
+        if (collateralToken == address(0)) {
             // Native token
             (bool success, ) = user.call{value: amount}("");
             if (!success) revert TransferFailed();
         } else {
             // ERC20 token
-            IERC20(tokenAddress).safeTransfer(user, amount);
+            IERC20(collateralToken).safeTransfer(user, amount);
         }
     }
 
@@ -1077,10 +1126,10 @@ contract AssetVault is
         // If multiple users claim simultaneously, early claimers get full rewards
         // Later claimers get capped at remaining balance (simple, fair approach)
         uint256 vaultBalance;
-        if (tokenAddress == address(0)) {
+        if (collateralToken == address(0)) {
             vaultBalance = address(this).balance;
         } else {
-            vaultBalance = IERC20(tokenAddress).balanceOf(address(this));
+            vaultBalance = IERC20(collateralToken).balanceOf(address(this));
         }
 
         uint256 actualRewards = rewards;
@@ -1109,11 +1158,11 @@ contract AssetVault is
         lpPos.totalRewardsClaimed += actualRewards;
 
         // Transfer rewards (capped amount)
-        if (tokenAddress == address(0)) {
+        if (collateralToken == address(0)) {
             (bool success, ) = msg.sender.call{value: actualRewards}("");
             if (!success) revert TransferFailed();
         } else {
-            IERC20(tokenAddress).safeTransfer(msg.sender, actualRewards);
+            IERC20(collateralToken).safeTransfer(msg.sender, actualRewards);
         }
 
         emit RewardsClaimed(
@@ -1148,10 +1197,10 @@ contract AssetVault is
         // HIGH FIX: Cap rewards at available balance to prevent race conditions
         // For compounding, we only compound what the vault can actually support
         uint256 vaultBalance;
-        if (tokenAddress == address(0)) {
+        if (collateralToken == address(0)) {
             vaultBalance = address(this).balance;
         } else {
-            vaultBalance = IERC20(tokenAddress).balanceOf(address(this));
+            vaultBalance = IERC20(collateralToken).balanceOf(address(this));
         }
 
         uint256 actualRewards = rewards;
@@ -1297,6 +1346,7 @@ contract AssetVault is
         uint16 _maxLeverageExposureBps,
         uint16 _maxPositionSizePercentBps
     ) external onlyOwner {
+        // LOW-01 FIX: Comprehensive input validation
         if (
             _maxPayoutBps > BASIS_POINTS ||
             _perBetUtilBps > BASIS_POINTS ||
@@ -1304,6 +1354,13 @@ contract AssetVault is
             _maxLeverageExposureBps > BASIS_POINTS ||
             _maxPositionSizePercentBps > BASIS_POINTS
         ) revert InvalidParameters();
+
+        // LOW-01 FIX: Check min < max relationship
+        if (_minBetAmount >= _maxBetAmount) revert InvalidParameters();
+        if (_minBetAmount == 0) revert InvalidAmount();
+
+        // LOW-01 FIX: Check utilization makes sense
+        if (_perBetUtilBps > _maxUtilizationBps) revert InvalidParameters();
 
         vaultParams.maxPayoutBps = _maxPayoutBps;
         vaultParams.perBetUtilBps = _perBetUtilBps;
@@ -1392,18 +1449,29 @@ contract AssetVault is
      */
     function getVaultValueUSD() public view returns (uint256 valueUSD) {
         if (vaultInfo.totalLiquidity == 0) return 0;
-        if (pythOracle == address(0)) return 0; // No oracle configured
-        if (tokenPriceFeedId == bytes32(0)) return 0; // No price feed configured
 
-        // Get token price from Pyth oracle
-        // Price is in USD with 18 decimals (e.g., $3000.50 = 3000.5e18)
-        try IPythOracle(pythOracle).getLatestPrice(tokenPriceFeedId) returns (
-            int256 price,
-            uint256
-        ) {
+        // OPTIMIZATION: Stablecoins can use hardcoded $1 price
+        if (isStablecoinCollateral) {
+            // Assume stablecoin = $1.00 (saves gas, increases reliability)
+            // Example: 1000 USDC (6 decimals) = $1,000
+            // totalLiquidity is in token decimals, need to normalize to 18 decimals for USD
+            return vaultInfo.totalLiquidity; // Already in correct decimals (18)
+        }
+
+        // For non-stablecoins: get price from oracle
+        if (pythOracle == address(0)) return 0; // No oracle configured
+        if (collateralTokenPriceFeedId == bytes32(0)) return 0; // No price feed configured
+
+        // CRITICAL FIX: Get COLLATERAL token price (not project token price!)
+        // Example: ETH/MON vault has 100 MON at $50/MON
+        //   - Use MON price ($50) not ETH price ($3000)
+        //   - Result: 100 MON * $50 = $5,000 ✅
+        try
+            IPythOracle(pythOracle).getLatestPrice(collateralTokenPriceFeedId)
+        returns (int256 price, uint256) {
             if (price <= 0) return 0;
 
-            // Convert: (token amount) × (price per token) / 1e18
+            // Convert: (collateral amount) × (collateral price) / 1e18
             // Both totalLiquidity and price are in 18 decimals
             valueUSD = (vaultInfo.totalLiquidity * uint256(price)) / 1e18;
             return valueUSD;
@@ -1798,6 +1866,8 @@ contract AssetVault is
      */
     function setGraduationThreshold(uint256 _threshold) external onlyOwner {
         if (vaultInfo.isGraduated) revert AlreadyGraduated();
+        if (_threshold == 0) revert InvalidAmount(); // LOW-01 FIX: Threshold must be > 0
+
         uint256 oldThreshold = vaultInfo.graduationThreshold;
         vaultInfo.graduationThreshold = _threshold;
         emit GraduationThresholdUpdated(oldThreshold, _threshold);

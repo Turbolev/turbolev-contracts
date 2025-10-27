@@ -70,8 +70,9 @@ library PositionLib {
     struct Position {
         uint64 positionId;
         address user;
+        address projectToken; // Project token address (the asset being bet on - can be from any chain)
         address tokenAddress; // Collateral token address: address(0) for native token, or ERC20 token address
-        bytes32 priceFeedId; // Pyth price feed ID of the asset being bet on
+        bytes32 priceFeedId; // Pyth price feed ID of the project token being bet on
         uint256 amount; // Collateral amount in token's decimals (includes added margin)
         uint8 leverage; // Leverage multiplier (1-100)
         uint8 direction; // BET_DIRECTION_UP or BET_DIRECTION_DOWN

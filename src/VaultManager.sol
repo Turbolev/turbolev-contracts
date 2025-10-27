@@ -12,14 +12,15 @@ import "./AssetVault.sol";
 /**
  * @title VaultManager
  * @notice Factory contract to create and manage multiple AssetVault instances
- * @dev Manages vaults for different tokens (native + ERC20) - Non-upgradeable
+ * @dev Manages vaults for (projectToken, collateralToken) pairs - Non-upgradeable
  *
  * Features:
- * - Create vaults for different tokens
+ * - Create vaults for different (project token, collateral token) pairs
  * - Track all vaults and their addresses
  * - Route requests to appropriate vaults
  * - Global risk management across all vaults
  * - Centralized configuration
+ * - Prevent duplicate vault creation for same pair
  */
 contract VaultManager is Ownable, ReentrancyGuard, Pausable {
     // ========================================================================
@@ -32,34 +33,35 @@ contract VaultManager is Ownable, ReentrancyGuard, Pausable {
     /// @notice SettlementEngine contract address
     address public settlementEngine;
 
-    /// @notice AssetVault implementation address (deprecated - vaults are now deployed directly)
-    address public vaultImplementation;
-
-    /// @notice Mapping: token address => vault address
-    mapping(address => address) public vaults;
+    /// @notice Mapping: (projectToken, collateralToken) => vault address
+    /// @dev Using keccak256(abi.encodePacked(projectToken, collateralToken)) as key
+    mapping(bytes32 => address) public vaultsByTokenPair;
 
     /// @notice Mapping: price feed ID => vault address (to prevent duplicates)
     mapping(bytes32 => address) public vaultsByPriceFeed;
 
-    /// @notice Array of all vault token addresses
-    address[] public supportedTokens;
+    /// @notice Array of all vault addresses
+    address[] public allVaults;
 
     /// @notice Mapping: vault address => is valid vault
     mapping(address => bool) public isValidVault;
+
+    /// @notice Mapping: vault address => project token
+    mapping(address => address) public vaultProjectToken;
+
+    /// @notice Mapping: vault address => collateral token
+    mapping(address => address) public vaultCollateralToken;
 
     // ========================================================================
     // EVENTS
     // ========================================================================
 
     event VaultCreated(
-        address indexed tokenAddress,
-        address indexed vaultAddress,
+        address indexed projectToken,
+        bytes32 indexed projectTokenPriceFeedId,
+        address indexed collateralToken,
+        address vaultAddress,
         uint256 timestamp
-    );
-
-    event VaultImplementationUpdated(
-        address indexed oldImplementation,
-        address indexed newImplementation
     );
 
     event PositionManagerUpdated(
@@ -97,7 +99,9 @@ contract VaultManager is Ownable, ReentrancyGuard, Pausable {
     error NotPositionManager();
     error NotSettlementEngine();
     error DuplicatePriceFeedId();
+    error DuplicateTokenPair(); // New: Vault for this (projectToken, collateralToken) pair already exists
     error InvalidAmount(); // HIGH FIX: For validation checks
+    error InvalidPriceFeedId(); // Validation for price feed ID
 
     // ========================================================================
     // MODIFIERS
@@ -130,54 +134,82 @@ contract VaultManager is Ownable, ReentrancyGuard, Pausable {
     // ========================================================================
 
     /**
-     * @notice Create new vault for a token
-     * @param tokenAddress Token address (address(0) for native token)
-     * @param tokenPriceFeedId Pyth price feed ID for token (for USD conversion)
-     * @param maxPayoutBps Max payout in bps
-     * @param perBetUtilBps Per bet utilization in bps
-     * @param maxUtilizationBps Max utilization in bps
-     * @param minBetAmount Min bet amount
-     * @param maxBetAmount Max bet amount
+     * @notice Create new vault for a (projectToken, collateralToken) pair
+     * @param _projectToken Project token address (the asset being bet on - can be from any chain)
+     * @param _projectTokenPriceFeedId Pyth price feed ID for the project token
+     * @param _collateralToken Collateral token address (what users stake and trade with - must be on Monad)
+     * @param _collateralTokenPriceFeedId Pyth price feed ID for collateral (can be 0 if stablecoin)
+     * @param _isStablecoinCollateral Whether collateral is stablecoin (USDC, USDT, DAI) - saves gas
+     * @param _maxPayoutBps Max payout in bps
+     * @param _perBetUtilBps Per bet utilization in bps
+     * @param _maxUtilizationBps Max utilization in bps
+     * @param _minBetAmount Min bet amount (in collateral token)
+     * @param _maxBetAmount Max bet amount (in collateral token)
      * @return vaultAddress Address of created vault
+     * @dev Prevents duplicate vault creation for same (projectToken, collateralToken) pair
      */
     function createVault(
-        address tokenAddress,
-        bytes32 tokenPriceFeedId,
-        uint16 maxPayoutBps,
-        uint16 perBetUtilBps,
-        uint16 maxUtilizationBps,
-        uint256 minBetAmount,
-        uint256 maxBetAmount
+        address _projectToken,
+        bytes32 _projectTokenPriceFeedId,
+        address _collateralToken,
+        bytes32 _collateralTokenPriceFeedId,
+        bool _isStablecoinCollateral,
+        uint16 _maxPayoutBps,
+        uint16 _perBetUtilBps,
+        uint16 _maxUtilizationBps,
+        uint256 _minBetAmount,
+        uint256 _maxBetAmount
     ) external onlyOwner returns (address vaultAddress) {
-        if (vaults[tokenAddress] != address(0)) revert VaultAlreadyExists();
+        // Validate inputs
+        if (_projectTokenPriceFeedId == bytes32(0)) revert InvalidPriceFeedId();
+        // OPTIMIZATION: Stablecoins don't need price feed
+        if (
+            !_isStablecoinCollateral &&
+            _collateralTokenPriceFeedId == bytes32(0)
+        ) {
+            revert InvalidPriceFeedId();
+        }
 
-        // Validate that price feed ID is not already used by another vault
-        if (vaultsByPriceFeed[tokenPriceFeedId] != address(0)) {
-            revert DuplicatePriceFeedId();
+        // Check if vault for this token pair already exists
+        bytes32 pairKey = keccak256(
+            abi.encodePacked(_projectToken, _collateralToken)
+        );
+        if (vaultsByTokenPair[pairKey] != address(0)) {
+            revert DuplicateTokenPair();
         }
 
         // Deploy new vault directly (non-upgradeable)
         AssetVault vault = new AssetVault(
-            tokenAddress,
+            _projectToken,
+            _projectTokenPriceFeedId,
+            _collateralToken,
+            _collateralTokenPriceFeedId,
+            _isStablecoinCollateral,
             address(this),
             positionManager,
-            tokenPriceFeedId,
-            maxPayoutBps,
-            perBetUtilBps,
-            maxUtilizationBps,
-            minBetAmount,
-            maxBetAmount
+            _maxPayoutBps,
+            _perBetUtilBps,
+            _maxUtilizationBps,
+            _minBetAmount,
+            _maxBetAmount
         );
 
         vaultAddress = address(vault);
 
         // Register vault
-        vaults[tokenAddress] = vaultAddress;
-        vaultsByPriceFeed[tokenPriceFeedId] = vaultAddress;
-        supportedTokens.push(tokenAddress);
+        vaultsByTokenPair[pairKey] = vaultAddress;
+        allVaults.push(vaultAddress);
         isValidVault[vaultAddress] = true;
+        vaultProjectToken[vaultAddress] = _projectToken;
+        vaultCollateralToken[vaultAddress] = _collateralToken;
 
-        emit VaultCreated(tokenAddress, vaultAddress, block.timestamp);
+        emit VaultCreated(
+            _projectToken,
+            _projectTokenPriceFeedId,
+            _collateralToken,
+            vaultAddress,
+            block.timestamp
+        );
 
         return vaultAddress;
     }
@@ -187,50 +219,56 @@ contract VaultManager is Ownable, ReentrancyGuard, Pausable {
     // ========================================================================
 
     /**
-     * @notice Get vault address for token
-     * @param tokenAddress Token address
+     * @notice Get vault address for a (projectToken, collateralToken) pair
+     * @param _projectToken Project token address
+     * @param _collateralToken Collateral token address
      * @return vaultAddress Vault address
      */
     function getVault(
-        address tokenAddress
+        address _projectToken,
+        address _collateralToken
     ) external view returns (address vaultAddress) {
-        vaultAddress = vaults[tokenAddress];
+        bytes32 pairKey = keccak256(
+            abi.encodePacked(_projectToken, _collateralToken)
+        );
+        vaultAddress = vaultsByTokenPair[pairKey];
         if (vaultAddress == address(0)) revert VaultNotFound();
         return vaultAddress;
     }
 
     /**
-     * @notice Get vault address by price feed ID
-     * @param priceFeedId Pyth price feed ID
+     * @notice Get vault address by token pair key
+     * @param _pairKey Hash of the token pair
      * @return vaultAddress Vault address (address(0) if not found)
      */
-    function getVaultByPriceFeed(
-        bytes32 priceFeedId
+    function getVaultByPairKey(
+        bytes32 _pairKey
     ) external view returns (address vaultAddress) {
-        return vaultsByPriceFeed[priceFeedId];
+        return vaultsByTokenPair[_pairKey];
     }
 
     /**
-     * @notice Check if vault exists for token
-     * @param tokenAddress Token address
+     * @notice Check if vault exists for token pair
+     * @param _projectToken Project token address
+     * @param _collateralToken Collateral token address
      * @return exists Whether vault exists
      */
     function isVaultSupported(
-        address tokenAddress
+        address _projectToken,
+        address _collateralToken
     ) external view returns (bool exists) {
-        return vaults[tokenAddress] != address(0);
+        bytes32 pairKey = keccak256(
+            abi.encodePacked(_projectToken, _collateralToken)
+        );
+        return vaultsByTokenPair[pairKey] != address(0);
     }
 
     /**
-     * @notice Get all supported tokens
-     * @return tokens Array of token addresses
+     * @notice Get all vault addresses
+     * @return vaults Array of all vault addresses
      */
-    function getSupportedTokens()
-        external
-        view
-        returns (address[] memory tokens)
-    {
-        return supportedTokens;
+    function getAllVaults() external view returns (address[] memory vaults) {
+        return allVaults;
     }
 
     /**
@@ -238,7 +276,39 @@ contract VaultManager is Ownable, ReentrancyGuard, Pausable {
      * @return count Number of vaults
      */
     function getVaultCount() external view returns (uint256 count) {
-        return supportedTokens.length;
+        return allVaults.length;
+    }
+
+    /**
+     * @notice Check if a vault is graduated
+     * @param _vaultAddress Vault address
+     * @return isGraduated Whether the vault is graduated
+     * @dev Reads from AssetVault directly
+     */
+    function isVaultGraduated(
+        address _vaultAddress
+    ) external view returns (bool isGraduated) {
+        if (!isValidVault[_vaultAddress]) return false;
+
+        // Call getVaultInfo() which returns the full VaultInfo struct
+        IAssetVault.VaultInfo memory vaultInfo = IAssetVault(_vaultAddress)
+            .getVaultInfo();
+        return vaultInfo.isGraduated;
+    }
+
+    /**
+     * @notice Get token pair for a vault
+     * @param _vaultAddress Vault address
+     * @return projectToken Project token address
+     * @return collateralToken Collateral token address
+     */
+    function getVaultTokenPair(
+        address _vaultAddress
+    ) external view returns (address projectToken, address collateralToken) {
+        return (
+            vaultProjectToken[_vaultAddress],
+            vaultCollateralToken[_vaultAddress]
+        );
     }
 
     // ========================================================================
@@ -246,8 +316,9 @@ contract VaultManager is Ownable, ReentrancyGuard, Pausable {
     // ========================================================================
 
     /**
-     * @notice Check position risk for a token
-     * @param tokenAddress Token address
+     * @notice Check position risk for a vault
+     * @param _projectToken Project token address
+     * @param _collateralToken Collateral token address
      * @param positionSize Position size
      * @param leverage Leverage multiplier
      * @param priceFeedId Pyth price feed ID of asset being bet on
@@ -255,12 +326,16 @@ contract VaultManager is Ownable, ReentrancyGuard, Pausable {
      * @return reason Reason if cannot open
      */
     function checkPositionRisk(
-        address tokenAddress,
+        address _projectToken,
+        address _collateralToken,
         uint256 positionSize,
         uint8 leverage,
         bytes32 priceFeedId
     ) external view returns (bool canOpen, string memory reason) {
-        address vaultAddress = vaults[tokenAddress];
+        bytes32 pairKey = keccak256(
+            abi.encodePacked(_projectToken, _collateralToken)
+        );
+        address vaultAddress = vaultsByTokenPair[pairKey];
         if (vaultAddress == address(0)) {
             return (false, "Vault not found");
         }
@@ -275,7 +350,8 @@ contract VaultManager is Ownable, ReentrancyGuard, Pausable {
 
     /**
      * @notice Deposit collateral from bet
-     * @param tokenAddress Token address
+     * @param _projectToken Project token address
+     * @param _collateralToken Collateral token address
      * @param amount Collateral amount
      * @param positionSize Position size
      * @param priceFeedId Pyth price feed ID of asset being bet on
@@ -283,21 +359,25 @@ contract VaultManager is Ownable, ReentrancyGuard, Pausable {
      * @dev HIGH FIX: Check vault existence BEFORE accepting payment to prevent stuck funds
      */
     function depositFromBet(
-        address tokenAddress,
+        address _projectToken,
+        address _collateralToken,
         uint256 amount,
         uint256 positionSize,
         bytes32 priceFeedId,
         uint8 direction
     ) external payable onlyPositionManager {
         // HIGH FIX: Validate vault exists BEFORE accepting any payment
-        address vaultAddress = vaults[tokenAddress];
+        bytes32 pairKey = keccak256(
+            abi.encodePacked(_projectToken, _collateralToken)
+        );
+        address vaultAddress = vaultsByTokenPair[pairKey];
         if (vaultAddress == address(0)) revert VaultNotFound();
 
         // HIGH FIX: Additional validation - ensure vault is actually a contract
         if (vaultAddress.code.length == 0) revert VaultNotFound();
 
         // Forward call to vault
-        if (tokenAddress == address(0)) {
+        if (_collateralToken == address(0)) {
             // Native token - msg.value should match amount
             if (msg.value != amount) revert InvalidAmount();
 
@@ -323,16 +403,21 @@ contract VaultManager is Ownable, ReentrancyGuard, Pausable {
 
     /**
      * @notice Execute payout to user
-     * @param tokenAddress Token address
+     * @param _projectToken Project token address
+     * @param _collateralToken Collateral token address
      * @param user User address
      * @param amount Payout amount
      */
     function executePayout(
-        address tokenAddress,
+        address _projectToken,
+        address _collateralToken,
         address user,
         uint256 amount
     ) external onlyPositionManager {
-        address vaultAddress = vaults[tokenAddress];
+        bytes32 pairKey = keccak256(
+            abi.encodePacked(_projectToken, _collateralToken)
+        );
+        address vaultAddress = vaultsByTokenPair[pairKey];
         if (vaultAddress == address(0)) revert VaultNotFound();
 
         IAssetVault(vaultAddress).executePayout(user, amount);
@@ -340,7 +425,8 @@ contract VaultManager is Ownable, ReentrancyGuard, Pausable {
 
     /**
      * @notice Update vault P&L
-     * @param tokenAddress Token address
+     * @param _projectToken Project token address
+     * @param _collateralToken Collateral token address
      * @param positionId Position ID (for tracking)
      * @param collateral Collateral amount
      * @param vaultPnL Vault P&L
@@ -351,7 +437,8 @@ contract VaultManager is Ownable, ReentrancyGuard, Pausable {
      * @param direction Position direction (1=LONG, 2=SHORT)
      */
     function updateVaultPnLWithLeverage(
-        address tokenAddress,
+        address _projectToken,
+        address _collateralToken,
         uint64 positionId,
         uint256 collateral,
         int256 vaultPnL,
@@ -361,7 +448,10 @@ contract VaultManager is Ownable, ReentrancyGuard, Pausable {
         bytes32 priceFeedId,
         uint8 direction
     ) external onlyPositionManager {
-        address vaultAddress = vaults[tokenAddress];
+        bytes32 pairKey = keccak256(
+            abi.encodePacked(_projectToken, _collateralToken)
+        );
+        address vaultAddress = vaultsByTokenPair[pairKey];
         if (vaultAddress == address(0)) revert VaultNotFound();
 
         IAssetVault(vaultAddress).updateVaultPnL(
@@ -400,50 +490,11 @@ contract VaultManager is Ownable, ReentrancyGuard, Pausable {
         emit SettlementEngineUpdated(oldAddress, _settlementEngine);
     }
 
-    /**
-     * @notice Update vault implementation (for future vaults)
-     */
-    function updateVaultImplementation(
-        address _newImplementation
-    ) external onlyOwner {
-        if (_newImplementation == address(0)) revert InvalidAddress();
-        address oldImplementation = vaultImplementation;
-        vaultImplementation = _newImplementation;
-        emit VaultImplementationUpdated(oldImplementation, _newImplementation);
-    }
+    // NOTE: updateVaultPositionManager, pauseVault, unpauseVault
+    // moved to VaultManagerViews.sol to reduce contract size
 
-    /**
-     * @notice Update PositionManager contract for a specific vault
-     */
-    function updateVaultPositionManager(
-        address tokenAddress,
-        address _positionManager
-    ) external onlyOwner {
-        address vaultAddress = vaults[tokenAddress];
-        if (vaultAddress == address(0)) revert VaultNotFound();
-
-        IAssetVault(vaultAddress).setPositionManager(_positionManager);
-    }
-
-    /**
-     * @notice Pause a specific vault
-     */
-    function pauseVault(address tokenAddress) external onlyOwner {
-        address vaultAddress = vaults[tokenAddress];
-        if (vaultAddress == address(0)) revert VaultNotFound();
-
-        IAssetVault(vaultAddress).pause();
-    }
-
-    /**
-     * @notice Unpause a specific vault
-     */
-    function unpauseVault(address tokenAddress) external onlyOwner {
-        address vaultAddress = vaults[tokenAddress];
-        if (vaultAddress == address(0)) revert VaultNotFound();
-
-        IAssetVault(vaultAddress).unpause();
-    }
+    // NOTE: vaultImplementation variable and updateVaultImplementation() removed
+    // (BP-01 FIX) as vaults are deployed directly, not via proxy pattern
 
     /**
      * @notice Pause factory (prevents new vault creation)
@@ -502,143 +553,14 @@ contract VaultManager is Ownable, ReentrancyGuard, Pausable {
     }
 
     // ========================================================================
-    // VIEW FUNCTIONS
+    // VIEW FUNCTIONS (Minimal - most moved to VaultManagerViews)
     // ========================================================================
 
-    /**
-     * @notice Get vault info for a token
-     */
-    function getVaultInfo(
-        address tokenAddress
-    ) external view returns (IAssetVault.VaultInfo memory) {
-        address vaultAddress = vaults[tokenAddress];
-        if (vaultAddress == address(0)) revert VaultNotFound();
-
-        return IAssetVault(vaultAddress).getVaultInfo();
-    }
-
-    /**
-     * @notice Get vault parameters for a token
-     */
-    function getVaultParams(
-        address tokenAddress
-    ) external view returns (IAssetVault.VaultParams memory) {
-        address vaultAddress = vaults[tokenAddress];
-        if (vaultAddress == address(0)) revert VaultNotFound();
-
-        return IAssetVault(vaultAddress).getVaultParams();
-    }
-
-    /**
-     * @notice Get LP position for a user in a specific vault
-     */
-    function getLPPosition(
-        address tokenAddress,
-        address user
-    ) external view returns (IAssetVault.LPPosition memory) {
-        address vaultAddress = vaults[tokenAddress];
-        if (vaultAddress == address(0)) revert VaultNotFound();
-
-        return IAssetVault(vaultAddress).getLPPosition(user);
-    }
-
-    /**
-     * @notice Get total liquidity across all vaults (in native token equivalent)
-     * @dev This is a simplified view - actual implementation would need price oracle
-     */
-    function getTotalLiquidity() external view returns (uint256 total) {
-        for (uint256 i = 0; i < supportedTokens.length; i++) {
-            address vaultAddress = vaults[supportedTokens[i]];
-            IAssetVault.VaultInfo memory info = IAssetVault(vaultAddress)
-                .getVaultInfo();
-            total += info.totalLiquidity;
-        }
-        return total;
-    }
-
-    // ========================================================================
-    // GRADUATION FUNCTIONS (Phase 2)
-    // ========================================================================
-
-    /**
-     * @notice Get all graduated vaults
-     * @return graduated Array of graduated vault addresses
-     */
-    function getGraduatedVaults()
-        external
-        view
-        returns (address[] memory graduated)
-    {
-        uint256 count = 0;
-
-        // Count graduated vaults
-        for (uint256 i = 0; i < supportedTokens.length; i++) {
-            address vaultAddr = vaults[supportedTokens[i]];
-            IAssetVault.VaultInfo memory info = IAssetVault(vaultAddr)
-                .getVaultInfo();
-            if (info.isGraduated) {
-                count++;
-            }
-        }
-
-        // Collect graduated vaults
-        graduated = new address[](count);
-        uint256 index = 0;
-
-        for (uint256 i = 0; i < supportedTokens.length; i++) {
-            address vaultAddr = vaults[supportedTokens[i]];
-            IAssetVault.VaultInfo memory info = IAssetVault(vaultAddr)
-                .getVaultInfo();
-            if (info.isGraduated) {
-                graduated[index] = vaultAddr;
-                index++;
-            }
-        }
-
-        return graduated;
-    }
-
-    /**
-     * @notice Get total USD value across all vaults
-     * @return totalUSD Total value in USD (18 decimals)
-     */
-    function getTotalValueUSD() external view returns (uint256 totalUSD) {
-        for (uint256 i = 0; i < supportedTokens.length; i++) {
-            address vaultAddr = vaults[supportedTokens[i]];
-            totalUSD += IAssetVault(vaultAddr).getVaultValueUSD();
-        }
-        return totalUSD;
-    }
-
-    /**
-     * @notice Set Pyth Oracle for a vault
-     * @param tokenAddress Token address
-     * @param pythOracle PythOracle contract address
-     */
-    function setVaultPythOracle(
-        address tokenAddress,
-        address pythOracle
-    ) external onlyOwner {
-        address vaultAddress = vaults[tokenAddress];
-        if (vaultAddress == address(0)) revert VaultNotFound();
-
-        IAssetVault(vaultAddress).setPythOracle(pythOracle);
-    }
-
-    /**
-     * @notice Set graduation threshold for a vault
-     * @param tokenAddress Token address
-     * @param threshold New threshold in token amount (same decimals as token)
-     */
-    function setVaultGraduationThreshold(
-        address tokenAddress,
-        uint256 threshold
-    ) external onlyOwner {
-        address vaultAddress = vaults[tokenAddress];
-        if (vaultAddress == address(0)) revert VaultNotFound();
-
-        IAssetVault(vaultAddress).setGraduationThreshold(threshold);
-    }
+    // NOTE: Complex view and admin functions moved to VaultManagerViews.sol
+    // to reduce contract size below 24KB limit. Use VaultManagerViews for:
+    // - getVaultInfo(), getVaultParams(), getLPPosition()
+    // - getTotalLiquidity(), getGraduatedVaults(), getTotalValueUSD()
+    // - All admin forwarding functions (pauseVault, setVaultPythOracle, etc.)
 
     // ========================================================================
     // HIGH FIX: Emergency View Functions

@@ -243,7 +243,10 @@ contract SettlementEngine is
             uint256 cap1 = position.maxProfitCap; // 3× collateral
 
             // Cap 2: 2% of vault token value (at settlement time)
-            uint256 cap2 = _calculateVaultCap(position.tokenAddress);
+            uint256 cap2 = _calculateVaultCap(
+                position.projectToken,
+                position.tokenAddress
+            );
 
             // Use minimum of two caps
             uint256 maxProfit = cap1;
@@ -461,20 +464,23 @@ contract SettlementEngine is
 
     /**
      * @notice Calculate vault-based cap (2% of vault token value)
-     * @param tokenAddress Collateral token address
+     * @param projectToken Project token address
+     * @param collateralToken Collateral token address
      * @return vaultCap 2% of vault liquidity in tokens (0 if not available)
      * @dev Used at settlement time to compare with 3× collateral cap
      */
     function _calculateVaultCap(
-        address tokenAddress
+        address projectToken,
+        address collateralToken
     ) internal view returns (uint256) {
         if (vaultManager == address(0)) {
             return 0; // No vault manager
         }
 
-        // Get vault address
+        // Get vault address for (projectToken, collateralToken) pair
         address vaultAddress = IVaultManager(vaultManager).getVault(
-            tokenAddress
+            projectToken,
+            collateralToken
         );
         if (vaultAddress == address(0)) {
             return 0; // Vault not found

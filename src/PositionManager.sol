@@ -252,8 +252,9 @@ contract PositionManager is
 
     /**
      * @notice Open position (LONG/SHORT) with leverage
-     * @param collateralToken Token to use as collateral (address(0) for native token)
-     * @param priceFeedId Pyth price feed ID of the asset being bet on
+     * @param projectToken Project token address (the asset being bet on - can be from any chain)
+     * @param collateralToken Collateral token to use (must be on Monad - address(0) for native token)
+     * @param priceFeedId Pyth price feed ID of the project token being bet on
      * @param collateralAmount Amount of collateral (for ERC20, ignored for native token)
      * @param leverage Leverage multiplier (1-100x)
      * @param direction 1 = LONG (predict price increase), 2 = SHORT (predict price decrease)
@@ -261,6 +262,7 @@ contract PositionManager is
      * @return positionId Position ID
      */
     function openPosition(
+        address projectToken,
         address collateralToken,
         bytes32 priceFeedId,
         uint256 collateralAmount,
@@ -324,10 +326,13 @@ contract PositionManager is
 
         if (openPrice == 0) revert InvalidPrice();
 
-        // Validate collateral vault exists
+        // Validate collateral vault exists for this (projectToken, collateralToken) pair
         if (vaultManager != address(0)) {
             if (
-                !IVaultManager(vaultManager).isVaultSupported(collateralToken)
+                !IVaultManager(vaultManager).isVaultSupported(
+                    projectToken,
+                    collateralToken
+                )
             ) {
                 revert InvalidCollateralToken();
             }
@@ -349,6 +354,7 @@ contract PositionManager is
         // Check risk limits với VaultManager (check against position size, not just collateral)
         if (vaultManager != address(0)) {
             (bool canOpen, ) = IVaultManager(vaultManager).checkPositionRisk(
+                projectToken,
                 collateralToken,
                 positionSize,
                 leverage,
@@ -362,6 +368,7 @@ contract PositionManager is
             if (collateralToken == address(0)) {
                 // Native token
                 IVaultManager(vaultManager).depositFromBet{value: amount}(
+                    projectToken,
                     collateralToken,
                     amount,
                     positionSize,
@@ -372,6 +379,7 @@ contract PositionManager is
                 // ERC20 token - approve and transfer
                 IERC20(collateralToken).approve(vaultManager, amount);
                 IVaultManager(vaultManager).depositFromBet(
+                    projectToken,
                     collateralToken,
                     amount,
                     positionSize,
@@ -387,8 +395,9 @@ contract PositionManager is
 
         pos.positionId = positionId;
         pos.user = msg.sender;
+        pos.projectToken = projectToken; // Project token being bet on
         pos.tokenAddress = collateralToken; // Collateral token
-        pos.priceFeedId = priceFeedId; // Pyth price feed ID of asset being bet on
+        pos.priceFeedId = priceFeedId; // Pyth price feed ID of project token being bet on
         pos.amount = amount; // Collateral
         pos.leverage = leverage;
         pos.direction = direction;
@@ -603,6 +612,7 @@ contract PositionManager is
             if (pos.tokenAddress == address(0)) {
                 // Native token - forward to vault
                 IVaultManager(vaultManager).depositFromBet{value: marginAmount}(
+                    pos.projectToken,
                     pos.tokenAddress,
                     marginAmount,
                     0, // No position size increase
@@ -613,6 +623,7 @@ contract PositionManager is
                 // ERC20 - approve and forward
                 IERC20(pos.tokenAddress).approve(vaultManager, marginAmount);
                 IVaultManager(vaultManager).depositFromBet(
+                    pos.projectToken,
                     pos.tokenAddress,
                     marginAmount,
                     0, // No position size increase
@@ -732,6 +743,7 @@ contract PositionManager is
         // Update vault P&L
         if (vaultManager != address(0)) {
             IVaultManager(vaultManager).updateVaultPnLWithLeverage(
+                pos.projectToken, // Project token
                 pos.tokenAddress, // Collateral token
                 positionId, // Position ID for tracking
                 pos.amount,
@@ -747,6 +759,7 @@ contract PositionManager is
         // Execute payout if user has any payout
         if (payout > 0 && vaultManager != address(0)) {
             IVaultManager(vaultManager).executePayout(
+                pos.projectToken, // Project token
                 pos.tokenAddress, // Collateral token
                 pos.user,
                 payout
