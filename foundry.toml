@@ -20,4 +20,11 @@ number_underscore = "thousands"
 auto_detect_solc = false
 offline = false
 
+# File system permissions for scripts
+fs_permissions = [
+    { access = "read", path = "./" },
+    { access = "write", path = "./deployments" },
+    { access = "read", path = "./out" },
+]
+
 # See more config options https://github.com/foundry-rs/foundry/tree/master/config
