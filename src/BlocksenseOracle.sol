@@ -19,11 +19,7 @@ import "./interfaces/ICLFeedRegistryAdapter.sol";
  * - Circuit breaker for price manipulation protection
  * - Simple interface: just pass base and quote addresses directly
  */
-contract BlocksenseOracle is
-    OwnableUpgradeable,
-    PausableUpgradeable,
-    UUPSUpgradeable
-{
+contract BlocksenseOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgradeable {
     // ========================================================================
     // STATE VARIABLES
     // ========================================================================
@@ -56,22 +52,13 @@ contract BlocksenseOracle is
     // EVENTS
     // ========================================================================
 
-    event BlocksenseOracleInitialized(
-        address indexed registryContract,
-        uint256 maxPriceAge
-    );
+    event BlocksenseOracleInitialized(address indexed registryContract, uint256 maxPriceAge);
 
-    event RegistryContractUpdated(
-        address indexed oldContract,
-        address indexed newContract
-    );
+    event RegistryContractUpdated(address indexed oldContract, address indexed newContract);
 
     event MaxPriceAgeUpdated(uint256 oldAge, uint256 newAge);
 
-    event PriceValidationConfigUpdated(
-        uint256 maxPriceChangeBps,
-        uint256 minPriceUpdateInterval
-    );
+    event PriceValidationConfigUpdated(uint256 maxPriceChangeBps, uint256 minPriceUpdateInterval);
 
     event CircuitBreakerTriggered(
         address indexed base,
@@ -107,13 +94,13 @@ contract BlocksenseOracle is
      * @param _registry Blocksense CL Feed Registry Adapter address
      * @param _maxPriceAge Maximum price age in seconds
      */
-    function initialize(
-        address initialOwner,
-        address _registry,
-        uint256 _maxPriceAge
-    ) public initializer {
-        if (initialOwner == address(0) || _registry == address(0))
+    function initialize(address initialOwner, address _registry, uint256 _maxPriceAge)
+        public
+        initializer
+    {
+        if (initialOwner == address(0) || _registry == address(0)) {
             revert InvalidAddress();
+        }
         if (_maxPriceAge == 0) revert InvalidPriceAge();
 
         __Ownable_init(initialOwner);
@@ -123,9 +110,8 @@ contract BlocksenseOracle is
         registry = ICLFeedRegistryAdapter(_registry);
         maxPriceAge = _maxPriceAge;
 
-        // Initialize validation parameters
-        maxPriceChangeBps = 1000; // 10% max price change
-        minPriceUpdateInterval = 1; // 1 second minimum between updates
+        maxPriceChangeBps = 1000;
+        minPriceUpdateInterval = 1;
 
         emit BlocksenseOracleInitialized(_registry, _maxPriceAge);
     }
@@ -141,23 +127,19 @@ contract BlocksenseOracle is
      * @return price Price in int256 format (scaled to 18 decimals)
      * @return updatedAt When price was last updated
      */
-    function getPrice(
-        address base,
-        address quote
-    ) external view whenNotPaused returns (int256 price, uint256 updatedAt) {
+    function getPrice(address base, address quote)
+        external
+        view
+        whenNotPaused
+        returns (int256 price, uint256 updatedAt)
+    {
         if (base == address(0) || quote == address(0)) revert InvalidAddress();
 
-        // Get price from Blocksense registry
-        (, int256 answer, , uint256 timestamp, ) = registry.latestRoundData(
-            base,
-            quote
-        );
+        (, int256 answer,, uint256 timestamp,) = registry.latestRoundData(base, quote);
 
-        // Validate price freshness
         if (block.timestamp - timestamp > maxPriceAge) revert PriceStale();
         if (answer <= 0) revert InvalidPrice();
 
-        // Scale price to 18 decimals
         uint8 feedDecimals = registry.decimals(base, quote);
         int256 scaledPrice = _scalePrice(answer, feedDecimals);
 
@@ -171,20 +153,18 @@ contract BlocksenseOracle is
      * @return price Price in int256 format (scaled to 18 decimals)
      * @return updatedAt When price was last updated
      */
-    function getPriceUnsafe(
-        address base,
-        address quote
-    ) external view whenNotPaused returns (int256 price, uint256 updatedAt) {
+    function getPriceUnsafe(address base, address quote)
+        external
+        view
+        whenNotPaused
+        returns (int256 price, uint256 updatedAt)
+    {
         if (base == address(0) || quote == address(0)) revert InvalidAddress();
 
-        (, int256 answer, , uint256 timestamp, ) = registry.latestRoundData(
-            base,
-            quote
-        );
+        (, int256 answer,, uint256 timestamp,) = registry.latestRoundData(base, quote);
 
         if (answer <= 0) revert InvalidPrice();
 
-        // Scale price to 18 decimals
         uint8 feedDecimals = registry.decimals(base, quote);
         int256 scaledPrice = _scalePrice(answer, feedDecimals);
 
@@ -200,27 +180,21 @@ contract BlocksenseOracle is
      * @return updatedAt When price was last updated
      * @dev Includes circuit breaker validation
      */
-    function getPriceNoOlderThan(
-        address base,
-        address quote,
-        uint256 maxAge
-    ) external whenNotPaused returns (int256 price, uint256 updatedAt) {
+    function getPriceNoOlderThan(address base, address quote, uint256 maxAge)
+        external
+        whenNotPaused
+        returns (int256 price, uint256 updatedAt)
+    {
         if (base == address(0) || quote == address(0)) revert InvalidAddress();
 
-        (, int256 answer, , uint256 timestamp, ) = registry.latestRoundData(
-            base,
-            quote
-        );
+        (, int256 answer,, uint256 timestamp,) = registry.latestRoundData(base, quote);
 
-        // Check price age
         if (block.timestamp - timestamp > maxAge) revert PriceStale();
         if (answer <= 0) revert InvalidPrice();
 
-        // Scale price to 18 decimals
         uint8 feedDecimals = registry.decimals(base, quote);
         int256 scaledPrice = _scalePrice(answer, feedDecimals);
 
-        // Validate with circuit breaker
         _validatePrice(base, quote, scaledPrice, timestamp);
 
         return (scaledPrice, timestamp);
@@ -236,10 +210,7 @@ contract BlocksenseOracle is
      * @param decimals Feed decimals
      * @return scaledPrice Scaled price
      */
-    function _scalePrice(
-        int256 price,
-        uint8 decimals
-    ) internal pure returns (int256 scaledPrice) {
+    function _scalePrice(int256 price, uint8 decimals) internal pure returns (int256 scaledPrice) {
         if (decimals == 18) {
             return price;
         } else if (decimals < 18) {
@@ -256,15 +227,11 @@ contract BlocksenseOracle is
      * @param price Scaled price
      * @param timestamp Update timestamp
      */
-    function _validatePrice(
-        address base,
-        address quote,
-        int256 price,
-        uint256 timestamp
-    ) internal {
+    function _validatePrice(address base, address quote, int256 price, uint256 timestamp)
+        internal
+    {
         LastPrice memory lastPrice = lastValidPrices[base][quote];
 
-        // Early returns to reduce nesting
         if (lastPrice.timestamp == 0 || maxPriceChangeBps == 0) {
             _updateLastValidPrice(base, quote, price, timestamp);
             return;
@@ -280,22 +247,15 @@ contract BlocksenseOracle is
             return;
         }
 
-        // Calculate price change percentage
         uint256 priceChange = price > lastPrice.price
             ? uint256(price - lastPrice.price)
             : uint256(lastPrice.price - price);
 
-        uint256 changePercent = (priceChange * 10000) /
-            uint256(lastPrice.price);
+        uint256 BASIS_POINTS = 10_000;
+        uint256 changePercent = (priceChange * BASIS_POINTS) / uint256(lastPrice.price);
 
         if (changePercent > maxPriceChangeBps) {
-            emit CircuitBreakerTriggered(
-                base,
-                quote,
-                lastPrice.price,
-                price,
-                changePercent
-            );
+            emit CircuitBreakerTriggered(base, quote, lastPrice.price, price, changePercent);
             revert PriceChangeTooLarge();
         }
 
@@ -309,16 +269,10 @@ contract BlocksenseOracle is
      * @param price Validated price
      * @param timestamp Price timestamp
      */
-    function _updateLastValidPrice(
-        address base,
-        address quote,
-        int256 price,
-        uint256 timestamp
-    ) internal {
-        lastValidPrices[base][quote] = LastPrice({
-            price: price,
-            timestamp: timestamp
-        });
+    function _updateLastValidPrice(address base, address quote, int256 price, uint256 timestamp)
+        internal
+    {
+        lastValidPrices[base][quote] = LastPrice({ price: price, timestamp: timestamp });
     }
 
     // ========================================================================
@@ -352,19 +306,16 @@ contract BlocksenseOracle is
      * @param _maxPriceChangeBps Maximum price change in bps
      * @param _minPriceUpdateInterval Minimum time between price updates
      */
-    function setPriceValidationConfig(
-        uint256 _maxPriceChangeBps,
-        uint256 _minPriceUpdateInterval
-    ) external onlyOwner {
-        if (_maxPriceChangeBps > 5000) revert InvalidValidationConfig(); // Max 50%
+    function setPriceValidationConfig(uint256 _maxPriceChangeBps, uint256 _minPriceUpdateInterval)
+        external
+        onlyOwner
+    {
+        if (_maxPriceChangeBps > 5000) revert InvalidValidationConfig();
 
         maxPriceChangeBps = _maxPriceChangeBps;
         minPriceUpdateInterval = _minPriceUpdateInterval;
 
-        emit PriceValidationConfigUpdated(
-            _maxPriceChangeBps,
-            _minPriceUpdateInterval
-        );
+        emit PriceValidationConfigUpdated(_maxPriceChangeBps, _minPriceUpdateInterval);
     }
 
     /**
@@ -384,9 +335,7 @@ contract BlocksenseOracle is
     /**
      * @notice Authorize upgrade (UUPS pattern)
      */
-    function _authorizeUpgrade(
-        address newImplementation
-    ) internal override onlyOwner {}
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner { }
 
     /**
      * @notice Get contract version

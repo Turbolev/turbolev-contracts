@@ -14,10 +14,10 @@ interface IBlocksenseOracle {
      * @return price Price in int256 format (scaled to 18 decimals)
      * @return updatedAt When price was last updated
      */
-    function getPrice(
-        address base,
-        address quote
-    ) external view returns (int256 price, uint256 updatedAt);
+    function getPrice(address base, address quote)
+        external
+        view
+        returns (int256 price, uint256 updatedAt);
 
     /**
      * @notice Get price unsafe (no staleness check)
@@ -26,10 +26,10 @@ interface IBlocksenseOracle {
      * @return price Price in int256 format (scaled to 18 decimals)
      * @return updatedAt When price was last updated
      */
-    function getPriceUnsafe(
-        address base,
-        address quote
-    ) external view returns (int256 price, uint256 updatedAt);
+    function getPriceUnsafe(address base, address quote)
+        external
+        view
+        returns (int256 price, uint256 updatedAt);
 
     /**
      * @notice Get price no older than specified age with validation
@@ -39,9 +39,7 @@ interface IBlocksenseOracle {
      * @return price Price in int256 format (scaled to 18 decimals)
      * @return updatedAt When price was last updated
      */
-    function getPriceNoOlderThan(
-        address base,
-        address quote,
-        uint256 maxAge
-    ) external returns (int256 price, uint256 updatedAt);
+    function getPriceNoOlderThan(address base, address quote, uint256 maxAge)
+        external
+        returns (int256 price, uint256 updatedAt);
 }

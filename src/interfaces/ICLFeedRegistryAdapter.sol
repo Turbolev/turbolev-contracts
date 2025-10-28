@@ -14,10 +14,7 @@ interface ICLFeedRegistryAdapter {
      * @param quote Quote asset address
      * @return decimals Number of decimals
      */
-    function decimals(
-        address base,
-        address quote
-    ) external view returns (uint8 decimals);
+    function decimals(address base, address quote) external view returns (uint8 decimals);
 
     /**
      * @notice Get description of a price feed
@@ -25,10 +22,10 @@ interface ICLFeedRegistryAdapter {
      * @param quote Quote asset address
      * @return description Feed description
      */
-    function description(
-        address base,
-        address quote
-    ) external view returns (string memory description);
+    function description(address base, address quote)
+        external
+        view
+        returns (string memory description);
 
     /**
      * @notice Get latest price answer
@@ -36,10 +33,7 @@ interface ICLFeedRegistryAdapter {
      * @param quote Quote asset address
      * @return answer Latest price
      */
-    function latestAnswer(
-        address base,
-        address quote
-    ) external view returns (int256 answer);
+    function latestAnswer(address base, address quote) external view returns (int256 answer);
 
     /**
      * @notice Get latest round ID
@@ -47,10 +41,7 @@ interface ICLFeedRegistryAdapter {
      * @param quote Quote asset address
      * @return roundId Latest round ID
      */
-    function latestRound(
-        address base,
-        address quote
-    ) external view returns (uint256 roundId);
+    function latestRound(address base, address quote) external view returns (uint256 roundId);
 
     /**
      * @notice Get round data by round ID
@@ -63,11 +54,7 @@ interface ICLFeedRegistryAdapter {
      * @return updatedAt Update timestamp
      * @return answeredInRound Answered in round
      */
-    function getRoundData(
-        address base,
-        address quote,
-        uint80 roundId
-    )
+    function getRoundData(address base, address quote, uint80 roundId)
         external
         view
         returns (
@@ -88,10 +75,7 @@ interface ICLFeedRegistryAdapter {
      * @return updatedAt Update timestamp
      * @return answeredInRound Answered in round
      */
-    function latestRoundData(
-        address base,
-        address quote
-    )
+    function latestRoundData(address base, address quote)
         external
         view
         returns (

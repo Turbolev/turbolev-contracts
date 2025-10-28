@@ -11,66 +11,47 @@ interface IVaultManager {
      * @param _projectToken Project token address
      * @return vaultAddress Vault contract address
      */
-    function getVault(
-        address _projectToken
-    ) external view returns (address vaultAddress);
+    function getVault(address _projectToken) external view returns (address vaultAddress);
 
     /**
      * @notice Check if vault is supported for project token
      * @param _projectToken Project token address
      * @return supported Whether vault exists
      */
-    function isVaultSupported(
-        address _projectToken
-    ) external view returns (bool supported);
+    function isVaultSupported(address _projectToken) external view returns (bool supported);
 
     /**
      * @notice Check position risk
      * @param _projectToken Project token address
      * @param positionSize Position size (collateral * leverage)
      * @param leverage Leverage multiplier
-     * @param useProjectToken True if using project token, false if using MON
      * @return canOpen Whether position can be opened
      * @return reason Reason if cannot open
      */
-    function checkPositionRisk(
-        address _projectToken,
-        uint256 positionSize,
-        uint8 leverage,
-        bool useProjectToken
-    ) external view returns (bool canOpen, string memory reason);
+    function checkPositionRisk(address _projectToken, uint256 positionSize, uint8 leverage)
+        external
+        view
+        returns (bool canOpen, string memory reason);
 
     /**
-     * @notice Deposit collateral from bet (supports MON or project token)
+     * @notice Deposit collateral from bet (v1: project token only)
      * @param _projectToken Project token address
-     * @param amount Collateral amount
+     * @param amount Collateral amount in project tokens
      * @param positionSize Position size
-     * @param useProjectToken True if using project token, false if using MON
-     * @param direction Position direction (1=LONG, 2=SHORT)
      */
-    function depositFromBet(
-        address _projectToken,
-        uint256 amount,
-        uint256 positionSize,
-        bool useProjectToken,
-        uint8 direction
-    ) external payable;
+    function depositFromBet(address _projectToken, uint256 amount, uint256 positionSize)
+        external
+        payable;
 
     /**
-     * @notice Execute payout to user (supports MON or project token)
+     * @notice Execute payout to user (v1: project token only)
      * @param _projectToken Project token address
      * @param user User address
-     * @param amount Payout amount
-     * @param useProjectToken True if payout should be in project token, false for MON
+     * @param amount Payout amount in project tokens
      * @param positionId Position ID for tracking partial payouts
      */
-    function executePayout(
-        address _projectToken,
-        address user,
-        uint256 amount,
-        bool useProjectToken,
-        uint64 positionId
-    ) external;
+    function executePayout(address _projectToken, address user, uint256 amount, uint64 positionId)
+        external;
 
     /**
      * @notice Update vault P&L with leverage
@@ -81,7 +62,6 @@ interface IVaultManager {
      * @param fee Fee collected
      * @param positionSize Position size
      * @param excessProfit Excess profit from capped trades
-     * @param direction Position direction (1=LONG, 2=SHORT)
      */
     function updateVaultPnLWithLeverage(
         address _projectToken,
@@ -90,7 +70,32 @@ interface IVaultManager {
         int256 vaultPnL,
         uint256 fee,
         uint256 positionSize,
-        uint256 excessProfit,
-        uint8 direction
+        uint256 excessProfit
     ) external;
+
+    /**
+     * @notice Get vault address by project token (alias for getVault)
+     * @param projectToken Project token address
+     * @return vaultAddress Vault address
+     */
+    function vaultsByProjectToken(address projectToken)
+        external
+        view
+        returns (address vaultAddress);
+
+    /**
+     * @notice Get all vaults
+     * @return Array of vault addresses
+     */
+    function getAllVaults() external view returns (address[] memory);
+
+    /**
+     * @notice Pause factory
+     */
+    function pause() external;
+
+    /**
+     * @notice Unpause factory
+     */
+    function unpause() external;
 }

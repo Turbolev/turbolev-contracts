@@ -7,10 +7,7 @@ pragma solidity ^0.8.22;
  */
 interface IAssetVault {
     struct VaultInfo {
-        address tokenAddress;
         uint256 totalLiquidity;
-        uint256 activeLiquidity;
-        uint256 reservedLiquidity;
         uint256 totalShares;
         uint256 lifetimePnL;
         bool isNegativePnL;
@@ -18,20 +15,16 @@ interface IAssetVault {
         uint256 totalPositionsSettled;
         uint256 totalLeverageExposure;
         uint256 maxLeverageExposure;
-        bool isPaused;
-        bool isInitialized;
         uint256 createdAt;
-        // Fee tracking (new in Phase 1)
         uint256 totalFeesCollected;
         uint256 totalStakingFees;
         uint256 totalWithdrawalFees;
-        // Graduation (Phase 2)
         bool isGraduated;
-        uint256 graduationThreshold; // Token amount threshold (not USD)
+        uint256 graduationThreshold;
         uint256 graduatedAt;
         bool tradingEnabled;
-        // Trading Caps (Phase 3)
         uint256 totalExcessProfit;
+        uint256 pendingPositions;
     }
 
     struct VaultParams {
@@ -41,17 +34,8 @@ interface IAssetVault {
         uint256 minBetAmount;
         uint256 maxBetAmount;
         uint16 maxLeverageExposureBps;
-        uint16 maxPositionSizePercentBps; // Phase 5: Max position size as % of TVL
-        uint256 minLiquidityAmount; // REFACTOR: Min liquidity deposit
-    }
-
-    // Phase 5: Open Interest tracking per asset
-    struct AssetOIInfo {
-        uint256 totalOI; // Total Open Interest for this asset
-        uint256 longOI; // OI from LONG positions
-        uint256 shortOI; // OI from SHORT positions
-        uint256 maxOI; // Max OI allowed for this asset
-        uint256 positionCount; // Number of open positions
+        uint16 maxPositionSizePercentBps;
+        uint256 minLiquidityAmount;
     }
 
     struct LPPosition {
@@ -61,11 +45,10 @@ interface IAssetVault {
         uint256 stakedAt;
         uint256 lastRewardClaim;
         uint256 totalRewardsClaimed;
-        uint256 lastProcessedDay; // Phase 4
-        uint256 pendingRewards; // Phase 4
+        uint256 lastProcessedDay;
+        uint256 pendingRewards;
     }
 
-    // Phase 4: Daily Snapshot for Staker Rewards
     struct DailySnapshot {
         uint256 day;
         uint256 totalLiquidity;
@@ -74,7 +57,7 @@ interface IAssetVault {
         uint256 totalPositionsSettled;
         bool isProcessed;
         uint256 timestamp;
-        uint64[] positionIds; // All position IDs settled this day
+        uint64[] positionIds;
     }
 
     /**
@@ -91,31 +74,18 @@ interface IAssetVault {
 
     /**
      * @notice Deposit collateral from bet
-     * @param amount Collateral amount
+     * @param amount Collateral amount in project tokens
      * @param positionSize Position size
-     * @param useProjectToken True if using project token, false if using MON
-     * @param direction Position direction (1=LONG, 2=SHORT)
      */
-    function depositFromBet(
-        uint256 amount,
-        uint256 positionSize,
-        bool useProjectToken,
-        uint8 direction
-    ) external payable;
+    function depositFromBet(uint256 amount, uint256 positionSize) external payable;
 
     /**
      * @notice Execute payout to user
      * @param user User address
-     * @param amount Payout amount
-     * @param useProjectToken True if payout should be in project token, false for MON
+     * @param amount Payout amount in project tokens
      * @param positionId Position ID for tracking partial payouts
      */
-    function executePayout(
-        address user,
-        uint256 amount,
-        bool useProjectToken,
-        uint64 positionId
-    ) external;
+    function executePayout(address user, uint256 amount, uint64 positionId) external;
 
     /**
      * @notice Update vault P&L
@@ -125,8 +95,6 @@ interface IAssetVault {
      * @param fee Fee collected
      * @param positionSize Position size
      * @param excessProfit Excess profit from capped trades
-     * @param priceFeedId Pyth price feed ID of the asset
-     * @param direction Position direction (1=LONG, 2=SHORT)
      */
     function updateVaultPnL(
         uint64 positionId,
@@ -134,24 +102,20 @@ interface IAssetVault {
         int256 vaultPnL,
         uint256 fee,
         uint256 positionSize,
-        uint256 excessProfit,
-        bytes32 priceFeedId,
-        uint8 direction
+        uint256 excessProfit
     ) external;
 
     /**
      * @notice Check position risk
      * @param positionSize Position size
      * @param leverage Leverage multiplier
-     * @param useProjectToken True if using project token, false if using MON
      * @return canOpen Whether position can be opened
      * @return reason Reason if cannot open
      */
-    function checkPositionRisk(
-        uint256 positionSize,
-        uint8 leverage,
-        bool useProjectToken
-    ) external view returns (bool canOpen, string memory reason);
+    function checkPositionRisk(uint256 positionSize, uint8 leverage)
+        external
+        view
+        returns (bool canOpen, string memory reason);
 
     /**
      * @notice Get vault info
@@ -167,9 +131,7 @@ interface IAssetVault {
      * @notice Get LP position
      * @param user User address
      */
-    function getLPPosition(
-        address user
-    ) external view returns (LPPosition memory);
+    function getLPPosition(address user) external view returns (LPPosition memory);
 
     /**
      * @notice Set PositionManager contract address
@@ -188,7 +150,7 @@ interface IAssetVault {
     function unpause() external;
 
     // ========================================================================
-    // FEE-RELATED FUNCTIONS (Phase 1)
+    // FEE-RELATED FUNCTIONS
     // ========================================================================
 
     /**
@@ -207,18 +169,10 @@ interface IAssetVault {
      * @return netAmount Net amount user will receive
      * @return isEarlyWithdrawal Whether this would be an early withdrawal
      */
-    function calculateWithdrawalAmount(
-        address user,
-        uint256 shares
-    )
+    function calculateWithdrawalAmount(address user, uint256 shares)
         external
         view
-        returns (
-            uint256 grossAmount,
-            uint256 fee,
-            uint256 netAmount,
-            bool isEarlyWithdrawal
-        );
+        returns (uint256 grossAmount, uint256 fee, uint256 netAmount, bool isEarlyWithdrawal);
 
     /**
      * @notice Get fee configuration
@@ -229,11 +183,7 @@ interface IAssetVault {
     function getFeeConfig()
         external
         view
-        returns (
-            uint16 stakingFeeBps,
-            uint16 earlyWithdrawalFeeBps,
-            uint256 minLockPeriod
-        );
+        returns (uint16 stakingFeeBps, uint16 earlyWithdrawalFeeBps, uint256 minLockPeriod);
 
     /**
      * @notice Get total fees collected
@@ -259,7 +209,7 @@ interface IAssetVault {
     function setEarlyWithdrawalFeeBps(uint16 earlyWithdrawalFeeBps) external;
 
     // ========================================================================
-    // GRADUATION FUNCTIONS (Phase 2)
+    // GRADUATION FUNCTIONS
     // ========================================================================
 
     /**
@@ -293,7 +243,7 @@ interface IAssetVault {
     function setBlocksenseOracle(address blocksenseOracle) external;
 
     // ========================================================================
-    // PHASE 4: STAKER REWARD FUNCTIONS
+    // STAKER REWARD FUNCTIONS
     // ========================================================================
 
     /**
@@ -308,9 +258,10 @@ interface IAssetVault {
      * @return pendingRewards Total pending rewards
      * @return processableDays Number of days that can be processed
      */
-    function calculatePendingRewards(
-        address user
-    ) external view returns (uint256 pendingRewards, uint256 processableDays);
+    function calculatePendingRewards(address user)
+        external
+        view
+        returns (uint256 pendingRewards, uint256 processableDays);
 
     /**
      * @notice Claim pending rewards
@@ -353,86 +304,48 @@ interface IAssetVault {
      * @param day Day number
      * @return snapshot Daily snapshot data
      */
-    function getDailySnapshot(
-        uint256 day
-    ) external view returns (DailySnapshot memory snapshot);
+    function getDailySnapshot(uint256 day) external view returns (DailySnapshot memory snapshot);
 
     /**
      * @notice Get position IDs settled in a specific day
      * @param day Day number
      * @return positionIds Array of position IDs
      */
-    function getDailyPositionIds(
-        uint256 day
-    ) external view returns (uint64[] memory positionIds);
+    function getDailyPositionIds(uint256 day) external view returns (uint64[] memory positionIds);
 
     /**
      * @notice Get current day's position IDs (before snapshot)
      * @return positionIds Array of position IDs settled today
      */
-    function getCurrentDailyPositionIds()
-        external
-        view
-        returns (uint64[] memory positionIds);
+    function getCurrentDailyPositionIds() external view returns (uint64[] memory positionIds);
 
     // ========================================================================
-    // PHASE 5: OPEN INTEREST FUNCTIONS
+    // PENDING PAYOUT SYSTEM FUNCTIONS
     // ========================================================================
 
     /**
-     * @notice Get Open Interest info for a specific asset
-     * @param priceFeedId Pyth price feed ID
-     * @return assetOI Asset OI information
+     * @notice Manually trigger processing of pending payouts
+     * @dev Can be called by backend when liquidity is added
      */
-    function getAssetOI(
-        bytes32 priceFeedId
-    ) external view returns (AssetOIInfo memory assetOI);
+    function processPendingPayouts() external;
 
     /**
-     * @notice Get all tracked assets with open positions
-     * @return assets Array of price feed IDs
+     * @notice Get pending payout amount for a position
+     * @param positionId Position ID
+     * @return amount Pending payout amount
      */
-    function getTrackedAssets() external view returns (bytes32[] memory assets);
+    function positionPayouts(uint64 positionId) external view returns (uint256 amount);
 
     /**
-     * @notice Get OI utilization rate for a specific asset
-     * @param priceFeedId Pyth price feed ID
-     * @return utilizationBps OI utilization in basis points (0-10000)
+     * @notice Get user address for a pending payout
+     * @param positionId Position ID
+     * @return user User address
      */
-    function getAssetOIUtilization(
-        bytes32 priceFeedId
-    ) external view returns (uint256 utilizationBps);
+    function pendingPayoutUsers(uint64 positionId) external view returns (address user);
 
     /**
-     * @notice Get LONG/SHORT imbalance for a specific asset
-     * @param priceFeedId Pyth price feed ID
-     * @return imbalance Difference between LONG and SHORT OI
-     * @return imbalancePercent Imbalance as percentage of total OI (in bps)
+     * @notice Get the pending payout queue
+     * @return queue Array of position IDs in FIFO order
      */
-    function getAssetOIImbalance(
-        bytes32 priceFeedId
-    ) external view returns (int256 imbalance, int256 imbalancePercent);
-
-    /**
-     * @notice Get total OI across all assets
-     * @return totalOI Sum of all asset OIs
-     */
-    function getTotalOIAllAssets() external view returns (uint256 totalOI);
-
-    /**
-     * @notice Set max Open Interest for a specific asset
-     * @param priceFeedId Pyth price feed ID
-     * @param maxOI Maximum Open Interest allowed
-     */
-    function setAssetMaxOI(bytes32 priceFeedId, uint256 maxOI) external;
-
-    /**
-     * @notice Set max OI for multiple assets at once
-     * @param priceFeedIds Array of price feed IDs
-     * @param maxOIs Array of max OI values
-     */
-    function setAssetMaxOIBatch(
-        bytes32[] calldata priceFeedIds,
-        uint256[] calldata maxOIs
-    ) external;
+    function getPendingPayoutQueue() external view returns (uint64[] memory queue);
 }

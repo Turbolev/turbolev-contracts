@@ -6,7 +6,7 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 /**
  * @title BackendAccessControlUpgradeable
  * @notice Upgradeable access control contract for managing multiple backend addresses
- * @dev Similar to Ownable but for backend role management - Upgradeable version
+ * @dev Similar to Ownable but for backend role management
  *
  * Features:
  * - Support multiple backend addresses
@@ -26,8 +26,7 @@ abstract contract BackendAccessControlUpgradeable is Initializable {
     /// @notice Array of all backend addresses for enumeration
     address[] private _backendList;
 
-    /// @notice MEDIUM-04 FIX: Mapping to track backend index in array (prevent gas griefing)
-    /// @dev Index is stored as (actualIndex + 1) to distinguish from non-existent (0)
+    /// @notice Mapping to track backend index in array
     mapping(address => uint256) private _backendIndex;
 
     // ========================================================================
@@ -110,7 +109,6 @@ abstract contract BackendAccessControlUpgradeable is Initializable {
     /**
      * @notice Add a backend address (internal)
      * @param backend Address to add as backend
-     * @dev MEDIUM-04 FIX: Store index mapping for O(1) removal
      */
     function _addBackend(address backend) internal {
         if (backend == address(0)) revert InvalidBackendAddress();
@@ -118,7 +116,7 @@ abstract contract BackendAccessControlUpgradeable is Initializable {
 
         _backends[backend] = true;
         _backendList.push(backend);
-        _backendIndex[backend] = _backendList.length; // Store as (index + 1)
+        _backendIndex[backend] = _backendList.length;
 
         emit BackendAdded(backend);
     }
@@ -126,24 +124,21 @@ abstract contract BackendAccessControlUpgradeable is Initializable {
     /**
      * @notice Remove a backend address (internal)
      * @param backend Address to remove from backends
-     * @dev MEDIUM-04 FIX: Use index mapping for O(1) removal instead of loop
      */
     function _removeBackend(address backend) internal {
         if (!_backends[backend]) revert BackendNotFound();
 
         _backends[backend] = false;
 
-        // MEDIUM-04 FIX: O(1) removal using index mapping
         uint256 indexPlusOne = _backendIndex[backend];
         if (indexPlusOne > 0) {
             uint256 index = indexPlusOne - 1;
             uint256 lastIndex = _backendList.length - 1;
 
             if (index != lastIndex) {
-                // Swap with last element
                 address lastBackend = _backendList[lastIndex];
                 _backendList[index] = lastBackend;
-                _backendIndex[lastBackend] = indexPlusOne; // Update swapped element's index
+                _backendIndex[lastBackend] = indexPlusOne;
             }
 
             _backendList.pop();
@@ -155,14 +150,13 @@ abstract contract BackendAccessControlUpgradeable is Initializable {
 
     /**
      * @notice Clear all backends (internal)
-     * @dev MEDIUM-04 NOTE: Loop accepted here as this is rare admin operation
      */
     function _clearBackends() internal {
         uint256 length = _backendList.length;
         for (uint256 i = 0; i < length; i++) {
             address backend = _backendList[i];
             _backends[backend] = false;
-            delete _backendIndex[backend]; // MEDIUM-04 FIX: Clear index mapping
+            delete _backendIndex[backend];
             emit BackendRemoved(backend);
         }
         delete _backendList;
@@ -172,7 +166,6 @@ abstract contract BackendAccessControlUpgradeable is Initializable {
      * @dev This empty reserved space is put in place to allow future versions to add new
      * variables without shifting down storage in the inheritance chain.
      * See https://docs.openzeppelin.com/contracts/4.x/upgradeable#storage_gaps
-     * MEDIUM-04 NOTE: Reduced from 48 to 47 due to new _backendIndex mapping
      */
     uint256[47] private __gap;
 }

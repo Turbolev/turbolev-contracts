@@ -2,17 +2,19 @@
 pragma solidity ^0.8.22;
 
 import "./interfaces/IAssetVault.sol";
+import "./interfaces/IVaultManager.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 
 /**
- * @title VaultManagerViews
+ * @title VaultManagerHelper
  * @notice Helper contract for VaultManager view and admin functions
  * @dev Extracted from VaultManager to reduce contract size below 24KB limit
  *
  * Purpose: Separate read-only and admin forwarding logic from core VaultManager
  * This pattern allows VaultManager to stay under EIP-170 contract size limit
  */
-contract VaultManagerViews {
+contract VaultManagerHelper {
     // ========================================================================
     // STATE VARIABLES (Reference to main VaultManager)
     // ========================================================================
@@ -46,12 +48,7 @@ contract VaultManagerViews {
     // ========================================================================
 
     modifier onlyOwner() {
-        // Get owner from VaultManager (which inherits from Ownable)
-        (bool success, bytes memory data) = vaultManager.staticcall(
-            abi.encodeWithSignature("owner()")
-        );
-        require(success, "Owner check failed");
-        address owner = abi.decode(data, (address));
+        address owner = Ownable(vaultManager).owner();
         if (msg.sender != owner) revert NotAuthorized();
         _;
     }
@@ -64,22 +61,14 @@ contract VaultManagerViews {
      * @notice Get vault address from VaultManager
      */
     function _getVault(address tokenAddress) internal view returns (address) {
-        (bool success, bytes memory data) = vaultManager.staticcall(
-            abi.encodeWithSignature("vaults(address)", tokenAddress)
-        );
-        require(success, "Vault lookup failed");
-        return abi.decode(data, (address));
+        return IVaultManager(vaultManager).getVault(tokenAddress);
     }
 
     /**
-     * @notice Get all supported tokens from VaultManager
+     * @notice Get all vaults from VaultManager
      */
-    function _getSupportedTokens() internal view returns (address[] memory) {
-        (bool success, bytes memory data) = vaultManager.staticcall(
-            abi.encodeWithSignature("getSupportedTokens()")
-        );
-        require(success, "Token lookup failed");
-        return abi.decode(data, (address[]));
+    function _getAllVaults() internal view returns (address[] memory) {
+        return IVaultManager(vaultManager).getAllVaults();
     }
 
     // ========================================================================
@@ -89,9 +78,11 @@ contract VaultManagerViews {
     /**
      * @notice Get vault info for a token
      */
-    function getVaultInfo(
-        address tokenAddress
-    ) external view returns (IAssetVault.VaultInfo memory) {
+    function getVaultInfo(address tokenAddress)
+        external
+        view
+        returns (IAssetVault.VaultInfo memory)
+    {
         address vaultAddress = _getVault(tokenAddress);
         if (vaultAddress == address(0)) revert VaultNotFound();
 
@@ -101,9 +92,11 @@ contract VaultManagerViews {
     /**
      * @notice Get vault parameters for a token
      */
-    function getVaultParams(
-        address tokenAddress
-    ) external view returns (IAssetVault.VaultParams memory) {
+    function getVaultParams(address tokenAddress)
+        external
+        view
+        returns (IAssetVault.VaultParams memory)
+    {
         address vaultAddress = _getVault(tokenAddress);
         if (vaultAddress == address(0)) revert VaultNotFound();
 
@@ -113,10 +106,11 @@ contract VaultManagerViews {
     /**
      * @notice Get LP position for a user in a specific vault
      */
-    function getLPPosition(
-        address tokenAddress,
-        address user
-    ) external view returns (IAssetVault.LPPosition memory) {
+    function getLPPosition(address tokenAddress, address user)
+        external
+        view
+        returns (IAssetVault.LPPosition memory)
+    {
         address vaultAddress = _getVault(tokenAddress);
         if (vaultAddress == address(0)) revert VaultNotFound();
 
@@ -125,15 +119,12 @@ contract VaultManagerViews {
 
     /**
      * @notice Get total liquidity across all vaults (in native token equivalent)
-     * @dev This is a simplified view - actual implementation would need price oracle
      */
     function getTotalLiquidity() external view returns (uint256 total) {
-        address[] memory tokens = _getSupportedTokens();
+        address[] memory vaults = _getAllVaults();
 
-        for (uint256 i = 0; i < tokens.length; i++) {
-            address vaultAddress = _getVault(tokens[i]);
-            IAssetVault.VaultInfo memory info = IAssetVault(vaultAddress)
-                .getVaultInfo();
+        for (uint256 i = 0; i < vaults.length; i++) {
+            IAssetVault.VaultInfo memory info = IAssetVault(vaults[i]).getVaultInfo();
             total += info.totalLiquidity;
         }
         return total;
@@ -143,34 +134,24 @@ contract VaultManagerViews {
      * @notice Get all graduated vaults
      * @return graduated Array of graduated vault addresses
      */
-    function getGraduatedVaults()
-        external
-        view
-        returns (address[] memory graduated)
-    {
-        address[] memory tokens = _getSupportedTokens();
+    function getGraduatedVaults() external view returns (address[] memory graduated) {
+        address[] memory vaults = _getAllVaults();
         uint256 count = 0;
 
-        // Count graduated vaults
-        for (uint256 i = 0; i < tokens.length; i++) {
-            address vaultAddr = _getVault(tokens[i]);
-            IAssetVault.VaultInfo memory info = IAssetVault(vaultAddr)
-                .getVaultInfo();
+        for (uint256 i = 0; i < vaults.length; i++) {
+            IAssetVault.VaultInfo memory info = IAssetVault(vaults[i]).getVaultInfo();
             if (info.isGraduated) {
                 count++;
             }
         }
 
-        // Collect graduated vaults
         graduated = new address[](count);
         uint256 index = 0;
 
-        for (uint256 i = 0; i < tokens.length; i++) {
-            address vaultAddr = _getVault(tokens[i]);
-            IAssetVault.VaultInfo memory info = IAssetVault(vaultAddr)
-                .getVaultInfo();
+        for (uint256 i = 0; i < vaults.length; i++) {
+            IAssetVault.VaultInfo memory info = IAssetVault(vaults[i]).getVaultInfo();
             if (info.isGraduated) {
-                graduated[index] = vaultAddr;
+                graduated[index] = vaults[i];
                 index++;
             }
         }
@@ -183,11 +164,10 @@ contract VaultManagerViews {
      * @return totalUSD Total value in USD (18 decimals)
      */
     function getTotalValueUSD() external view returns (uint256 totalUSD) {
-        address[] memory tokens = _getSupportedTokens();
+        address[] memory vaults = _getAllVaults();
 
-        for (uint256 i = 0; i < tokens.length; i++) {
-            address vaultAddr = _getVault(tokens[i]);
-            totalUSD += IAssetVault(vaultAddr).getVaultValueUSD();
+        for (uint256 i = 0; i < vaults.length; i++) {
+            totalUSD += IAssetVault(vaults[i]).getVaultValueUSD();
         }
         return totalUSD;
     }
@@ -199,10 +179,10 @@ contract VaultManagerViews {
     /**
      * @notice Update PositionManager contract for a specific vault
      */
-    function updateVaultPositionManager(
-        address tokenAddress,
-        address _positionManager
-    ) external onlyOwner {
+    function updateVaultPositionManager(address tokenAddress, address _positionManager)
+        external
+        onlyOwner
+    {
         address vaultAddress = _getVault(tokenAddress);
         if (vaultAddress == address(0)) revert VaultNotFound();
 
@@ -234,10 +214,10 @@ contract VaultManagerViews {
      * @param tokenAddress Token address
      * @param blocksenseOracle BlocksenseOracle contract address
      */
-    function setVaultBlocksenseOracle(
-        address tokenAddress,
-        address blocksenseOracle
-    ) external onlyOwner {
+    function setVaultBlocksenseOracle(address tokenAddress, address blocksenseOracle)
+        external
+        onlyOwner
+    {
         address vaultAddress = _getVault(tokenAddress);
         if (vaultAddress == address(0)) revert VaultNotFound();
 
@@ -249,13 +229,27 @@ contract VaultManagerViews {
      * @param tokenAddress Token address
      * @param threshold New threshold in token amount (same decimals as token)
      */
-    function setVaultGraduationThreshold(
-        address tokenAddress,
-        uint256 threshold
-    ) external onlyOwner {
+    function setVaultGraduationThreshold(address tokenAddress, uint256 threshold)
+        external
+        onlyOwner
+    {
         address vaultAddress = _getVault(tokenAddress);
         if (vaultAddress == address(0)) revert VaultNotFound();
 
         IAssetVault(vaultAddress).setGraduationThreshold(threshold);
+    }
+
+    /**
+     * @notice Pause VaultManager factory
+     */
+    function pauseFactory() external onlyOwner {
+        IVaultManager(vaultManager).pause();
+    }
+
+    /**
+     * @notice Unpause VaultManager factory
+     */
+    function unpauseFactory() external onlyOwner {
+        IVaultManager(vaultManager).unpause();
     }
 }

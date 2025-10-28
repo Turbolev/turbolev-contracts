@@ -16,7 +16,6 @@ import "./interfaces/ISettlementEngine.sol";
 /**
  * @title PositionManager
  * @notice Core position management contract for binary options (LONG/SHORT) - Upgradeable
- * @dev Migrated from binary_bet.move with multi-collateral support
  *
  * Features:
  * - Open positions with LONG/SHORT direction using multiple collateral tokens
@@ -52,9 +51,6 @@ contract PositionManager is
     /// @notice Mapping from positionId to Position data
     mapping(uint64 => PositionLib.Position) public positions;
 
-    /// @notice Mapping from user -> list of position IDs
-    mapping(address => uint64[]) public userPositions;
-
     /// @notice Maintenance Margin Ratio in bps (2000 = 20%)
     /// @dev Liquidation happens when loss = (100% - MMR) = 80% of collateral
     uint256 public maintenanceMarginRatio;
@@ -65,16 +61,8 @@ contract PositionManager is
     /// @notice Maximum leverage (default: 100x)
     uint8 public maxLeverage;
 
-    // ========================================================================
-    // HIGH FIX: Flash Loan Protection
-    // ========================================================================
-
     /// @notice Minimum time a position must be held before closing (configurable)
     uint256 public minPositionHoldTime;
-
-    // ========================================================================
-    // MEDIUM-02 FIX: Slippage Protection
-    // ========================================================================
 
     /// @notice Maximum allowed price slippage in basis points (default: 100 = 1%)
     /// @dev Prevents closing position if price moved unfavorably by more than this %
@@ -84,8 +72,8 @@ contract PositionManager is
     // CONSTANTS
     // ========================================================================
 
-    /// @notice Maximum price age for oracle price (5 seconds)
-    uint256 public constant PRICE_MAX_AGE = 5;
+    /// @notice Maximum price age for oracle price
+    uint256 public constant PRICE_MAX_AGE = 60 seconds;
 
     // ========================================================================
     // EVENTS
@@ -95,7 +83,6 @@ contract PositionManager is
         uint64 indexed positionId,
         address indexed user,
         address tokenAddress,
-        bytes32 priceFeedId,
         uint256 amount,
         uint8 leverage,
         uint8 direction,
@@ -128,19 +115,11 @@ contract PositionManager is
     event MaintenanceMarginRatioUpdated(uint256 oldRatio, uint256 newRatio);
     event LeverageLimitsUpdated(uint8 minLeverage, uint8 maxLeverage);
 
-    event SettlementEngineUpdated(
-        address indexed oldAddress,
-        address indexed newAddress
-    );
-    event VaultManagerUpdated(
-        address indexed oldAddress,
-        address indexed newAddress
-    );
+    event SettlementEngineUpdated(address indexed oldAddress, address indexed newAddress);
+    event VaultManagerUpdated(address indexed oldAddress, address indexed newAddress);
 
-    // HIGH FIX: Flash Loan Protection Events
     event MinPositionHoldTimeUpdated(uint256 oldTime, uint256 newTime);
 
-    // HIGH-04 FIX: Add Margin Events
     event MarginAdded(
         uint64 indexed positionId,
         address indexed user,
@@ -169,14 +148,12 @@ contract PositionManager is
     error InvalidMaintenanceMarginRatio();
     error InvalidPriceFeedId();
     error InvalidCollateralToken();
-
-    // HIGH FIX: Flash Loan Protection Errors
     error PositionClosedTooEarly();
     error InvalidHoldTime();
-
-    // MEDIUM-02 FIX: Slippage Protection Errors
     error DeadlineExpired();
     error SlippageExceeded();
+    error PriceStale();
+    error SlippageExceededOnOpen();
 
     // ========================================================================
     // CONSTRUCTOR / INITIALIZER
@@ -192,12 +169,10 @@ contract PositionManager is
      * @param initialOwner Owner address
      * @param _backend Backend address (initial backend to add)
      */
-    function initialize(
-        address initialOwner,
-        address _backend
-    ) public initializer {
-        if (initialOwner == address(0) || _backend == address(0))
+    function initialize(address initialOwner, address _backend) public initializer {
+        if (initialOwner == address(0) || _backend == address(0)) {
             revert InvalidAddress();
+        }
 
         __Ownable_init(initialOwner);
         __ReentrancyGuard_init();
@@ -213,10 +188,8 @@ contract PositionManager is
         minLeverage = uint8(PositionLib.MIN_LEVERAGE); // 1x
         maxLeverage = uint8(PositionLib.MAX_LEVERAGE); // 100x
 
-        // HIGH FIX: Set default minimum position hold time (60 seconds)
         minPositionHoldTime = PositionLib.MIN_POSITION_HOLD_TIME; // 60 seconds
 
-        // MEDIUM-02 FIX: Initialize max slippage tolerance
         maxSlippageBps = 100; // 1% default slippage tolerance
     }
 
@@ -225,39 +198,37 @@ contract PositionManager is
     // ========================================================================
 
     /// @notice Accept native token transfers
-    receive() external payable {}
+    receive() external payable { }
 
     /// @notice Fallback function
-    fallback() external payable {}
+    fallback() external payable { }
 
     // ========================================================================
     // USER FUNCTIONS
     // ========================================================================
 
     /**
-     * @notice Open position (LONG/SHORT) with leverage using MON or project token
-     * @param projectToken Project token address (the asset being bet on - must be on Monad)
-     * @param collateralAmount Amount of collateral (for ERC20, ignored for native token)
-     * @param useProjectToken True to use project token as collateral, false to use MON
+     * @notice Open position (LONG/SHORT) with leverage (v1: project token only)
+     * @param projectToken Project token address (the ONLY token accepted as collateral)
+     * @param collateralAmount Amount of project token collateral (for ERC20, ignored for native)
      * @param leverage Leverage multiplier (1-100x)
      * @param direction 1 = LONG (predict price increase), 2 = SHORT (predict price decrease)
-     * @dev priceUpdate parameter is reserved for future Blocksense Oracle integration
+     * @param maxAcceptablePrice Maximum acceptable open price (0 = no limit)
      * @return positionId Position ID
      */
     function openPosition(
         address projectToken,
         uint256 collateralAmount,
-        bool useProjectToken,
         uint8 leverage,
         uint8 direction,
-        bytes[] calldata /* priceUpdate */
+        uint256 maxAcceptablePrice
     ) external payable nonReentrant whenNotPaused returns (uint64 positionId) {
         // Validate inputs
-        if (leverage < minLeverage || leverage > maxLeverage)
+        if (leverage < minLeverage || leverage > maxLeverage) {
             revert InvalidLeverage();
+        }
         if (
-            direction != PositionLib.BET_DIRECTION_UP &&
-            direction != PositionLib.BET_DIRECTION_DOWN
+            direction != PositionLib.BET_DIRECTION_UP && direction != PositionLib.BET_DIRECTION_DOWN
         ) {
             revert InvalidDirection();
         }
@@ -270,38 +241,43 @@ contract PositionManager is
         uint256 openPrice;
         uint256 pricePublishTime;
 
-        // Handle collateral based on choice
-        if (useProjectToken) {
-            // Using project token as collateral
-            if (projectToken == address(0)) {
-                // Native project token (rare case)
-                amount = msg.value;
-                if (amount == 0) revert InvalidAmount();
-            } else {
-                // ERC20 project token
-                amount = collateralAmount;
-                if (amount == 0) revert InvalidAmount();
-
-                // Transfer project token from user to this contract
-                IERC20(projectToken).transferFrom(
-                    msg.sender,
-                    address(this),
-                    amount
-                );
-            }
-        } else {
-            // Using MON as collateral
-            // For now, assume MON is native token (msg.value)
+        // Handle collateral - ONLY project token accepted (v1)
+        if (projectToken == address(0)) {
+            // Native project token (rare case)
             amount = msg.value;
             if (amount == 0) revert InvalidAmount();
+        } else {
+            // ERC20 project token (most common)
+            amount = collateralAmount;
+            if (amount == 0) revert InvalidAmount();
+
+            // Transfer project token from user to this contract
+            IERC20(projectToken).transferFrom(msg.sender, address(this), amount);
         }
 
-        // Get price from Blocksense Oracle (simplified for now)
-        // In production, this would use proper Blocksense Oracle integration
-        openPrice = 1e18; // Placeholder price
-        pricePublishTime = block.timestamp;
+        // Get price from Blocksense Oracle via SettlementEngine
+        (openPrice, pricePublishTime) =
+            ISettlementEngine(settlementEngine).getSettlementPrice(projectToken);
 
         if (openPrice == 0) revert InvalidPrice();
+
+        if (block.timestamp > pricePublishTime + PRICE_MAX_AGE) {
+            revert PriceStale();
+        }
+
+        if (maxAcceptablePrice > 0) {
+            if (direction == PositionLib.BET_DIRECTION_LONG) {
+                // LONG: User wants to buy, so limit max price
+                if (openPrice > maxAcceptablePrice) {
+                    revert SlippageExceededOnOpen();
+                }
+            } else {
+                // SHORT: User wants to sell, so limit min price
+                if (openPrice < maxAcceptablePrice) {
+                    revert SlippageExceededOnOpen();
+                }
+            }
+        }
 
         // Validate vault exists for this project token
         if (vaultManager != address(0)) {
@@ -317,27 +293,21 @@ contract PositionManager is
 
         // Check risk limits with VaultManager
         if (vaultManager != address(0)) {
-            (bool canOpen, ) = IVaultManager(vaultManager).checkPositionRisk(
-                projectToken,
-                positionSize,
-                leverage,
-                useProjectToken
-            );
+            (bool canOpen,) =
+                IVaultManager(vaultManager).checkPositionRisk(projectToken, positionSize, leverage);
             if (!canOpen) revert RiskLimitExceeded();
         }
 
         // Transfer collateral to VaultManager
         if (vaultManager != address(0)) {
-            if (useProjectToken && projectToken != address(0)) {
+            if (projectToken != address(0)) {
                 // ERC20 project token - approve and transfer
                 IERC20(projectToken).approve(vaultManager, amount);
             }
 
             IVaultManager(vaultManager).depositFromBet{
-                value: useProjectToken && projectToken == address(0)
-                    ? amount
-                    : (!useProjectToken ? amount : 0)
-            }(projectToken, amount, positionSize, useProjectToken, direction);
+                value: projectToken == address(0) ? amount : 0
+            }(projectToken, amount, positionSize);
         }
 
         // Create position with leverage
@@ -347,8 +317,7 @@ contract PositionManager is
         pos.positionId = positionId;
         pos.user = msg.sender;
         pos.projectToken = projectToken; // Project token being bet on
-        pos.tokenAddress = useProjectToken ? projectToken : address(0); // Token used for collateral (address(0) = MON)
-        pos.priceFeedId = bytes32(uint256(uint160(projectToken))); // Use project token address as price feed ID
+        pos.tokenAddress = projectToken; // Token used for collateral (v1: always project token)
         pos.amount = amount; // Collateral
         pos.leverage = leverage;
         pos.direction = direction;
@@ -363,30 +332,18 @@ contract PositionManager is
 
         // Calculate liquidation price with leverage and maintenance margin
         pos.liquidationPrice = PositionLib.calculateLiquidationPrice(
-            openPrice,
-            direction,
-            leverage,
-            maintenanceMarginRatio
+            openPrice, direction, leverage, maintenanceMarginRatio
         );
 
-        // Calculate and store max profit cap (3× collateral) at position open time (Phase 3)
         pos.maxProfitCap = amount * PositionLib.MAX_PROFIT_CAP_MULTIPLIER;
-
-        // HIGH FIX: Set minimum close time to prevent flash loan attacks
         pos.minCloseTime = block.timestamp + minPositionHoldTime;
-
-        // HIGH-04 FIX: Initialize margin tracking
         pos.initialMargin = amount;
         pos.addedMargin = 0;
-
-        // Add to user's positions
-        userPositions[msg.sender].push(positionId);
 
         emit PositionOpened(
             positionId,
             msg.sender,
-            useProjectToken ? projectToken : address(0), // Token used for collateral
-            pos.priceFeedId,
+            projectToken, // Token used for collateral (v1: always project token)
             amount,
             leverage,
             direction,
@@ -401,46 +358,36 @@ contract PositionManager is
     }
 
     /**
-     * @notice Close position (user initiated)
+     * @notice Close position (user initiated, v1: uses Blocksense Oracle)
      * @param positionId Position ID
      * @param deadline Deadline timestamp for transaction execution
-     * @param priceUpdate Pyth price update data (required for fresh price)
-     * @dev HIGH FIX: Enforces minimum hold time to prevent flash loan attacks
-     * @dev MEDIUM-02 FIX: Includes deadline and slippage protection
      */
-    function closePosition(
-        uint64 positionId,
-        uint256 deadline,
-        bytes[] calldata priceUpdate
-    ) external payable nonReentrant whenNotPaused {
+    function closePosition(uint64 positionId, uint256 deadline)
+        external
+        nonReentrant
+        whenNotPaused
+    {
         PositionLib.Position storage pos = positions[positionId];
 
-        // MEDIUM-02 FIX: Check deadline
         if (block.timestamp > deadline) revert DeadlineExpired();
 
         // Validate
         if (pos.user == address(0)) revert PositionNotFound();
         if (pos.user != msg.sender) revert NotPositionOwner();
-        if (pos.state != PositionLib.POSITION_STATE_OPEN)
+        if (pos.state != PositionLib.POSITION_STATE_OPEN) {
             revert PositionNotOpen();
+        }
 
-        // HIGH FIX: Check minimum hold time to prevent flash loan attacks
         if (block.timestamp < pos.minCloseTime) {
             revert PositionClosedTooEarly();
         }
 
-        // Get close price from oracle via SettlementEngine with price update
+        // Get close price from Blocksense Oracle via SettlementEngine
         if (settlementEngine == address(0)) revert InvalidAddress();
-        (uint256 closePrice, uint256 pricePublishTime) = ISettlementEngine(
-            settlementEngine
-        ).getSettlementPriceWithUpdate{value: msg.value}(
-            pos.priceFeedId,
-            PRICE_MAX_AGE,
-            priceUpdate
-        );
+        (uint256 closePrice, uint256 pricePublishTime) =
+            ISettlementEngine(settlementEngine).getSettlementPrice(pos.projectToken);
         if (closePrice == 0) revert InvalidPrice();
 
-        // MEDIUM-02 FIX: Check slippage protection
         if (maxSlippageBps > 0) {
             uint256 priceChange;
             bool unfavorable;
@@ -450,16 +397,14 @@ contract PositionManager is
                 unfavorable = closePrice < pos.openPrice;
                 if (unfavorable) {
                     priceChange =
-                        ((pos.openPrice - closePrice) * 10000) /
-                        pos.openPrice;
+                        ((pos.openPrice - closePrice) * PositionLib.BASIS_POINTS) / pos.openPrice;
                 }
             } else {
                 // SHORT: Unfavorable if price went up
                 unfavorable = closePrice > pos.openPrice;
                 if (unfavorable) {
                     priceChange =
-                        ((closePrice - pos.openPrice) * 10000) /
-                        pos.openPrice;
+                        ((closePrice - pos.openPrice) * PositionLib.BASIS_POINTS) / pos.openPrice;
                 }
             }
 
@@ -479,63 +424,44 @@ contract PositionManager is
     }
 
     /**
-     * @notice Add margin to existing position to avoid liquidation
+     * @notice Add margin to existing position to avoid liquidation (v1: Blocksense Oracle)
      * @param positionId Position ID
-     * @param marginAmount Amount of margin to add
-     * @param priceUpdate Pyth price update data (required to check liquidation status)
-     * @dev HIGH-04 FIX: Allows users to increase collateral and avoid liquidation
-     * @dev REFACTOR: Prevents adding margin to already-liquidated positions
+     * @param marginAmount Amount of margin to add (in project token)
      */
-    function addMargin(
-        uint64 positionId,
-        uint256 marginAmount,
-        bytes[] calldata priceUpdate
-    ) external payable nonReentrant whenNotPaused {
+    function addMargin(uint64 positionId, uint256 marginAmount)
+        external
+        payable
+        nonReentrant
+        whenNotPaused
+    {
         PositionLib.Position storage pos = positions[positionId];
 
         // Validate position
         if (pos.user == address(0)) revert PositionNotFound();
         if (pos.user != msg.sender) revert NotPositionOwner();
-        if (pos.state != PositionLib.POSITION_STATE_OPEN)
+        if (pos.state != PositionLib.POSITION_STATE_OPEN) {
             revert PositionNotOpen();
+        }
         if (marginAmount == 0) revert InvalidAmount();
 
-        // REFACTOR: Check if position already liquidated (protect user from adding margin to dead position)
-        // Get current price to verify position is not liquidated
+        // Get current price from Blocksense Oracle to verify position is not liquidated
         uint256 currentPrice;
         if (settlementEngine != address(0)) {
-            // For native token: msg.value = oracle fee + marginAmount
-            // For ERC20: msg.value = oracle fee only
-            uint256 oracleFee = msg.value;
-            if (pos.tokenAddress == address(0)) {
-                // Native token: deduct margin from msg.value for oracle fee
-                if (msg.value <= marginAmount) revert InvalidAmount();
-                oracleFee = msg.value - marginAmount;
-            }
-
-            (currentPrice, ) = ISettlementEngine(settlementEngine)
-                .getSettlementPriceWithUpdate{value: oracleFee}(
-                pos.priceFeedId,
-                PRICE_MAX_AGE,
-                priceUpdate
-            );
+            (currentPrice,) =
+                ISettlementEngine(settlementEngine).getSettlementPrice(pos.projectToken);
 
             if (PositionLib.isLiquidated(pos, currentPrice)) {
                 revert PositionAlreadyLiquidated();
             }
         }
 
-        // Handle payment based on token type
+        // Handle payment
         if (pos.tokenAddress == address(0)) {
-            // Native token - msg.value already validated in liquidation check above
-            // msg.value = oracle fee + marginAmount
+            // Native project token
+            if (msg.value != marginAmount) revert InvalidAmount();
         } else {
-            // ERC20 token - msg.value is only for oracle fee
-            IERC20(pos.tokenAddress).transferFrom(
-                msg.sender,
-                address(this),
-                marginAmount
-            );
+            // ERC20 project token
+            IERC20(pos.tokenAddress).transferFrom(msg.sender, address(this), marginAmount);
         }
 
         // Update position margin
@@ -573,71 +499,50 @@ contract PositionManager is
             }(
                 pos.projectToken,
                 marginAmount,
-                0, // No position size increase
-                useProjectToken,
-                pos.direction
+                0 // No position size increase
             );
         }
 
         emit MarginAdded(
-            positionId,
-            msg.sender,
-            marginAmount,
-            pos.amount,
-            pos.liquidationPrice,
-            block.timestamp
+            positionId, msg.sender, marginAmount, pos.amount, pos.liquidationPrice, block.timestamp
         );
     }
 
     /**
-     * @notice Backend force close position (for liquidation or expiry)
+     * @notice Backend force close position (for liquidation or expiry, v1: Blocksense Oracle)
      * @param positionId Position ID
      * @param isLiquidation True if this is a liquidation
-     * @param priceUpdate Pyth price update data (required for fresh price)
      */
-    function backendClosePosition(
-        uint64 positionId,
-        bool isLiquidation,
-        bytes[] calldata priceUpdate
-    ) external payable nonReentrant onlyBackend {
+    function backendClosePosition(uint64 positionId, bool isLiquidation)
+        external
+        nonReentrant
+        onlyBackend
+    {
         PositionLib.Position storage pos = positions[positionId];
         if (pos.user == address(0)) revert PositionNotFound();
-        if (pos.state != PositionLib.POSITION_STATE_OPEN)
+        if (pos.state != PositionLib.POSITION_STATE_OPEN) {
             revert PositionNotOpen();
+        }
 
-        // Get close price from oracle via SettlementEngine with price update
+        if (!isLiquidation && block.timestamp < pos.minCloseTime) {
+            revert PositionClosedTooEarly();
+        }
+
+        // Get close price from Blocksense Oracle via SettlementEngine
         if (settlementEngine == address(0)) revert InvalidAddress();
-        (uint256 closePrice, uint256 pricePublishTime) = ISettlementEngine(
-            settlementEngine
-        ).getSettlementPriceWithUpdate{value: msg.value}(
-            pos.priceFeedId,
-            PRICE_MAX_AGE,
-            priceUpdate
-        );
+        (uint256 closePrice, uint256 pricePublishTime) =
+            ISettlementEngine(settlementEngine).getSettlementPrice(pos.projectToken);
         if (closePrice == 0) revert InvalidPrice();
 
         if (isLiquidation) {
-            uint256 liquidationFeeBps = PositionLib.calculateLiquidationFee(
-                pos.leverage
-            );
-            uint256 liquidationFee = (pos.amount * liquidationFeeBps) / 10000;
+            uint256 liquidationFeeBps = PositionLib.calculateLiquidationFee(pos.leverage);
+            uint256 liquidationFee = (pos.amount * liquidationFeeBps) / PositionLib.BASIS_POINTS;
 
-            emit BetLiquidated(
-                positionId,
-                pos.user,
-                closePrice,
-                liquidationFee,
-                block.timestamp
-            );
+            emit BetLiquidated(positionId, pos.user, closePrice, liquidationFee, block.timestamp);
         }
 
         // Process settlement
-        _processSettlement(
-            positionId,
-            closePrice,
-            isLiquidation,
-            pricePublishTime
-        );
+        _processSettlement(positionId, closePrice, isLiquidation, pricePublishTime);
     }
 
     // ========================================================================
@@ -656,35 +561,19 @@ contract PositionManager is
     ) internal {
         PositionLib.Position storage pos = positions[positionId];
 
-        // Call SettlementEngine to process settlement
+        // Call SettlementEngine to process settlement directly
         if (settlementEngine == address(0)) revert InvalidAddress();
 
-        // Process settlement and get result
-        bytes memory callData = abi.encodeWithSelector(
-            ISettlementEngine.processSettlement.selector,
-            pos,
-            closePrice,
-            isLiquidation
-        );
-        (bool success, bytes memory returnData) = settlementEngine.call(
-            callData
-        );
-        if (!success) revert SettlementFailed();
-
-        // Decode result - declare variables first
-        bool won;
-        uint256 payout;
-        uint256 fee;
-        int256 pnl;
-        int256 vaultPnL;
-        uint8 finalState;
-        uint256 excessProfit;
-
-        (won, payout, fee, pnl, vaultPnL, finalState, excessProfit) = abi
-            .decode(
-                returnData,
-                (bool, uint256, uint256, int256, int256, uint8, uint256)
-            );
+        // Process settlement and get result - direct call (no more low-level call)
+        (
+            bool won,
+            uint256 payout,
+            uint256 fee,
+            int256 pnl,
+            int256 vaultPnL,
+            uint8 finalState,
+            uint256 excessProfit
+        ) = ISettlementEngine(settlementEngine).processSettlement(pos, closePrice, isLiquidation);
 
         // Update vault P&L
         if (vaultManager != address(0)) {
@@ -695,19 +584,16 @@ contract PositionManager is
                 vaultPnL,
                 fee,
                 pos.positionSize,
-                excessProfit,
-                pos.direction // Position direction
+                excessProfit
             );
         }
 
-        // Execute payout if user has any payout
+        // Execute payout if user has any payout (v1: always project token)
         if (payout > 0 && vaultManager != address(0)) {
-            bool useProjectToken = (pos.tokenAddress != address(0)); // If tokenAddress is not 0, user used project token
             IVaultManager(vaultManager).executePayout(
                 pos.projectToken, // Project token
                 pos.user,
                 payout,
-                useProjectToken,
                 positionId
             );
         }
@@ -718,26 +604,26 @@ contract PositionManager is
         pos.lastModifiedTimestamp = block.timestamp;
 
         emit PositionClosed(
-            positionId,
-            pos.user,
-            won,
-            payout,
-            closePrice,
-            pnl,
-            block.timestamp,
-            pricePublishTime
+            positionId, pos.user, won, payout, closePrice, pnl, block.timestamp, pricePublishTime
         );
     }
 
     // ========================================================================
     // ADMIN FUNCTIONS
     // ========================================================================
+    modifier validAddress(address addr) {
+        if (addr == address(0)) revert InvalidAddress();
+        _;
+    }
 
     /**
      * @notice Set settlement engine address
      */
-    function setSettlementEngine(address _settlementEngine) external onlyOwner {
-        if (_settlementEngine == address(0)) revert InvalidAddress();
+    function setSettlementEngine(address _settlementEngine)
+        external
+        onlyOwner
+        validAddress(_settlementEngine)
+    {
         address oldAddress = settlementEngine;
         settlementEngine = _settlementEngine;
         emit SettlementEngineUpdated(oldAddress, _settlementEngine);
@@ -746,8 +632,11 @@ contract PositionManager is
     /**
      * @notice Set vault manager address
      */
-    function setVaultManager(address _vaultManager) external onlyOwner {
-        if (_vaultManager == address(0)) revert InvalidAddress();
+    function setVaultManager(address _vaultManager)
+        external
+        onlyOwner
+        validAddress(_vaultManager)
+    {
         address oldAddress = vaultManager;
         vaultManager = _vaultManager;
         emit VaultManagerUpdated(oldAddress, _vaultManager);
@@ -757,7 +646,7 @@ contract PositionManager is
      * @notice Add a backend address
      * @param _backend Backend address to add
      */
-    function addBackend(address _backend) external onlyOwner {
+    function addBackend(address _backend) external onlyOwner validAddress(_backend) {
         _addBackend(_backend);
     }
 
@@ -765,7 +654,7 @@ contract PositionManager is
      * @notice Remove a backend address
      * @param _backend Backend address to remove
      */
-    function removeBackend(address _backend) external onlyOwner {
+    function removeBackend(address _backend) external onlyOwner validAddress(_backend) {
         _removeBackend(_backend);
     }
 
@@ -788,7 +677,7 @@ contract PositionManager is
      * @param newRatio New maintenance margin ratio in bps (e.g., 2000 = 20%)
      */
     function setMaintenanceMarginRatio(uint256 newRatio) external onlyOwner {
-        if (newRatio > 5000) revert InvalidMaintenanceMarginRatio(); // Max 50%
+        if (newRatio > 5000) revert InvalidMaintenanceMarginRatio();
         uint256 oldRatio = maintenanceMarginRatio;
         maintenanceMarginRatio = newRatio;
         emit MaintenanceMarginRatioUpdated(oldRatio, newRatio);
@@ -799,15 +688,8 @@ contract PositionManager is
      * @param _minLeverage Min leverage (e.g., 1)
      * @param _maxLeverage Max leverage (e.g., 100)
      */
-    function setLeverageLimits(
-        uint8 _minLeverage,
-        uint8 _maxLeverage
-    ) external onlyOwner {
-        if (
-            _minLeverage < 1 ||
-            _maxLeverage > 100 ||
-            _minLeverage > _maxLeverage
-        ) {
+    function setLeverageLimits(uint8 _minLeverage, uint8 _maxLeverage) external onlyOwner {
+        if (_minLeverage < 1 || _maxLeverage > 100 || _minLeverage > _maxLeverage) {
             revert InvalidLeverage();
         }
         minLeverage = _minLeverage;
@@ -818,13 +700,8 @@ contract PositionManager is
     /**
      * @notice Update minimum position hold time
      * @param _minPositionHoldTime New minimum hold time in seconds
-     * @dev HIGH FIX: Allows admin to adjust flash loan protection timing
      */
-    function setMinPositionHoldTime(
-        uint256 _minPositionHoldTime
-    ) external onlyOwner {
-        // Allow 0 to disable (though not recommended)
-        // Max 1 hour to prevent locking users too long
+    function setMinPositionHoldTime(uint256 _minPositionHoldTime) external onlyOwner {
         if (_minPositionHoldTime > 3600) revert InvalidHoldTime();
 
         uint256 oldTime = minPositionHoldTime;
@@ -835,15 +712,7 @@ contract PositionManager is
     /**
      * @notice Authorize upgrade (UUPS pattern)
      */
-    function _authorizeUpgrade(
-        address newImplementation
-    ) internal override onlyOwner {}
-
-    // ========================================================================
-    // BACKEND VALIDATION FUNCTIONS
-    // ========================================================================
-
-    // Legacy functions removed - now using priceFeedId directly
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner { }
 
     // ========================================================================
     // VIEW FUNCTIONS
@@ -852,28 +721,18 @@ contract PositionManager is
     /**
      * @notice Get position details
      */
-    function getPosition(
-        uint64 positionId
-    ) external view returns (PositionLib.Position memory) {
+    function getPosition(uint64 positionId) external view returns (PositionLib.Position memory) {
         return positions[positionId];
-    }
-
-    /**
-     * @notice Get user's positions
-     */
-    function getUserPositions(
-        address user
-    ) external view returns (uint64[] memory) {
-        return userPositions[user];
     }
 
     /**
      * @notice Check if position can be liquidated
      */
-    function checkLiquidation(
-        uint64 positionId,
-        uint256 currentPrice
-    ) external view returns (bool) {
+    function checkLiquidation(uint64 positionId, uint256 currentPrice)
+        external
+        view
+        returns (bool)
+    {
         PositionLib.Position storage pos = positions[positionId];
         return PositionLib.isLiquidated(pos, currentPrice);
     }
@@ -884,11 +743,7 @@ contract PositionManager is
     function getLeverageConfig()
         external
         view
-        returns (
-            uint8 _minLeverage,
-            uint8 _maxLeverage,
-            uint256 _maintenanceMarginRatio
-        )
+        returns (uint8 _minLeverage, uint8 _maxLeverage, uint256 _maintenanceMarginRatio)
     {
         return (minLeverage, maxLeverage, maintenanceMarginRatio);
     }
@@ -896,27 +751,24 @@ contract PositionManager is
     /**
      * @notice Calculate potential liquidation price for a position
      */
-    function calculatePotentialLiquidationPrice(
-        uint256 openPrice,
-        uint8 direction,
-        uint8 leverage
-    ) external view returns (uint256) {
-        return
-            PositionLib.calculateLiquidationPrice(
-                openPrice,
-                direction,
-                leverage,
-                maintenanceMarginRatio
-            );
+    function calculatePotentialLiquidationPrice(uint256 openPrice, uint8 direction, uint8 leverage)
+        external
+        view
+        returns (uint256)
+    {
+        return PositionLib.calculateLiquidationPrice(
+            openPrice, direction, leverage, maintenanceMarginRatio
+        );
     }
 
     /**
      * @notice Get position P&L at current price
      */
-    function getPositionPnL(
-        uint64 positionId,
-        uint256 currentPrice
-    ) external view returns (int256 pnl, int256 pnlPercentage) {
+    function getPositionPnL(uint64 positionId, uint256 currentPrice)
+        external
+        view
+        returns (int256 pnl, int256 pnlPercentage)
+    {
         PositionLib.Position storage pos = positions[positionId];
         return PositionLib.calculateUnrealizedPnL(pos, currentPrice);
     }
@@ -925,11 +777,12 @@ contract PositionManager is
      * @notice Get remaining hold time for a position
      * @param positionId Position ID
      * @return remainingTime Remaining time in seconds (0 if can close now)
-     * @dev HIGH FIX: Allows users to check when they can close position
      */
-    function getRemainingHoldTime(
-        uint64 positionId
-    ) external view returns (uint256 remainingTime) {
+    function getRemainingHoldTime(uint64 positionId)
+        external
+        view
+        returns (uint256 remainingTime)
+    {
         PositionLib.Position storage pos = positions[positionId];
         if (pos.user == address(0)) revert PositionNotFound();
 
@@ -946,9 +799,11 @@ contract PositionManager is
      * @return canClose Whether position can be closed
      * @return reason Reason if cannot close
      */
-    function canClosePosition(
-        uint64 positionId
-    ) external view returns (bool canClose, string memory reason) {
+    function canClosePosition(uint64 positionId)
+        external
+        view
+        returns (bool canClose, string memory reason)
+    {
         PositionLib.Position storage pos = positions[positionId];
 
         if (pos.user == address(0)) {
@@ -970,6 +825,6 @@ contract PositionManager is
      * @notice Get contract version
      */
     function version() external pure returns (string memory) {
-        return "3.0.0-synthetic-leverage";
+        return "1.0.0-position-manager";
     }
 }

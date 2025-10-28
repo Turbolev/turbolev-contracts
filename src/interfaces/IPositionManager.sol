@@ -8,19 +8,19 @@ pragma solidity ^0.8.22;
 interface IPositionManager {
     /**
      * @notice Open position with leverage
-     * @param collateralToken Token to use as collateral (address(0) for native)
-     * @param priceFeedId Pyth price feed ID of the asset being bet on
+     * @param projectToken Project token address (the asset being bet on)
      * @param collateralAmount Amount of collateral
      * @param leverage Leverage multiplier
      * @param direction LONG (1) or SHORT (2)
+     * @param maxAcceptablePrice Maximum acceptable open price (0 = no limit) - GAP-03 FIX
      * @return positionId Position ID
      */
     function openPosition(
-        address collateralToken,
-        bytes32 priceFeedId,
+        address projectToken,
         uint256 collateralAmount,
         uint8 leverage,
-        uint8 direction
+        uint8 direction,
+        uint256 maxAcceptablePrice
     ) external payable returns (uint64 positionId);
 
     /**
@@ -35,13 +35,10 @@ interface IPositionManager {
      * @param positionId Position ID
      * @param marginAmount Amount of margin to add
      * @param priceUpdate Pyth price update data (REFACTOR: check liquidation)
-     * @dev HIGH-04 FIX: Allows users to add collateral to avoid liquidation
      */
-    function addMargin(
-        uint64 positionId,
-        uint256 marginAmount,
-        bytes[] calldata priceUpdate
-    ) external payable;
+    function addMargin(uint64 positionId, uint256 marginAmount, bytes[] calldata priceUpdate)
+        external
+        payable;
 
     /**
      * @notice Backend force close position
@@ -49,11 +46,8 @@ interface IPositionManager {
      * @param closePrice Close price
      * @param isLiquidation Whether this is liquidation
      */
-    function backendClosePosition(
-        uint64 positionId,
-        uint256 closePrice,
-        bool isLiquidation
-    ) external;
+    function backendClosePosition(uint64 positionId, uint256 closePrice, bool isLiquidation)
+        external;
 
     /**
      * @notice Add a backend address
@@ -91,9 +85,10 @@ interface IPositionManager {
      * @param positionId Position ID
      * @return remainingTime Remaining time in seconds
      */
-    function getRemainingHoldTime(
-        uint64 positionId
-    ) external view returns (uint256 remainingTime);
+    function getRemainingHoldTime(uint64 positionId)
+        external
+        view
+        returns (uint256 remainingTime);
 
     /**
      * @notice Check if position can be closed
@@ -101,7 +96,8 @@ interface IPositionManager {
      * @return canClose Whether position can be closed
      * @return reason Reason if cannot close
      */
-    function canClosePosition(
-        uint64 positionId
-    ) external view returns (bool canClose, string memory reason);
+    function canClosePosition(uint64 positionId)
+        external
+        view
+        returns (bool canClose, string memory reason);
 }
