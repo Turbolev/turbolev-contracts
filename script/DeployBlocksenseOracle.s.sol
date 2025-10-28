@@ -15,6 +15,14 @@ contract DeployBlocksenseOracle is DeployHelper {
     function run() public {
         vm.startBroadcast(deployer);
 
+        // Check if already deployed
+        if (_isContractDeployed(blocksenseOracle)) {
+            console.log("\nBlocksenseOracle already deployed!");
+            console.log("Using existing address:", blocksenseOracle);
+            vm.stopBroadcast();
+            return;
+        }
+
         console.log("\nDeploying BlocksenseOracle...");
         console.log("Chain ID:", block.chainid);
         console.log("Owner:", owner);
@@ -27,7 +35,10 @@ contract DeployBlocksenseOracle is DeployHelper {
 
         // Prepare initialization data
         bytes memory initData = abi.encodeWithSelector(
-            BlocksenseOracle.initialize.selector, owner, blocksenseRegistry, ORACLE_MAX_PRICE_AGE
+            BlocksenseOracle.initialize.selector,
+            owner,
+            blocksenseRegistry,
+            ORACLE_MAX_PRICE_AGE
         );
 
         // Deploy proxy

@@ -15,6 +15,14 @@ contract DeploySettlementEngine is DeployHelper {
     function run() public {
         vm.startBroadcast(deployer);
 
+        // Check if already deployed
+        if (_isContractDeployed(settlementEngine)) {
+            console.log("\nSettlementEngine already deployed!");
+            console.log("Using existing address:", settlementEngine);
+            vm.stopBroadcast();
+            return;
+        }
+
         console.log("\nDeploying SettlementEngine...");
         console.log("Owner:", owner);
 
@@ -23,7 +31,10 @@ contract DeploySettlementEngine is DeployHelper {
         console.log("Implementation deployed:", impl);
 
         // Prepare initialization data
-        bytes memory initData = abi.encodeWithSelector(SettlementEngine.initialize.selector, owner);
+        bytes memory initData = abi.encodeWithSelector(
+            SettlementEngine.initialize.selector,
+            owner
+        );
 
         // Deploy proxy
         address proxy = address(new ERC1967Proxy(impl, initData));
@@ -32,9 +43,14 @@ contract DeploySettlementEngine is DeployHelper {
 
         // Apply config
         SettlementEngine(settlementEngine).updateConfig(
-            HOUSE_EDGE_BPS, WIN_MULTIPLIER_BPS, MIN_BET_AMOUNT, MAX_BET_AMOUNT
+            HOUSE_EDGE_BPS,
+            WIN_MULTIPLIER_BPS,
+            MIN_BET_AMOUNT,
+            MAX_BET_AMOUNT
         );
-        SettlementEngine(settlementEngine).setMaxProfitCapBps(MAX_PROFIT_CAP_BPS);
+        SettlementEngine(settlementEngine).setMaxProfitCapBps(
+            MAX_PROFIT_CAP_BPS
+        );
 
         _logDeployment("SettlementEngine", settlementEngine);
 

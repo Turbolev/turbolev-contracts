@@ -15,6 +15,14 @@ contract DeployVaultManager is DeployHelper {
     function run() public {
         vm.startBroadcast(deployer);
 
+        // Check if already deployed
+        if (_isContractDeployed(vaultManager)) {
+            console.log("\nVaultManager already deployed!");
+            console.log("Using existing address:", vaultManager);
+            vm.stopBroadcast();
+            return;
+        }
+
         console.log("\nDeploying VaultManager...");
         console.log("Owner:", owner);
 
@@ -23,7 +31,10 @@ contract DeployVaultManager is DeployHelper {
         console.log("Implementation deployed:", impl);
 
         // Prepare initialization data
-        bytes memory initData = abi.encodeWithSelector(VaultManager.initialize.selector, owner);
+        bytes memory initData = abi.encodeWithSelector(
+            VaultManager.initialize.selector,
+            owner
+        );
 
         // Deploy proxy
         address proxy = address(new ERC1967Proxy(impl, initData));

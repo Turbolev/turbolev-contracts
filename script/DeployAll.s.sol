@@ -75,6 +75,12 @@ contract DeployAll is DeployHelper {
     // ========================================================================
 
     function _deployBlocksenseOracle() internal {
+        // Check if already deployed
+        if (_isContractDeployed(blocksenseOracle)) {
+            console.log("\nBlocksenseOracle already deployed, skipping...");
+            return;
+        }
+
         console.log("\nStep 1: Deploying BlocksenseOracle...");
 
         // Deploy implementation
@@ -101,6 +107,12 @@ contract DeployAll is DeployHelper {
     }
 
     function _deploySettlementEngine() internal {
+        // Check if already deployed
+        if (_isContractDeployed(settlementEngine)) {
+            console.log("\nSettlementEngine already deployed, skipping...");
+            return;
+        }
+
         console.log("\nStep 2: Deploying SettlementEngine...");
 
         // Deploy implementation
@@ -137,6 +149,12 @@ contract DeployAll is DeployHelper {
     }
 
     function _deployPositionManager() internal {
+        // Check if already deployed
+        if (_isContractDeployed(positionManager)) {
+            console.log("\nPositionManager already deployed, skipping...");
+            return;
+        }
+
         console.log("\nStep 3: Deploying PositionManager...");
 
         // Deploy implementation
@@ -174,6 +192,12 @@ contract DeployAll is DeployHelper {
     }
 
     function _deployVaultManager() internal {
+        // Check if already deployed
+        if (_isContractDeployed(vaultManager)) {
+            console.log("\nVaultManager already deployed, skipping...");
+            return;
+        }
+
         console.log("\nStep 4: Deploying VaultManager...");
 
         // Deploy implementation

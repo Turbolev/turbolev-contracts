@@ -75,6 +75,30 @@ MAX_LEVERAGE=1000000
 
 ## Deployment Scripts
 
+### Smart Deployment (Recommended)
+
+All deployment scripts now support **smart deployment** - they will check if contracts are already deployed before deploying new ones.
+
+**How it works:**
+1. Scripts read contract addresses from environment variables first
+2. If addresses are set (not zero), they skip deployment and use existing contracts
+3. If addresses are not set, they deploy new contracts
+4. After deployment, addresses are saved to `deployments/{chainId}.json`
+
+**To use smart deployment:**
+Add already deployed contract addresses to your `.env` file:
+```bash
+BLOCKSENSE_ORACLE_ADDRESS=0x...
+SETTLEMENT_ENGINE_ADDRESS=0x...
+POSITION_MANAGER_ADDRESS=0x...
+VAULT_MANAGER_ADDRESS=0x...
+```
+
+This allows you to:
+- Deploy only missing contracts
+- Redeploy specific contracts while keeping others
+- Skip deployment of contracts that are already on-chain
+
 ### Deploy Full System
 
 Deploy all contracts in the correct order with automatic configuration:
@@ -84,13 +108,11 @@ forge script script/DeployAll.s.sol:DeployAll --rpc-url $RPC_URL --broadcast -vv
 ```
 
 **What it does:**
-1. Deploys BlocksenseOracle (upgradeable via UUPS proxy)
-2. Deploys SettlementEngine (upgradeable via UUPS proxy)
-3. Deploys PositionManager (upgradeable via UUPS proxy)
-4. Deploys VaultManager (upgradeable via UUPS proxy)
-5. Connects all contracts together
-6. Verifies the deployment
-7. Saves deployment addresses to `deployments/{chainId}.json`
+1. Checks each contract - if address in `.env`, uses existing contract
+2. Deploys only missing contracts (upgradeable via UUPS proxy)
+3. Connects all contracts together
+4. Verifies the deployment
+5. Saves deployment addresses to `deployments/{chainId}.json`
 
 **Output:**
 - Deployment addresses saved to `deployments/{chainId}.json`

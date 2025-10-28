@@ -15,6 +15,14 @@ contract DeployPositionManager is DeployHelper {
     function run() public {
         vm.startBroadcast(deployer);
 
+        // Check if already deployed
+        if (_isContractDeployed(positionManager)) {
+            console.log("\nPositionManager already deployed!");
+            console.log("Using existing address:", positionManager);
+            vm.stopBroadcast();
+            return;
+        }
+
         console.log("\nDeploying PositionManager...");
         console.log("Owner:", owner);
         console.log("Backend:", backend);
@@ -24,8 +32,11 @@ contract DeployPositionManager is DeployHelper {
         console.log("Implementation deployed:", impl);
 
         // Prepare initialization data
-        bytes memory initData =
-            abi.encodeWithSelector(PositionManager.initialize.selector, owner, backend);
+        bytes memory initData = abi.encodeWithSelector(
+            PositionManager.initialize.selector,
+            owner,
+            backend
+        );
 
         // Deploy proxy
         address proxy = address(new ERC1967Proxy(impl, initData));
@@ -36,8 +47,13 @@ contract DeployPositionManager is DeployHelper {
         PositionManager(payable(positionManager)).setMaintenanceMarginRatio(
             MAINTENANCE_MARGIN_RATIO
         );
-        PositionManager(payable(positionManager)).setLeverageLimits(MIN_LEVERAGE, MAX_LEVERAGE);
-        PositionManager(payable(positionManager)).setMinPositionHoldTime(MIN_POSITION_HOLD_TIME);
+        PositionManager(payable(positionManager)).setLeverageLimits(
+            MIN_LEVERAGE,
+            MAX_LEVERAGE
+        );
+        PositionManager(payable(positionManager)).setMinPositionHoldTime(
+            MIN_POSITION_HOLD_TIME
+        );
 
         _logDeployment("PositionManager", positionManager);
 

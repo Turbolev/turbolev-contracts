@@ -22,12 +22,21 @@ contract CreateVault is DeployHelper {
         address projectTokenQuote = vm.envAddress("PROJECT_TOKEN_QUOTE");
 
         // Params can be overridden via ENV, otherwise use defaults from helper
-        uint16 maxPayoutBps = uint16(vm.envOr("MAX_PAYOUT_BPS", uint256(MAX_PAYOUT_BPS)));
-        uint16 perBetUtilBps = uint16(vm.envOr("PER_BET_UTIL_BPS", uint256(PER_BET_UTIL_BPS)));
-        uint16 maxUtilBps = uint16(vm.envOr("MAX_UTIL_BPS", uint256(MAX_UTIL_BPS)));
+        uint16 maxPayoutBps = uint16(
+            vm.envOr("MAX_PAYOUT_BPS", uint256(MAX_PAYOUT_BPS))
+        );
+        uint16 perBetUtilBps = uint16(
+            vm.envOr("PER_BET_UTIL_BPS", uint256(PER_BET_UTIL_BPS))
+        );
+        uint16 maxUtilBps = uint16(
+            vm.envOr("MAX_UTIL_BPS", uint256(MAX_UTIL_BPS))
+        );
         uint256 minBet = vm.envOr("MIN_BET_AMOUNT", MIN_BET_AMOUNT);
         uint256 maxBet = vm.envOr("MAX_BET_AMOUNT", MAX_BET_AMOUNT);
-        uint256 graduationThreshold = vm.envOr("GRADUATION_THRESHOLD", GRADUATION_THRESHOLD);
+        uint256 graduationThreshold = vm.envOr(
+            "GRADUATION_THRESHOLD",
+            GRADUATION_THRESHOLD
+        );
 
         console.log("\nCreating vault for token:", projectToken);
         console.log("Project Token Base:", projectTokenBase);
