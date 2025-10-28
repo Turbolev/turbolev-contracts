@@ -80,16 +80,11 @@ contract DeployHelper is Script {
 
         // Setup accounts from environment variables or use defaults
         owner = vm.envOr("OWNER_ADDRESS", deployer);
-        backend = vm.envOr(
-            "BACKEND_ADDRESS",
-            address(0x1111111111111111111111111111111111111111)
-        );
+        backend = vm.envOr("BACKEND_ADDRESS", address(0x1111111111111111111111111111111111111111));
 
         // Setup Blocksense registry address - check env first, then use chainId-based defaults
-        blocksenseRegistry = vm.envOr(
-            "BLOCKSENSE_REGISTRY_ADDRESS",
-            _getBlocksenseRegistry(block.chainid)
-        );
+        blocksenseRegistry =
+            vm.envOr("BLOCKSENSE_REGISTRY_ADDRESS", _getBlocksenseRegistry(block.chainid));
 
         // Try to load already deployed contract addresses from environment
         _loadDeployedAddressesFromEnv();
@@ -115,9 +110,11 @@ contract DeployHelper is Script {
      * @param chainId Chain ID
      * @return registryAddress Registry address
      */
-    function _getBlocksenseRegistry(
-        uint256 chainId
-    ) internal pure returns (address registryAddress) {
+    function _getBlocksenseRegistry(uint256 chainId)
+        internal
+        pure
+        returns (address registryAddress)
+    {
         if (chainId == CHAINID_MAINNET) {
             // Mainnet Blocksense registry address
             // TODO: Update with official registry address
@@ -166,10 +163,7 @@ contract DeployHelper is Script {
      * @param name Contract name
      * @param contractAddress Contract address
      */
-    function _logDeployment(
-        string memory name,
-        address contractAddress
-    ) internal {
+    function _logDeployment(string memory name, address contractAddress) internal {
         console.log("");
         console.log("===================================");
         console.log("Deployed:", name);
@@ -204,57 +198,20 @@ contract DeployHelper is Script {
      */
     function _saveDeploymentAddresses() internal {
         uint256 chainId = block.chainid;
-        string memory file = string.concat(
-            "deployments/",
-            vm.toString(chainId),
-            ".json"
-        );
+        string memory file = string.concat("deployments/", vm.toString(chainId), ".json");
 
         // Create JSON object
         string memory json = "{\n";
-        json = string.concat(
-            json,
-            '  "network": ',
-            vm.toString(block.chainid),
-            ",\n"
-        );
+        json = string.concat(json, '  "network": ', vm.toString(block.chainid), ",\n");
         json = string.concat(json, '  "owner": "', vm.toString(owner), '",\n');
+        json = string.concat(json, '  "backend": "', vm.toString(backend), '",\n');
         json = string.concat(
-            json,
-            '  "backend": "',
-            vm.toString(backend),
-            '",\n'
+            json, '  "blocksenseRegistry": "', vm.toString(blocksenseRegistry), '",\n'
         );
-        json = string.concat(
-            json,
-            '  "blocksenseRegistry": "',
-            vm.toString(blocksenseRegistry),
-            '",\n'
-        );
-        json = string.concat(
-            json,
-            '  "blocksenseOracle": "',
-            vm.toString(blocksenseOracle),
-            '",\n'
-        );
-        json = string.concat(
-            json,
-            '  "settlementEngine": "',
-            vm.toString(settlementEngine),
-            '",\n'
-        );
-        json = string.concat(
-            json,
-            '  "positionManager": "',
-            vm.toString(positionManager),
-            '",\n'
-        );
-        json = string.concat(
-            json,
-            '  "vaultManager": "',
-            vm.toString(vaultManager),
-            '"\n'
-        );
+        json = string.concat(json, '  "blocksenseOracle": "', vm.toString(blocksenseOracle), '",\n');
+        json = string.concat(json, '  "settlementEngine": "', vm.toString(settlementEngine), '",\n');
+        json = string.concat(json, '  "positionManager": "', vm.toString(positionManager), '",\n');
+        json = string.concat(json, '  "vaultManager": "', vm.toString(vaultManager), '"\n');
         json = string.concat(json, "}");
 
         vm.writeFile(file, json);
@@ -267,11 +224,7 @@ contract DeployHelper is Script {
      */
     function _loadDeploymentAddresses() internal {
         uint256 chainId = block.chainid;
-        string memory file = string.concat(
-            "deployments/",
-            vm.toString(chainId),
-            ".json"
-        );
+        string memory file = string.concat("deployments/", vm.toString(chainId), ".json");
 
         string memory json = vm.readFile(file);
 

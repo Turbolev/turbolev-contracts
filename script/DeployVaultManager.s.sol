@@ -31,10 +31,7 @@ contract DeployVaultManager is DeployHelper {
         console.log("Implementation deployed:", impl);
 
         // Prepare initialization data
-        bytes memory initData = abi.encodeWithSelector(
-            VaultManager.initialize.selector,
-            owner
-        );
+        bytes memory initData = abi.encodeWithSelector(VaultManager.initialize.selector, owner);
 
         // Deploy proxy
         address proxy = address(new ERC1967Proxy(impl, initData));

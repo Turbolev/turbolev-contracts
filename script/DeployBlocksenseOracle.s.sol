@@ -35,10 +35,7 @@ contract DeployBlocksenseOracle is DeployHelper {
 
         // Prepare initialization data
         bytes memory initData = abi.encodeWithSelector(
-            BlocksenseOracle.initialize.selector,
-            owner,
-            blocksenseRegistry,
-            ORACLE_MAX_PRICE_AGE
+            BlocksenseOracle.initialize.selector, owner, blocksenseRegistry, ORACLE_MAX_PRICE_AGE
         );
 
         // Deploy proxy
