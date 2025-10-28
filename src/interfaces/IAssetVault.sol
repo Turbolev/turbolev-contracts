@@ -93,13 +93,13 @@ interface IAssetVault {
      * @notice Deposit collateral from bet
      * @param amount Collateral amount
      * @param positionSize Position size
-     * @param priceFeedId Pyth price feed ID of asset being bet on
+     * @param useProjectToken True if using project token, false if using MON
      * @param direction Position direction (1=LONG, 2=SHORT)
      */
     function depositFromBet(
         uint256 amount,
         uint256 positionSize,
-        bytes32 priceFeedId,
+        bool useProjectToken,
         uint8 direction
     ) external payable;
 
@@ -107,8 +107,15 @@ interface IAssetVault {
      * @notice Execute payout to user
      * @param user User address
      * @param amount Payout amount
+     * @param useProjectToken True if payout should be in project token, false for MON
+     * @param positionId Position ID for tracking partial payouts
      */
-    function executePayout(address user, uint256 amount) external;
+    function executePayout(
+        address user,
+        uint256 amount,
+        bool useProjectToken,
+        uint64 positionId
+    ) external;
 
     /**
      * @notice Update vault P&L
@@ -136,14 +143,14 @@ interface IAssetVault {
      * @notice Check position risk
      * @param positionSize Position size
      * @param leverage Leverage multiplier
-     * @param priceFeedId Pyth price feed ID of asset being bet on
+     * @param useProjectToken True if using project token, false if using MON
      * @return canOpen Whether position can be opened
      * @return reason Reason if cannot open
      */
     function checkPositionRisk(
         uint256 positionSize,
         uint8 leverage,
-        bytes32 priceFeedId
+        bool useProjectToken
     ) external view returns (bool canOpen, string memory reason);
 
     /**
@@ -280,10 +287,10 @@ interface IAssetVault {
     function setTradingEnabled(bool enabled) external;
 
     /**
-     * @notice Set Pyth Oracle address
-     * @param pythOracle Pyth Oracle contract address
+     * @notice Set Blocksense Oracle address
+     * @param blocksenseOracle Blocksense Oracle contract address
      */
-    function setPythOracle(address pythOracle) external;
+    function setBlocksenseOracle(address blocksenseOracle) external;
 
     // ========================================================================
     // PHASE 4: STAKER REWARD FUNCTIONS
@@ -309,11 +316,6 @@ interface IAssetVault {
      * @notice Claim pending rewards
      */
     function claimRewards() external;
-
-    /**
-     * @notice Compound pending rewards back into vault
-     */
-    function compoundRewards() external;
 
     /**
      * @notice Add a backend bot address

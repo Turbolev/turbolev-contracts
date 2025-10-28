@@ -6,7 +6,7 @@ import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol
 import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import "./PythOracle.sol";
+import "./BlocksenseOracle.sol";
 import "./libraries/PositionLib.sol";
 import "./interfaces/IVaultManager.sol";
 import "./interfaces/IAssetVault.sol";
@@ -52,8 +52,8 @@ contract SettlementEngine is
     /// @notice VaultManager contract address
     address public vaultManager;
 
-    /// @notice PythOracle contract address
-    address public pythOracle;
+    /// @notice BlocksenseOracle contract address
+    address public blocksenseOracle;
 
     /// @notice Max profit cap in bps (200 = 2% of vault USD value)
     uint16 public maxProfitCapBps;
@@ -102,7 +102,7 @@ contract SettlementEngine is
         address indexed newAddress
     );
 
-    event PythOracleUpdated(
+    event BlocksenseOracleUpdated(
         address indexed oldAddress,
         address indexed newAddress
     );
@@ -333,34 +333,58 @@ contract SettlementEngine is
     /**
      * @notice Get settlement price with price update (no older than maxAge)
      * @dev Used by PositionManager to get fresh price from oracle
-     * @param priceFeedId Pyth price feed ID
-     * @param maxAge Maximum acceptable price age in seconds (e.g., 5)
-     * @param priceUpdate Price update data from Pyth
+     * @dev This function is deprecated. Use getSettlementPrice with base/quote addresses instead.
      * @return closePrice Price from oracle (converted to uint256)
      * @return publishTime When price was published
      */
     function getSettlementPriceWithUpdate(
-        bytes32 priceFeedId,
-        uint256 maxAge,
-        bytes[] calldata priceUpdate
+        bytes32 /* priceFeedId */,
+        uint256 /* maxAge */,
+        bytes[] calldata /* priceUpdate */
     )
         external
         payable
         whenNotPaused
+        returns (uint256 /* closePrice */, uint256 /* publishTime */)
+    {
+        if (blocksenseOracle == address(0)) revert InvalidAddress();
+
+        // Note: With BlocksenseOracle, we need base/quote addresses instead of priceFeedId
+        // This function signature needs to be updated by caller
+        revert(
+            "Function deprecated - use getSettlementPrice with base/quote addresses"
+        );
+    }
+
+    /**
+     * @notice Get settlement price (for backend settlement)
+     * @param base Base token address for price feed
+     * @param quote Quote token address for price feed
+     * @param maxAge Maximum acceptable price age
+     * @return closePrice Settlement price
+     * @return publishTime When price was last updated
+     */
+    function getSettlementPrice(
+        address base,
+        address quote,
+        uint256 maxAge
+    )
+        external
+        view
+        whenNotPaused
         returns (uint256 closePrice, uint256 publishTime)
     {
-        if (pythOracle == address(0)) revert InvalidAddress();
+        if (blocksenseOracle == address(0)) revert InvalidAddress();
 
-        (int256 price, uint256 pubTime) = PythOracle(payable(pythOracle))
-            .getPriceNoOlderThan{value: msg.value}(
-            priceFeedId,
-            maxAge,
-            priceUpdate
-        );
+        (int256 price, uint256 updatedAt) = BlocksenseOracle(blocksenseOracle)
+            .getPrice(base, quote);
+
+        // Check price age
+        if (block.timestamp - updatedAt > maxAge) revert InvalidOraclePrice();
 
         // Convert to uint256 (price should always be positive for assets)
         if (price <= 0) revert InvalidOraclePrice();
-        return (uint256(price), pubTime);
+        return (uint256(price), updatedAt);
     }
 
     // ========================================================================
@@ -417,13 +441,13 @@ contract SettlementEngine is
     }
 
     /**
-     * @notice Set PythOracle address
+     * @notice Set BlocksenseOracle address
      */
-    function setPythOracle(address _pythOracle) external onlyOwner {
-        if (_pythOracle == address(0)) revert InvalidAddress();
-        address oldAddress = pythOracle;
-        pythOracle = _pythOracle;
-        emit PythOracleUpdated(oldAddress, _pythOracle);
+    function setBlocksenseOracle(address _blocksenseOracle) external onlyOwner {
+        if (_blocksenseOracle == address(0)) revert InvalidAddress();
+        address oldAddress = blocksenseOracle;
+        blocksenseOracle = _blocksenseOracle;
+        emit BlocksenseOracleUpdated(oldAddress, _blocksenseOracle);
     }
 
     /**
@@ -465,22 +489,20 @@ contract SettlementEngine is
     /**
      * @notice Calculate vault-based cap (2% of vault token value)
      * @param projectToken Project token address
-     * @param collateralToken Collateral token address
      * @return vaultCap 2% of vault liquidity in tokens (0 if not available)
      * @dev Used at settlement time to compare with 3× collateral cap
      */
     function _calculateVaultCap(
         address projectToken,
-        address collateralToken
+        address /* collateralToken */
     ) internal view returns (uint256) {
         if (vaultManager == address(0)) {
             return 0; // No vault manager
         }
 
-        // Get vault address for (projectToken, collateralToken) pair
+        // Get vault address for project token
         address vaultAddress = IVaultManager(vaultManager).getVault(
-            projectToken,
-            collateralToken
+            projectToken
         );
         if (vaultAddress == address(0)) {
             return 0; // Vault not found

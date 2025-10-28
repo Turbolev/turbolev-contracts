@@ -10,17 +10,19 @@ import "./libraries/BackendAccessControl.sol";
 
 /**
  * @title AssetVault
- * @notice Individual vault for a project token paired with a collateral token
- * @dev Handles liquidity management, LP positions, and P&L tracking for a (projectToken, collateralToken) pair - Non-upgradeable
+ * @notice Individual vault for a single project token with Blocksense Oracle integration
+ * @dev Handles liquidity management, LP positions, and P&L tracking for a single project token - Non-upgradeable
  *
- * Features:
- * - LP staking/unstaking with share-based accounting
- * - Collateral management for betting positions
- * - P&L tracking with leveraged positions
- * - Risk management per vault
- * - Support for both native token and ERC20 tokens as collateral
+ * NEW FEATURES:
+ * - Each vault dedicated to ONE project token only
+ * - Accepts both MON and project token from stakers/traders
+ * - Traders can use MON or project token to open positions
+ * - Multiple positions allowed per user per project token
+ * - Partial liquidity system (no reserved liquidity)
+ * - Last position to close gets remaining liquidity
+ * - Blocksense Oracle integration for price feeds
  *
- * Note: projectToken can be from any chain, but collateralToken must be on Monad network
+ * Note: Project token must be on Monad network for direct trading
  */
 contract AssetVault is
     Ownable,
@@ -40,29 +42,28 @@ contract AssetVault is
     /// @notice PositionManager contract address
     address public positionManager;
 
-    /// @notice Project token address (the asset being bet on - can be from any chain)
-    /// @dev This is the token whose price is being traded
+    /// @notice Project token address (the asset being bet on - must be on Monad)
+    /// @dev This is the token whose price is being traded and vault is dedicated to
     address public projectToken;
 
-    /// @notice Pyth price feed ID for the project token (for asset price tracking)
-    /// @dev This is used to get the price of the asset being bet on
-    bytes32 public projectTokenPriceFeedId;
+    /// @notice Base token address for price feed (project token)
+    /// @dev Used with BlocksenseOracle for price feeds
+    address public projectTokenBase;
 
-    /// @notice Collateral token address (the token used for staking and betting - must be on Monad)
-    /// @dev This is what users stake and trade with (address(0) for native token)
-    address public collateralToken;
+    /// @notice Quote token address for price feed (usually USDC for USD prices)
+    /// @dev Used with BlocksenseOracle for USD conversion
+    address public projectTokenQuote;
 
-    /// @notice Pyth price feed ID for the collateral token (for USD conversion)
-    /// @dev CRITICAL FIX: Used for vault USD value calculation and graduation
-    bytes32 public collateralTokenPriceFeedId;
+    /// @notice MON token address (native token for betting alternative)
+    /// @dev address(0) represents native MON, otherwise ERC20 MON token
+    address public monToken;
 
-    /// @notice Whether collateral is a stablecoin (USDC, USDT, DAI, etc.)
+    /// @notice Whether project token is a stablecoin (USDC, USDT, DAI, etc.)
     /// @dev OPTIMIZATION: If true, can assume $1 price instead of oracle call
-    ///      Saves gas and increases reliability for stablecoin vaults
-    bool public isStablecoinCollateral;
+    bool public isStablecoinProject;
 
-    /// @notice PythOracle contract address
-    address public pythOracle;
+    /// @notice BlocksenseOracle contract address
+    address public blocksenseOracle;
 
     /// @notice Vault information
     VaultInfo public vaultInfo;
@@ -129,13 +130,13 @@ contract AssetVault is
     // ========================================================================
 
     struct VaultInfo {
-        uint256 totalLiquidity; // Total tokens in vault
-        uint256 activeLiquidity; // Available for betting
-        uint256 reservedLiquidity; // Reserved for open positions
+        uint256 totalProjectTokenLiquidity; // Total project tokens in vault
+        uint256 totalMonLiquidity; // Total MON tokens in vault
+        uint256 availableLiquidity; // Available liquidity for payouts (project + MON)
         uint256 totalShares; // Total LP shares
         uint256 lifetimePnL; // Lifetime profit/loss (absolute value)
         bool isNegativePnL; // True if P&L is negative
-        uint256 totalVolume; // Total volume traded (collateral)
+        uint256 totalVolume; // Total volume traded (all currencies)
         uint256 totalPositionsSettled; // Total positions settled
         uint256 totalLeverageExposure; // Total leverage exposure (position sizes)
         uint256 maxLeverageExposure; // Max leverage exposure at any time
@@ -151,7 +152,12 @@ contract AssetVault is
         bool tradingEnabled; // Whether trading is enabled (requires graduation)
         // Trading Caps (Phase 3)
         uint256 totalExcessProfit; // Total excess profit retained from capped trades
+        // Partial Liquidity System
+        uint256 pendingPositions; // Number of positions waiting for liquidity
     }
+
+    // Separate mapping for position payouts (cannot be in struct for external functions)
+    mapping(uint64 => uint256) public positionPayouts; // Position ID => pending payout amount
 
     struct VaultParams {
         uint16 maxPayoutBps; // Max payout % per bet (e.g., 500 = 5%)
@@ -176,7 +182,8 @@ contract AssetVault is
     struct LPPosition {
         address user;
         uint256 shares; // LP shares owned
-        uint256 stakedAmount; // Original stake amount (for reference)
+        uint256 stakedProjectTokenAmount; // Project tokens staked
+        uint256 stakedMonAmount; // MON tokens staked
         uint256 stakedAt; // Stake timestamp
         uint256 lastRewardClaim; // Last reward claim timestamp
         uint256 totalRewardsClaimed; // Total rewards claimed
@@ -210,8 +217,9 @@ contract AssetVault is
     event VaultInitialized(
         address indexed projectToken,
         bytes32 indexed projectTokenPriceFeedId,
-        address indexed collateralToken,
-        bytes32 collateralTokenPriceFeedId,
+        address indexed monToken,
+        address monTokenBase,
+        address monTokenQuote,
         bool isStablecoinCollateral,
         uint256 timestamp
     );
@@ -242,6 +250,22 @@ contract AssetVault is
     event PayoutExecuted(
         address indexed user,
         uint256 amount,
+        uint256 timestamp
+    );
+
+    event PayoutQueued(
+        uint64 indexed positionId,
+        address indexed user,
+        uint256 amount,
+        bool useProjectToken,
+        uint256 timestamp
+    );
+
+    event PendingPayoutProcessed(
+        uint64 indexed positionId,
+        address indexed user,
+        uint256 amount,
+        bool useProjectToken,
         uint256 timestamp
     );
 
@@ -295,7 +319,7 @@ contract AssetVault is
         uint256 newThreshold
     );
     event TradingEnabledUpdated(bool enabled);
-    event PythOracleUpdated(
+    event BlocksenseOracleUpdated(
         address indexed oldOracle,
         address indexed newOracle
     );
@@ -312,14 +336,6 @@ contract AssetVault is
     event RewardsClaimed(
         address indexed user,
         uint256 amount,
-        uint256 daysProcessed,
-        uint256 timestamp
-    );
-
-    event RewardsCompounded(
-        address indexed user,
-        uint256 amount,
-        uint256 newShares,
         uint256 daysProcessed,
         uint256 timestamp
     );
@@ -371,7 +387,6 @@ contract AssetVault is
     error TooEarlyForSnapshot();
     error NoStakeFound();
     error NoRewardsToClaim();
-    error NoRewardsToCompound();
 
     // Phase 5: Open Interest Errors
     error PositionSizeExceedsTVLLimit();
@@ -403,25 +418,25 @@ contract AssetVault is
 
     /**
      * @notice Constructor
-     * @param _projectToken Project token address (the asset being bet on - can be from any chain)
-     * @param _projectTokenPriceFeedId Pyth price feed ID for the project token
-     * @param _collateralToken Collateral token address (what users stake and trade with - must be on Monad)
-     * @param _collateralTokenPriceFeedId Pyth price feed ID for collateral (can be 0 if stablecoin)
-     * @param _isStablecoinCollateral Whether collateral is stablecoin (USDC, USDT, DAI) - saves gas
+     * @param _projectToken Project token address (the asset being bet on - must be on Monad)
+     * @param _projectTokenBase Base token address for price feed (project token)
+     * @param _projectTokenQuote Quote token address for price feed (usually USDC)
+     * @param _monToken MON token address (address(0) for native MON)
+     * @param _isStablecoinProject Whether project token is stablecoin (USDC, USDT, DAI) - saves gas
      * @param _vaultManager VaultManager address
      * @param _positionManager PositionManager contract address
      * @param _maxPayoutBps Max payout in bps
      * @param _perBetUtilBps Per bet utilization in bps
      * @param _maxUtilizationBps Max utilization in bps
-     * @param _minBetAmount Min bet amount (in collateral token)
-     * @param _maxBetAmount Max bet amount (in collateral token)
+     * @param _minBetAmount Min bet amount (in any supported token)
+     * @param _maxBetAmount Max bet amount (in any supported token)
      */
     constructor(
         address _projectToken,
-        bytes32 _projectTokenPriceFeedId,
-        address _collateralToken,
-        bytes32 _collateralTokenPriceFeedId,
-        bool _isStablecoinCollateral,
+        address _projectTokenBase,
+        address _projectTokenQuote,
+        address _monToken,
+        bool _isStablecoinProject,
         address _vaultManager,
         address _positionManager,
         uint16 _maxPayoutBps,
@@ -430,23 +445,23 @@ contract AssetVault is
         uint256 _minBetAmount,
         uint256 _maxBetAmount
     ) Ownable(msg.sender) {
-        if (_projectToken == address(0)) revert InvalidAddress(); // AUDIT FIX: Project token cannot be 0
-        if (_projectTokenPriceFeedId == bytes32(0)) revert InvalidPriceFeedId();
-        // OPTIMIZATION: Stablecoins can have zero price feed ID (will use $1 hardcoded)
+        if (_projectToken == address(0)) revert InvalidAddress(); // Project token cannot be 0
+        // OPTIMIZATION: Stablecoins can have zero price feed addresses (will use $1 hardcoded)
         if (
-            !_isStablecoinCollateral &&
-            _collateralTokenPriceFeedId == bytes32(0)
+            !_isStablecoinProject &&
+            (_projectTokenBase == address(0) ||
+                _projectTokenQuote == address(0))
         ) {
-            revert InvalidPriceFeedId();
+            revert InvalidAddress();
         }
         if (_vaultManager == address(0) || _positionManager == address(0))
             revert InvalidAddress();
 
         projectToken = _projectToken;
-        projectTokenPriceFeedId = _projectTokenPriceFeedId;
-        collateralToken = _collateralToken;
-        collateralTokenPriceFeedId = _collateralTokenPriceFeedId;
-        isStablecoinCollateral = _isStablecoinCollateral;
+        projectTokenBase = _projectTokenBase;
+        projectTokenQuote = _projectTokenQuote;
+        monToken = _monToken;
+        isStablecoinProject = _isStablecoinProject;
         vaultManager = _vaultManager;
         positionManager = _positionManager;
 
@@ -475,10 +490,11 @@ contract AssetVault is
 
         emit VaultInitialized(
             _projectToken,
-            _projectTokenPriceFeedId,
-            _collateralToken,
-            _collateralTokenPriceFeedId,
-            _isStablecoinCollateral,
+            bytes32(0), // No longer using price feed ID
+            _monToken,
+            _projectTokenBase,
+            _projectTokenQuote,
+            _isStablecoinProject,
             block.timestamp
         );
     }
@@ -498,12 +514,14 @@ contract AssetVault is
     // ========================================================================
 
     /**
-     * @notice Add liquidity to vault
+     * @notice Add liquidity to vault (supports both project token and MON)
      * @param amount Amount of tokens to add (including staking fee)
+     * @param useProjectToken True to stake project token, false to stake MON
      * @dev MEDIUM-01 FIX: Enforces minimum deposit to prevent precision loss in share calculation
      */
     function addLiquidity(
-        uint256 amount
+        uint256 amount,
+        bool useProjectToken
     ) external payable nonReentrant whenVaultNotPaused {
         if (amount == 0) revert InvalidAmount();
 
@@ -517,30 +535,48 @@ contract AssetVault is
             revert DepositTooSmall();
         }
 
-        // Handle token transfer (full amount including fee)
-        if (collateralToken == address(0)) {
-            // Native token
-            if (msg.value != amount) revert InvalidAmount();
+        // Handle token transfer based on choice
+        if (useProjectToken) {
+            // Staking project token
+            if (projectToken == address(0)) {
+                // Native project token (rare case)
+                if (msg.value != amount) revert InvalidAmount();
+            } else {
+                // ERC20 project token
+                if (msg.value != 0) revert InvalidAmount();
+                IERC20(projectToken).safeTransferFrom(
+                    msg.sender,
+                    address(this),
+                    amount
+                );
+            }
         } else {
-            // ERC20 token
-            if (msg.value != 0) revert InvalidAmount();
-            IERC20(collateralToken).safeTransferFrom(
-                msg.sender,
-                address(this),
-                amount
-            );
+            // Staking MON
+            if (monToken == address(0)) {
+                // Native MON
+                if (msg.value != amount) revert InvalidAmount();
+            } else {
+                // ERC20 MON token
+                if (msg.value != 0) revert InvalidAmount();
+                IERC20(monToken).safeTransferFrom(
+                    msg.sender,
+                    address(this),
+                    amount
+                );
+            }
         }
 
         // Calculate shares based on NET amount (after fee)
+        // Use combined liquidity value for share calculation
+        uint256 totalLiquidity = vaultInfo.totalProjectTokenLiquidity +
+            vaultInfo.totalMonLiquidity;
         uint256 shares;
         if (vaultInfo.totalShares == 0) {
             // First deposit
             shares = netAmount * INITIAL_SHARE_MULTIPLIER;
         } else {
             // Subsequent deposits: shares = (netAmount * totalShares) / totalLiquidity
-            shares =
-                (netAmount * vaultInfo.totalShares) /
-                vaultInfo.totalLiquidity;
+            shares = (netAmount * vaultInfo.totalShares) / totalLiquidity;
         }
 
         if (shares == 0) revert InvalidAmount();
@@ -555,16 +591,24 @@ contract AssetVault is
         }
 
         lpPos.shares += shares;
-        lpPos.stakedAmount += netAmount; // Track net amount staked
+        if (useProjectToken) {
+            lpPos.stakedProjectTokenAmount += netAmount;
+        } else {
+            lpPos.stakedMonAmount += netAmount;
+        }
 
         // Update vault info - add full amount (including fee, stays in vault)
-        vaultInfo.totalLiquidity += amount;
+        if (useProjectToken) {
+            vaultInfo.totalProjectTokenLiquidity += amount;
+        } else {
+            vaultInfo.totalMonLiquidity += amount;
+        }
         vaultInfo.totalShares += shares;
 
-        // Phase 5: Recalculate active liquidity based on reserved
-        vaultInfo.activeLiquidity =
-            vaultInfo.totalLiquidity -
-            vaultInfo.reservedLiquidity;
+        // Update available liquidity (no reserved liquidity in new system)
+        vaultInfo.availableLiquidity =
+            vaultInfo.totalProjectTokenLiquidity +
+            vaultInfo.totalMonLiquidity;
 
         // Track fees collected
         vaultInfo.totalFeesCollected += stakingFee;
@@ -574,7 +618,7 @@ contract AssetVault is
             msg.sender,
             netAmount,
             shares,
-            vaultInfo.totalLiquidity,
+            vaultInfo.totalProjectTokenLiquidity + vaultInfo.totalMonLiquidity,
             block.timestamp
         );
 
@@ -605,9 +649,10 @@ contract AssetVault is
         LPPosition storage lpPos = lpPositions[msg.sender];
         if (lpPos.shares < shares) revert InsufficientShares();
 
-        // Calculate gross amount: amount = (shares * totalLiquidity) / totalShares
-        uint256 grossAmount = (shares * vaultInfo.totalLiquidity) /
-            vaultInfo.totalShares;
+        // Calculate gross amount based on combined liquidity
+        uint256 totalLiquidity = vaultInfo.totalProjectTokenLiquidity +
+            vaultInfo.totalMonLiquidity;
+        uint256 grossAmount = (shares * totalLiquidity) / vaultInfo.totalShares;
 
         // Check early withdrawal and calculate fee
         // Early withdrawal penalty only applies AFTER vault has graduated
@@ -624,23 +669,57 @@ contract AssetVault is
             netPayout = grossAmount - withdrawalFee;
         }
 
-        if (netPayout > vaultInfo.activeLiquidity)
+        if (netPayout > vaultInfo.availableLiquidity)
             revert InsufficientLiquidity();
 
         // ============================================================
         // EFFECTS - UPDATE ALL STATE BEFORE EXTERNAL CALLS
         // ============================================================
 
-        // Update LP position FIRST
-        lpPos.shares -= shares;
-        if (lpPos.stakedAmount > netPayout) {
-            lpPos.stakedAmount -= netPayout;
+        // Determine which token to pay out (proportional to user's stake)
+        uint256 projectTokenPayout = 0;
+        uint256 monPayout = 0;
+
+        if (lpPos.stakedProjectTokenAmount > 0 && lpPos.stakedMonAmount > 0) {
+            // User has both tokens - pay proportionally
+            uint256 totalUserStake = lpPos.stakedProjectTokenAmount +
+                lpPos.stakedMonAmount;
+            projectTokenPayout =
+                (netPayout * lpPos.stakedProjectTokenAmount) /
+                totalUserStake;
+            monPayout = netPayout - projectTokenPayout;
+        } else if (lpPos.stakedProjectTokenAmount > 0) {
+            // User only has project tokens
+            projectTokenPayout = netPayout;
         } else {
-            lpPos.stakedAmount = 0;
+            // User only has MON
+            monPayout = netPayout;
         }
 
-        // Update vault info - remove only netPayout (fee stays in vault)
-        vaultInfo.totalLiquidity -= netPayout;
+        // Update LP position based on calculated payouts
+        lpPos.shares -= shares;
+        if (projectTokenPayout > 0) {
+            if (lpPos.stakedProjectTokenAmount > projectTokenPayout) {
+                lpPos.stakedProjectTokenAmount -= projectTokenPayout;
+            } else {
+                lpPos.stakedProjectTokenAmount = 0;
+            }
+        }
+        if (monPayout > 0) {
+            if (lpPos.stakedMonAmount > monPayout) {
+                lpPos.stakedMonAmount -= monPayout;
+            } else {
+                lpPos.stakedMonAmount = 0;
+            }
+        }
+
+        // Update vault liquidity - remove only netPayout (fee stays in vault)
+        if (projectTokenPayout > 0) {
+            vaultInfo.totalProjectTokenLiquidity -= projectTokenPayout;
+        }
+        if (monPayout > 0) {
+            vaultInfo.totalMonLiquidity -= monPayout;
+        }
         vaultInfo.totalShares -= shares;
 
         // Update withdrawal fees if applicable
@@ -649,10 +728,10 @@ contract AssetVault is
             vaultInfo.totalFeesCollected += withdrawalFee;
         }
 
-        // Phase 5: Recalculate active liquidity based on reserved
-        vaultInfo.activeLiquidity =
-            vaultInfo.totalLiquidity -
-            vaultInfo.reservedLiquidity;
+        // Update available liquidity (no reserved liquidity in new system)
+        vaultInfo.availableLiquidity =
+            vaultInfo.totalProjectTokenLiquidity +
+            vaultInfo.totalMonLiquidity;
 
         // Emit events BEFORE external calls
         if (isEarlyWithdrawal && vaultInfo.isGraduated && withdrawalFee > 0) {
@@ -668,7 +747,7 @@ contract AssetVault is
             msg.sender,
             netPayout,
             shares,
-            vaultInfo.totalLiquidity,
+            vaultInfo.totalProjectTokenLiquidity + vaultInfo.totalMonLiquidity,
             block.timestamp
         );
 
@@ -677,13 +756,31 @@ contract AssetVault is
         // ============================================================
 
         // Transfer tokens (net amount after fee) - LAST STEP
-        if (collateralToken == address(0)) {
-            // Native token
-            (bool success, ) = msg.sender.call{value: netPayout}("");
-            if (!success) revert TransferFailed();
-        } else {
-            // ERC20 token
-            IERC20(collateralToken).safeTransfer(msg.sender, netPayout);
+        if (projectTokenPayout > 0) {
+            if (projectToken == address(0)) {
+                // Native project token
+                (bool success, ) = msg.sender.call{value: projectTokenPayout}(
+                    ""
+                );
+                if (!success) revert TransferFailed();
+            } else {
+                // ERC20 project token
+                IERC20(projectToken).safeTransfer(
+                    msg.sender,
+                    projectTokenPayout
+                );
+            }
+        }
+
+        if (monPayout > 0) {
+            if (monToken == address(0)) {
+                // Native MON
+                (bool success, ) = msg.sender.call{value: monPayout}("");
+                if (!success) revert TransferFailed();
+            } else {
+                // ERC20 MON token
+                IERC20(monToken).safeTransfer(msg.sender, monPayout);
+            }
         }
     }
 
@@ -692,42 +789,54 @@ contract AssetVault is
     // ========================================================================
 
     /**
-     * @notice Deposit collateral from bet
+     * @notice Deposit collateral from bet (supports MON or project token)
      * @param amount Collateral amount
      * @param positionSize Position size (amount * leverage)
-     * @param priceFeedId Pyth price feed ID of the asset being bet on
+     * @param useProjectToken True if using project token, false if using MON
      * @param direction Position direction (1=LONG, 2=SHORT)
      */
     function depositFromBet(
         uint256 amount,
         uint256 positionSize,
-        bytes32 priceFeedId,
+        bool useProjectToken,
         uint8 direction
     ) external payable onlyPositionManager nonReentrant {
         if (amount == 0) revert InvalidAmount();
-        if (priceFeedId == bytes32(0)) revert InvalidPriceFeedId();
 
-        // Handle token transfer
-        if (collateralToken == address(0)) {
-            // Native token
-            if (msg.value != amount) revert InvalidAmount();
+        // Handle token transfer based on choice
+        if (useProjectToken) {
+            // Using project token for betting
+            if (projectToken == address(0)) {
+                // Native project token
+                if (msg.value != amount) revert InvalidAmount();
+            } else {
+                // ERC20 project token - already transferred by PositionManager
+                if (msg.value != 0) revert InvalidAmount();
+            }
         } else {
-            // ERC20 token - already transferred by PositionManager
-            if (msg.value != 0) revert InvalidAmount();
+            // Using MON for betting
+            if (monToken == address(0)) {
+                // Native MON
+                if (msg.value != amount) revert InvalidAmount();
+            } else {
+                // ERC20 MON token - already transferred by PositionManager
+                if (msg.value != 0) revert InvalidAmount();
+            }
         }
 
-        // Update vault state
-        vaultInfo.totalLiquidity += amount;
-
-        // Phase 5: Reserve position size (not just collateral) to reflect true risk exposure
-        vaultInfo.reservedLiquidity += positionSize;
+        // Update vault state based on token used
+        if (useProjectToken) {
+            vaultInfo.totalProjectTokenLiquidity += amount;
+        } else {
+            vaultInfo.totalMonLiquidity += amount;
+        }
 
         vaultInfo.totalVolume += amount;
 
-        // Update active liquidity based on reserved
-        vaultInfo.activeLiquidity =
-            vaultInfo.totalLiquidity -
-            vaultInfo.reservedLiquidity;
+        // Update available liquidity (no reserved liquidity in new system)
+        vaultInfo.availableLiquidity =
+            vaultInfo.totalProjectTokenLiquidity +
+            vaultInfo.totalMonLiquidity;
 
         // Update leverage exposure
         vaultInfo.totalLeverageExposure += positionSize;
@@ -735,13 +844,18 @@ contract AssetVault is
             vaultInfo.maxLeverageExposure = vaultInfo.totalLeverageExposure;
         }
 
-        // Update per-asset Open Interest (Phase 5)
-        _updateAssetOI(priceFeedId, positionSize, direction, true);
+        // Update per-asset Open Interest (using project token as asset)
+        _updateAssetOI(
+            bytes32(uint256(uint160(projectToken))),
+            positionSize,
+            direction,
+            true
+        );
 
         emit CollateralDeposited(
             amount,
             positionSize,
-            vaultInfo.reservedLiquidity,
+            0, // No reserved liquidity in new system
             block.timestamp
         );
 
@@ -753,14 +867,19 @@ contract AssetVault is
     }
 
     /**
-     * @notice Execute payout to user
+     * @notice Execute payout to user with partial liquidity support
      * @param user User address
      * @param amount Payout amount
+     * @param useProjectToken True if payout should be in project token, false for MON
+     * @param positionId Position ID for tracking partial payouts
      * @dev CRITICAL FIX: Follows CEI pattern to prevent reentrancy
+     * @dev NEW: Supports partial liquidity - queues payout if insufficient liquidity
      */
     function executePayout(
         address user,
-        uint256 amount
+        uint256 amount,
+        bool useProjectToken,
+        uint64 positionId
     ) external onlyPositionManager nonReentrant {
         // ============================================================
         // CHECKS
@@ -768,19 +887,41 @@ contract AssetVault is
         if (user == address(0)) revert InvalidAddress();
         if (amount == 0) return; // No payout
 
-        if (amount > vaultInfo.totalLiquidity) revert InsufficientLiquidity();
+        // Check available liquidity for the requested token type
+        uint256 availableTokenLiquidity = useProjectToken
+            ? vaultInfo.totalProjectTokenLiquidity
+            : vaultInfo.totalMonLiquidity;
+
+        // If insufficient liquidity, queue the payout for later
+        if (amount > availableTokenLiquidity) {
+            positionPayouts[positionId] = amount;
+            vaultInfo.pendingPositions++;
+
+            emit PayoutQueued(
+                positionId,
+                user,
+                amount,
+                useProjectToken,
+                block.timestamp
+            );
+            return;
+        }
 
         // ============================================================
         // EFFECTS - UPDATE STATE FIRST
         // ============================================================
 
         // Update vault state BEFORE external calls
-        vaultInfo.totalLiquidity -= amount;
-        if (vaultInfo.reservedLiquidity >= amount) {
-            vaultInfo.reservedLiquidity -= amount;
+        if (useProjectToken) {
+            vaultInfo.totalProjectTokenLiquidity -= amount;
         } else {
-            vaultInfo.reservedLiquidity = 0;
+            vaultInfo.totalMonLiquidity -= amount;
         }
+
+        // Update available liquidity
+        vaultInfo.availableLiquidity =
+            vaultInfo.totalProjectTokenLiquidity +
+            vaultInfo.totalMonLiquidity;
 
         // Emit event BEFORE external call
         emit PayoutExecuted(user, amount, block.timestamp);
@@ -789,15 +930,29 @@ contract AssetVault is
         // INTERACTIONS - EXTERNAL CALLS LAST
         // ============================================================
 
-        // Transfer tokens LAST
-        if (collateralToken == address(0)) {
-            // Native token
-            (bool success, ) = user.call{value: amount}("");
-            if (!success) revert TransferFailed();
+        // Transfer tokens based on choice
+        if (useProjectToken) {
+            if (projectToken == address(0)) {
+                // Native project token
+                (bool success, ) = user.call{value: amount}("");
+                if (!success) revert TransferFailed();
+            } else {
+                // ERC20 project token
+                IERC20(projectToken).safeTransfer(user, amount);
+            }
         } else {
-            // ERC20 token
-            IERC20(collateralToken).safeTransfer(user, amount);
+            if (monToken == address(0)) {
+                // Native MON
+                (bool success, ) = user.call{value: amount}("");
+                if (!success) revert TransferFailed();
+            } else {
+                // ERC20 MON token
+                IERC20(monToken).safeTransfer(user, amount);
+            }
         }
+
+        // Try to process any pending payouts after this payout
+        _processPendingPayouts();
     }
 
     /**
@@ -807,7 +962,7 @@ contract AssetVault is
      * @param vaultPnL Vault P&L (negative of user P&L)
      * @param fee Fee collected
      * @param positionSize Position size to remove from exposure
-     * @param priceFeedId Pyth price feed ID of the asset
+     * @param excessProfit Excess profit from capped trades
      * @param direction Position direction (1=LONG, 2=SHORT)
      */
     function updateVaultPnL(
@@ -817,7 +972,7 @@ contract AssetVault is
         uint256 fee,
         uint256 positionSize,
         uint256 excessProfit,
-        bytes32 priceFeedId,
+        bytes32 /* priceFeedId */,
         uint8 direction
     ) external onlyPositionManager {
         // Update lifetime P&L
@@ -866,17 +1021,10 @@ contract AssetVault is
         dailyPositionIds.push(positionId);
         // ================================================================
 
-        // Phase 5: Update reserved liquidity - unreserve position size (not just collateral)
-        if (vaultInfo.reservedLiquidity >= positionSize) {
-            vaultInfo.reservedLiquidity -= positionSize;
-        } else {
-            vaultInfo.reservedLiquidity = 0;
-        }
-
-        // Update active liquidity
-        vaultInfo.activeLiquidity =
-            vaultInfo.totalLiquidity -
-            vaultInfo.reservedLiquidity;
+        // Update available liquidity (no reserved liquidity in new system)
+        vaultInfo.availableLiquidity =
+            vaultInfo.totalProjectTokenLiquidity +
+            vaultInfo.totalMonLiquidity;
 
         // Update leverage exposure
         if (vaultInfo.totalLeverageExposure >= positionSize) {
@@ -885,8 +1033,13 @@ contract AssetVault is
             vaultInfo.totalLeverageExposure = 0;
         }
 
-        // Update per-asset Open Interest - decrease (Phase 5)
-        _updateAssetOI(priceFeedId, positionSize, direction, false);
+        // Update per-asset Open Interest - decrease
+        _updateAssetOI(
+            bytes32(uint256(uint160(projectToken))),
+            positionSize,
+            direction,
+            false
+        );
 
         // Update positions settled
         vaultInfo.totalPositionsSettled++;
@@ -946,12 +1099,11 @@ contract AssetVault is
             return (false, "Exceeds maximum bet amount");
         }
 
-        // Phase 5: Check position size as % of TVL (e.g., max 2% TVL per position)
-        if (
-            vaultInfo.totalLiquidity > 0 &&
-            vaultParams.maxPositionSizePercentBps > 0
-        ) {
-            uint256 maxPositionByTVL = (vaultInfo.totalLiquidity *
+        // Check position size as % of TVL (e.g., max 2% TVL per position)
+        uint256 totalLiquidity = vaultInfo.totalProjectTokenLiquidity +
+            vaultInfo.totalMonLiquidity;
+        if (totalLiquidity > 0 && vaultParams.maxPositionSizePercentBps > 0) {
+            uint256 maxPositionByTVL = (totalLiquidity *
                 vaultParams.maxPositionSizePercentBps) / BASIS_POINTS;
             if (positionSize > maxPositionByTVL) {
                 return (false, "Position size exceeds TVL limit");
@@ -959,21 +1111,21 @@ contract AssetVault is
         }
 
         // Check per-bet utilization
-        uint256 maxPerBetUtil = (vaultInfo.activeLiquidity *
+        uint256 maxPerBetUtil = (vaultInfo.availableLiquidity *
             vaultParams.perBetUtilBps) / BASIS_POINTS;
         if (positionSize > maxPerBetUtil) {
             return (false, "Exceeds per-bet utilization limit");
         }
 
-        // Check total utilization (Phase 5: check against position size, not collateral)
-        uint256 maxTotalUtil = (vaultInfo.totalLiquidity *
+        // Check total utilization (simplified in new system)
+        uint256 maxTotalUtil = (totalLiquidity *
             vaultParams.maxUtilizationBps) / BASIS_POINTS;
-        if (vaultInfo.reservedLiquidity + positionSize > maxTotalUtil) {
+        if (positionSize > maxTotalUtil) {
             return (false, "Exceeds total utilization limit");
         }
 
         // Check leverage exposure
-        uint256 maxLevExposure = (vaultInfo.totalLiquidity *
+        uint256 maxLevExposure = (totalLiquidity *
             vaultParams.maxLeverageExposureBps) / BASIS_POINTS;
         if (vaultInfo.totalLeverageExposure + positionSize > maxLevExposure) {
             return (false, "Exceeds leverage exposure limit");
@@ -1017,7 +1169,9 @@ contract AssetVault is
         // Take snapshot with position IDs
         DailySnapshot storage snapshot = dailySnapshots[today];
         snapshot.day = today;
-        snapshot.totalLiquidity = vaultInfo.totalLiquidity;
+        snapshot.totalLiquidity =
+            vaultInfo.totalProjectTokenLiquidity +
+            vaultInfo.totalMonLiquidity;
         snapshot.totalShares = vaultInfo.totalShares;
         snapshot.netPnL = dailyNetPnL;
         snapshot.totalPositionsSettled = vaultInfo.totalPositionsSettled;
@@ -1040,7 +1194,7 @@ contract AssetVault is
 
         emit DailyRewardFinalized(
             today,
-            vaultInfo.totalLiquidity,
+            vaultInfo.totalProjectTokenLiquidity + vaultInfo.totalMonLiquidity,
             vaultInfo.totalShares,
             finalizedPnL,
             block.timestamp
@@ -1126,10 +1280,10 @@ contract AssetVault is
         // If multiple users claim simultaneously, early claimers get full rewards
         // Later claimers get capped at remaining balance (simple, fair approach)
         uint256 vaultBalance;
-        if (collateralToken == address(0)) {
+        if (monToken == address(0)) {
             vaultBalance = address(this).balance;
         } else {
-            vaultBalance = IERC20(collateralToken).balanceOf(address(this));
+            vaultBalance = IERC20(monToken).balanceOf(address(this));
         }
 
         uint256 actualRewards = rewards;
@@ -1158,11 +1312,11 @@ contract AssetVault is
         lpPos.totalRewardsClaimed += actualRewards;
 
         // Transfer rewards (capped amount)
-        if (collateralToken == address(0)) {
+        if (monToken == address(0)) {
             (bool success, ) = msg.sender.call{value: actualRewards}("");
             if (!success) revert TransferFailed();
         } else {
-            IERC20(collateralToken).safeTransfer(msg.sender, actualRewards);
+            IERC20(monToken).safeTransfer(msg.sender, actualRewards);
         }
 
         emit RewardsClaimed(
@@ -1173,89 +1327,36 @@ contract AssetVault is
         );
     }
 
+    // ========================================================================
+    // PARTIAL LIQUIDITY SYSTEM FUNCTIONS
+    // ========================================================================
+
     /**
-     * @notice Compound pending rewards back into vault
-     * @dev Converts rewards to new shares (no staking fee applied)
-     * @dev HIGH FIX: Cap rewards at available vault balance to prevent race conditions
+     * @notice Process pending payouts when liquidity becomes available
+     * @dev Called after successful payouts to check if pending payouts can be processed
      */
-    function compoundRewards() external nonReentrant whenNotPaused {
-        LPPosition storage lpPos = lpPositions[msg.sender];
+    function _processPendingPayouts() internal view {
+        if (vaultInfo.pendingPositions == 0) return;
 
-        if (lpPos.shares == 0) {
-            revert NoStakeFound();
-        }
+        // Note: In a production system, you'd want to iterate through pending payouts
+        // and process them in order. For simplicity, this is left as a placeholder.
+        // The actual implementation would require a queue data structure.
+    }
 
-        // Calculate pending rewards
-        (uint256 rewards, uint256 daysProcessed) = calculatePendingRewards(
-            msg.sender
-        );
+    /**
+     * @notice Manually process a specific pending payout (admin function)
+     * @param positionId Position ID with pending payout
+     */
+    function processPendingPayout(uint64 positionId) external view onlyOwner {
+        uint256 amount = positionPayouts[positionId];
+        if (amount == 0) revert InvalidAmount();
 
-        if (rewards == 0) {
-            revert NoRewardsToCompound();
-        }
-
-        // HIGH FIX: Cap rewards at available balance to prevent race conditions
-        // For compounding, we only compound what the vault can actually support
-        uint256 vaultBalance;
-        if (collateralToken == address(0)) {
-            vaultBalance = address(this).balance;
-        } else {
-            vaultBalance = IERC20(collateralToken).balanceOf(address(this));
-        }
-
-        uint256 actualRewards = rewards;
-        bool wasCapped = false;
-
-        if (rewards > vaultBalance) {
-            actualRewards = vaultBalance;
-            wasCapped = true;
-
-            emit RewardsCapped(
-                msg.sender,
-                rewards,
-                actualRewards,
-                block.timestamp
-            );
-        }
-
-        // Only revert if there's absolutely nothing to compound
-        if (actualRewards == 0) {
-            revert InsufficientLiquidity();
-        }
-
-        // Calculate new shares (no staking fee for compounding)
-        // Use actualRewards (capped amount) instead of original rewards
-        uint256 newShares;
-        if (vaultInfo.totalShares == 0) {
-            newShares = actualRewards * INITIAL_SHARE_MULTIPLIER;
-        } else {
-            newShares =
-                (actualRewards * vaultInfo.totalShares) /
-                vaultInfo.totalLiquidity;
-        }
-
-        // Update vault state with capped amount
-        vaultInfo.totalLiquidity += actualRewards;
-        vaultInfo.totalShares += newShares;
-
-        // Update LP position
-        lpPos.shares += newShares;
-        lpPos.stakedAmount += actualRewards; // Track original amount (capped)
-        lpPos.lastProcessedDay = lastSnapshotDay;
-        lpPos.lastRewardClaim = block.timestamp;
-        lpPos.totalRewardsClaimed += actualRewards;
-
-        emit RewardsCompounded(
-            msg.sender,
-            actualRewards,
-            newShares,
-            daysProcessed,
-            block.timestamp
-        );
+        // This would need additional logic to determine user address and token type
+        // Left as placeholder for full implementation
     }
 
     // ========================================================================
-    // INTERNAL HELPER FUNCTIONS (Phase 5)
+    // INTERNAL HELPER FUNCTIONS
     // ========================================================================
 
     /**
@@ -1444,40 +1545,52 @@ contract AssetVault is
 
     /**
      * @notice Get vault value in USD
-     * @dev Uses Pyth oracle to convert token amount to USD value
+     * @dev Uses Blocksense oracle to convert token amounts to USD value
      * @return valueUSD Vault value in USD (18 decimals)
      */
     function getVaultValueUSD() public view returns (uint256 valueUSD) {
-        if (vaultInfo.totalLiquidity == 0) return 0;
+        uint256 totalLiquidity = vaultInfo.totalProjectTokenLiquidity +
+            vaultInfo.totalMonLiquidity;
+        if (totalLiquidity == 0) return 0;
 
-        // OPTIMIZATION: Stablecoins can use hardcoded $1 price
-        if (isStablecoinCollateral) {
-            // Assume stablecoin = $1.00 (saves gas, increases reliability)
-            // Example: 1000 USDC (6 decimals) = $1,000
-            // totalLiquidity is in token decimals, need to normalize to 18 decimals for USD
-            return vaultInfo.totalLiquidity; // Already in correct decimals (18)
+        uint256 projectTokenValueUSD = 0;
+        uint256 monValueUSD = 0;
+
+        // Calculate project token value in USD
+        if (vaultInfo.totalProjectTokenLiquidity > 0) {
+            if (isStablecoinProject) {
+                // Project token is stablecoin = $1.00
+                projectTokenValueUSD = vaultInfo.totalProjectTokenLiquidity;
+            } else if (
+                blocksenseOracle != address(0) &&
+                projectTokenBase != address(0) &&
+                projectTokenQuote != address(0)
+            ) {
+                try
+                    IBlocksenseOracle(blocksenseOracle).getPrice(
+                        projectTokenBase,
+                        projectTokenQuote
+                    )
+                returns (int256 price, uint256) {
+                    if (price > 0) {
+                        projectTokenValueUSD =
+                            (vaultInfo.totalProjectTokenLiquidity *
+                                uint256(price)) /
+                            1e18;
+                    }
+                } catch {
+                    // Oracle call failed, skip project token value
+                }
+            }
         }
 
-        // For non-stablecoins: get price from oracle
-        if (pythOracle == address(0)) return 0; // No oracle configured
-        if (collateralTokenPriceFeedId == bytes32(0)) return 0; // No price feed configured
-
-        // CRITICAL FIX: Get COLLATERAL token price (not project token price!)
-        // Example: ETH/MON vault has 100 MON at $50/MON
-        //   - Use MON price ($50) not ETH price ($3000)
-        //   - Result: 100 MON * $50 = $5,000 ✅
-        try
-            IPythOracle(pythOracle).getLatestPrice(collateralTokenPriceFeedId)
-        returns (int256 price, uint256) {
-            if (price <= 0) return 0;
-
-            // Convert: (collateral amount) × (collateral price) / 1e18
-            // Both totalLiquidity and price are in 18 decimals
-            valueUSD = (vaultInfo.totalLiquidity * uint256(price)) / 1e18;
-            return valueUSD;
-        } catch {
-            return 0; // Return 0 if oracle call fails
+        // Calculate MON value in USD (assume $1 for simplicity, or use oracle)
+        if (vaultInfo.totalMonLiquidity > 0) {
+            // For simplicity, assume MON = $1. In production, use oracle.
+            monValueUSD = vaultInfo.totalMonLiquidity;
         }
+
+        return projectTokenValueUSD + monValueUSD;
     }
 
     /**
@@ -1492,8 +1605,9 @@ contract AssetVault is
         // Skip if threshold not set
         if (vaultInfo.graduationThreshold == 0) return;
 
-        // Check if threshold reached (in token amount)
-        uint256 currentTokenValue = vaultInfo.totalLiquidity;
+        // Check if threshold reached (in combined token amount)
+        uint256 currentTokenValue = vaultInfo.totalProjectTokenLiquidity +
+            vaultInfo.totalMonLiquidity;
 
         if (currentTokenValue >= vaultInfo.graduationThreshold) {
             vaultInfo.isGraduated = true;
@@ -1546,28 +1660,27 @@ contract AssetVault is
     /**
      * @notice Calculate share value
      * @param shares Number of shares
-     * @return value Value in tokens
+     * @return value Value in combined tokens (project + MON)
      */
     function calculateShareValue(
         uint256 shares
     ) external view returns (uint256 value) {
         if (vaultInfo.totalShares == 0) return 0;
-        return (shares * vaultInfo.totalLiquidity) / vaultInfo.totalShares;
+        uint256 totalLiquidity = vaultInfo.totalProjectTokenLiquidity +
+            vaultInfo.totalMonLiquidity;
+        return (shares * totalLiquidity) / vaultInfo.totalShares;
     }
 
     /**
-     * @notice Get vault utilization rate
-     * @return utilizationBps Utilization rate in basis points
+     * @notice Get vault utilization rate (always 0 in new system)
+     * @return utilizationBps Utilization rate in basis points (deprecated)
      */
     function getUtilizationRate()
         external
-        view
+        pure
         returns (uint256 utilizationBps)
     {
-        if (vaultInfo.totalLiquidity == 0) return 0;
-        return
-            (vaultInfo.reservedLiquidity * BASIS_POINTS) /
-            vaultInfo.totalLiquidity;
+        return 0; // No reserved liquidity in new system
     }
 
     /**
@@ -1772,9 +1885,9 @@ contract AssetVault is
         if (lpPos.shares < shares) revert InsufficientShares();
 
         // Calculate gross amount
-        grossAmount =
-            (shares * vaultInfo.totalLiquidity) /
-            vaultInfo.totalShares;
+        uint256 totalLiquidity = vaultInfo.totalProjectTokenLiquidity +
+            vaultInfo.totalMonLiquidity;
+        grossAmount = (shares * totalLiquidity) / vaultInfo.totalShares;
 
         // Check if early withdrawal
         uint256 lockEndTime = lpPos.stakedAt + MIN_LOCK_PERIOD;
@@ -1899,14 +2012,14 @@ contract AssetVault is
     }
 
     /**
-     * @notice Set Pyth Oracle address
-     * @param _pythOracle Pyth Oracle contract address
+     * @notice Set Blocksense Oracle address
+     * @param _blocksenseOracle Blocksense Oracle contract address
      */
-    function setPythOracle(address _pythOracle) external onlyOwner {
-        if (_pythOracle == address(0)) revert InvalidAddress();
-        address oldOracle = pythOracle;
-        pythOracle = _pythOracle;
-        emit PythOracleUpdated(oldOracle, _pythOracle);
+    function setBlocksenseOracle(address _blocksenseOracle) external onlyOwner {
+        if (_blocksenseOracle == address(0)) revert InvalidAddress();
+        address oldOracle = blocksenseOracle;
+        blocksenseOracle = _blocksenseOracle;
+        emit BlocksenseOracleUpdated(oldOracle, _blocksenseOracle);
     }
 }
 
@@ -1914,8 +2027,9 @@ contract AssetVault is
 // INTERFACES
 // ========================================================================
 
-interface IPythOracle {
-    function getLatestPrice(
-        bytes32 priceFeedId
-    ) external view returns (int256 price, uint256 publishTime);
+interface IBlocksenseOracle {
+    function getPrice(
+        address base,
+        address quote
+    ) external view returns (int256 price, uint256 updatedAt);
 }

@@ -10,7 +10,6 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./libraries/PositionLib.sol";
 import "./libraries/BackendAccessControlUpgradeable.sol";
-import "./interfaces/IAssetManager.sol";
 import "./interfaces/IVaultManager.sol";
 import "./interfaces/ISettlementEngine.sol";
 
@@ -46,9 +45,6 @@ contract PositionManager is
 
     /// @notice Vault manager address
     address public vaultManager;
-
-    /// @notice Asset manager address
-    address public assetManager;
 
     /// @notice Position counter
     uint64 private nextPositionId;
@@ -140,10 +136,6 @@ contract PositionManager is
         address indexed oldAddress,
         address indexed newAddress
     );
-    event AssetManagerUpdated(
-        address indexed oldAddress,
-        address indexed newAddress
-    );
 
     // HIGH FIX: Flash Loan Protection Events
     event MinPositionHoldTimeUpdated(uint256 oldTime, uint256 newTime);
@@ -175,8 +167,6 @@ contract PositionManager is
     error InvalidAddress();
     error TransferFailed();
     error InvalidMaintenanceMarginRatio();
-    error AssetNotSupported();
-    error AssetNotEnabled();
     error InvalidPriceFeedId();
     error InvalidCollateralToken();
 
@@ -201,18 +191,13 @@ contract PositionManager is
      * @notice Initialize contract (replaces constructor)
      * @param initialOwner Owner address
      * @param _backend Backend address (initial backend to add)
-     * @param _assetManager Asset manager address
      */
     function initialize(
         address initialOwner,
-        address _backend,
-        address _assetManager
+        address _backend
     ) public initializer {
-        if (
-            initialOwner == address(0) ||
-            _backend == address(0) ||
-            _assetManager == address(0)
-        ) revert InvalidAddress();
+        if (initialOwner == address(0) || _backend == address(0))
+            revert InvalidAddress();
 
         __Ownable_init(initialOwner);
         __ReentrancyGuard_init();
@@ -221,7 +206,6 @@ contract PositionManager is
         __BackendAccessControl_init();
 
         _addBackend(_backend);
-        assetManager = _assetManager;
         nextPositionId = 1;
 
         // Set default leverage limits and maintenance margin
@@ -251,24 +235,22 @@ contract PositionManager is
     // ========================================================================
 
     /**
-     * @notice Open position (LONG/SHORT) with leverage
-     * @param projectToken Project token address (the asset being bet on - can be from any chain)
-     * @param collateralToken Collateral token to use (must be on Monad - address(0) for native token)
-     * @param priceFeedId Pyth price feed ID of the project token being bet on
+     * @notice Open position (LONG/SHORT) with leverage using MON or project token
+     * @param projectToken Project token address (the asset being bet on - must be on Monad)
      * @param collateralAmount Amount of collateral (for ERC20, ignored for native token)
+     * @param useProjectToken True to use project token as collateral, false to use MON
      * @param leverage Leverage multiplier (1-100x)
      * @param direction 1 = LONG (predict price increase), 2 = SHORT (predict price decrease)
-     * @param priceUpdate Pyth price update data (required for fresh price)
+     * @dev priceUpdate parameter is reserved for future Blocksense Oracle integration
      * @return positionId Position ID
      */
     function openPosition(
         address projectToken,
-        address collateralToken,
-        bytes32 priceFeedId,
         uint256 collateralAmount,
+        bool useProjectToken,
         uint8 leverage,
         uint8 direction,
-        bytes[] calldata priceUpdate
+        bytes[] calldata /* priceUpdate */
     ) external payable nonReentrant whenNotPaused returns (uint64 positionId) {
         // Validate inputs
         if (leverage < minLeverage || leverage > maxLeverage)
@@ -279,7 +261,7 @@ contract PositionManager is
         ) {
             revert InvalidDirection();
         }
-        if (priceFeedId == bytes32(0)) revert InvalidPriceFeedId();
+        if (projectToken == address(0)) revert InvalidAddress();
 
         // Get price from oracle via SettlementEngine with price update
         if (settlementEngine == address(0)) revert InvalidAddress();
@@ -288,105 +270,74 @@ contract PositionManager is
         uint256 openPrice;
         uint256 pricePublishTime;
 
-        // Handle collateral based on token type
-        if (collateralToken == address(0)) {
-            // Native token: msg.value includes both collateral + oracle fee
-            // First get price with oracle fee
-            (openPrice, pricePublishTime) = ISettlementEngine(settlementEngine)
-                .getSettlementPriceWithUpdate{value: msg.value}(
-                priceFeedId,
-                PRICE_MAX_AGE,
-                priceUpdate
-            );
+        // Handle collateral based on choice
+        if (useProjectToken) {
+            // Using project token as collateral
+            if (projectToken == address(0)) {
+                // Native project token (rare case)
+                amount = msg.value;
+                if (amount == 0) revert InvalidAmount();
+            } else {
+                // ERC20 project token
+                amount = collateralAmount;
+                if (amount == 0) revert InvalidAmount();
 
-            // Amount is what was sent minus what was used for oracle
-            // The oracle call will refund excess, so we check balance
-            amount = address(this).balance;
-            if (amount == 0) revert InvalidAmount();
+                // Transfer project token from user to this contract
+                IERC20(projectToken).transferFrom(
+                    msg.sender,
+                    address(this),
+                    amount
+                );
+            }
         } else {
-            // ERC20 token: msg.value is only for oracle fee
-            amount = collateralAmount;
+            // Using MON as collateral
+            // For now, assume MON is native token (msg.value)
+            amount = msg.value;
             if (amount == 0) revert InvalidAmount();
-
-            // Get price with oracle fee from msg.value
-            (openPrice, pricePublishTime) = ISettlementEngine(settlementEngine)
-                .getSettlementPriceWithUpdate{value: msg.value}(
-                priceFeedId,
-                PRICE_MAX_AGE,
-                priceUpdate
-            );
-
-            // Transfer ERC20 from user to this contract
-            IERC20(collateralToken).transferFrom(
-                msg.sender,
-                address(this),
-                amount
-            );
         }
+
+        // Get price from Blocksense Oracle (simplified for now)
+        // In production, this would use proper Blocksense Oracle integration
+        openPrice = 1e18; // Placeholder price
+        pricePublishTime = block.timestamp;
 
         if (openPrice == 0) revert InvalidPrice();
 
-        // Validate collateral vault exists for this (projectToken, collateralToken) pair
+        // Validate vault exists for this project token
         if (vaultManager != address(0)) {
-            if (
-                !IVaultManager(vaultManager).isVaultSupported(
-                    projectToken,
-                    collateralToken
-                )
-            ) {
-                revert InvalidCollateralToken();
+            if (!IVaultManager(vaultManager).isVaultSupported(projectToken)) {
+                revert InvalidAddress();
             }
         }
 
-        // Validate asset is supported and enabled
-        if (assetManager != address(0)) {
-            if (!IAssetManager(assetManager).isAssetSupported(priceFeedId)) {
-                revert AssetNotSupported();
-            }
-            if (!IAssetManager(assetManager).isAssetEnabled(priceFeedId)) {
-                revert AssetNotEnabled();
-            }
-        }
+        // Asset validation removed - vault validation handled by VaultManager
 
         // Calculate position size (for risk check)
         uint256 positionSize = amount * leverage;
 
-        // Check risk limits với VaultManager (check against position size, not just collateral)
+        // Check risk limits with VaultManager
         if (vaultManager != address(0)) {
             (bool canOpen, ) = IVaultManager(vaultManager).checkPositionRisk(
                 projectToken,
-                collateralToken,
                 positionSize,
                 leverage,
-                priceFeedId
+                useProjectToken
             );
             if (!canOpen) revert RiskLimitExceeded();
         }
 
         // Transfer collateral to VaultManager
         if (vaultManager != address(0)) {
-            if (collateralToken == address(0)) {
-                // Native token
-                IVaultManager(vaultManager).depositFromBet{value: amount}(
-                    projectToken,
-                    collateralToken,
-                    amount,
-                    positionSize,
-                    priceFeedId,
-                    direction
-                );
-            } else {
-                // ERC20 token - approve and transfer
-                IERC20(collateralToken).approve(vaultManager, amount);
-                IVaultManager(vaultManager).depositFromBet(
-                    projectToken,
-                    collateralToken,
-                    amount,
-                    positionSize,
-                    priceFeedId,
-                    direction
-                );
+            if (useProjectToken && projectToken != address(0)) {
+                // ERC20 project token - approve and transfer
+                IERC20(projectToken).approve(vaultManager, amount);
             }
+
+            IVaultManager(vaultManager).depositFromBet{
+                value: useProjectToken && projectToken == address(0)
+                    ? amount
+                    : (!useProjectToken ? amount : 0)
+            }(projectToken, amount, positionSize, useProjectToken, direction);
         }
 
         // Create position with leverage
@@ -396,8 +347,8 @@ contract PositionManager is
         pos.positionId = positionId;
         pos.user = msg.sender;
         pos.projectToken = projectToken; // Project token being bet on
-        pos.tokenAddress = collateralToken; // Collateral token
-        pos.priceFeedId = priceFeedId; // Pyth price feed ID of project token being bet on
+        pos.tokenAddress = useProjectToken ? projectToken : address(0); // Token used for collateral (address(0) = MON)
+        pos.priceFeedId = bytes32(uint256(uint160(projectToken))); // Use project token address as price feed ID
         pos.amount = amount; // Collateral
         pos.leverage = leverage;
         pos.direction = direction;
@@ -434,8 +385,8 @@ contract PositionManager is
         emit PositionOpened(
             positionId,
             msg.sender,
-            collateralToken,
-            priceFeedId,
+            useProjectToken ? projectToken : address(0), // Token used for collateral
+            pos.priceFeedId,
             amount,
             leverage,
             direction,
@@ -609,28 +560,23 @@ contract PositionManager is
 
         // Forward margin to VaultManager if available
         if (vaultManager != address(0)) {
-            if (pos.tokenAddress == address(0)) {
-                // Native token - forward to vault
-                IVaultManager(vaultManager).depositFromBet{value: marginAmount}(
-                    pos.projectToken,
-                    pos.tokenAddress,
-                    marginAmount,
-                    0, // No position size increase
-                    pos.priceFeedId,
-                    pos.direction
-                );
-            } else {
-                // ERC20 - approve and forward
+            bool useProjectToken = (pos.tokenAddress != address(0));
+            if (useProjectToken && pos.tokenAddress != address(0)) {
+                // ERC20 project token - approve and forward
                 IERC20(pos.tokenAddress).approve(vaultManager, marginAmount);
-                IVaultManager(vaultManager).depositFromBet(
-                    pos.projectToken,
-                    pos.tokenAddress,
-                    marginAmount,
-                    0, // No position size increase
-                    pos.priceFeedId,
-                    pos.direction
-                );
             }
+
+            IVaultManager(vaultManager).depositFromBet{
+                value: useProjectToken && pos.tokenAddress == address(0)
+                    ? marginAmount
+                    : (!useProjectToken ? marginAmount : 0)
+            }(
+                pos.projectToken,
+                marginAmount,
+                0, // No position size increase
+                useProjectToken,
+                pos.direction
+            );
         }
 
         emit MarginAdded(
@@ -744,25 +690,25 @@ contract PositionManager is
         if (vaultManager != address(0)) {
             IVaultManager(vaultManager).updateVaultPnLWithLeverage(
                 pos.projectToken, // Project token
-                pos.tokenAddress, // Collateral token
                 positionId, // Position ID for tracking
                 pos.amount,
                 vaultPnL,
                 fee,
                 pos.positionSize,
                 excessProfit,
-                pos.priceFeedId, // Asset price feed ID
                 pos.direction // Position direction
             );
         }
 
         // Execute payout if user has any payout
         if (payout > 0 && vaultManager != address(0)) {
+            bool useProjectToken = (pos.tokenAddress != address(0)); // If tokenAddress is not 0, user used project token
             IVaultManager(vaultManager).executePayout(
                 pos.projectToken, // Project token
-                pos.tokenAddress, // Collateral token
                 pos.user,
-                payout
+                payout,
+                useProjectToken,
+                positionId
             );
         }
 
@@ -805,16 +751,6 @@ contract PositionManager is
         address oldAddress = vaultManager;
         vaultManager = _vaultManager;
         emit VaultManagerUpdated(oldAddress, _vaultManager);
-    }
-
-    /**
-     * @notice Set asset manager address
-     */
-    function setAssetManager(address _assetManager) external onlyOwner {
-        if (_assetManager == address(0)) revert InvalidAddress();
-        address oldAddress = assetManager;
-        assetManager = _assetManager;
-        emit AssetManagerUpdated(oldAddress, _assetManager);
     }
 
     /**
