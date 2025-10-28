@@ -131,35 +131,6 @@ contract VaultManagerHelper {
     }
 
     /**
-     * @notice Get all graduated vaults
-     * @return graduated Array of graduated vault addresses
-     */
-    function getGraduatedVaults() external view returns (address[] memory graduated) {
-        address[] memory vaults = _getAllVaults();
-        uint256 count = 0;
-
-        for (uint256 i = 0; i < vaults.length; i++) {
-            IAssetVault.VaultInfo memory info = IAssetVault(vaults[i]).getVaultInfo();
-            if (info.isGraduated) {
-                count++;
-            }
-        }
-
-        graduated = new address[](count);
-        uint256 index = 0;
-
-        for (uint256 i = 0; i < vaults.length; i++) {
-            IAssetVault.VaultInfo memory info = IAssetVault(vaults[i]).getVaultInfo();
-            if (info.isGraduated) {
-                graduated[index] = vaults[i];
-                index++;
-            }
-        }
-
-        return graduated;
-    }
-
-    /**
      * @notice Get total USD value across all vaults
      * @return totalUSD Total value in USD (18 decimals)
      */

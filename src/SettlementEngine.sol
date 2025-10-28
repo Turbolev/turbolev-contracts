@@ -234,7 +234,7 @@ contract SettlementEngine is
             // Won: User gets collateral + profit - house edge
             uint256 profit = uint256(pnl);
 
-            // Apply profit cap (Phase 3)
+            // Apply profit cap
             // Cap 1: 3× collateral (stored in position at open time)
             uint256 cap1 = position.maxProfitCap; // 3× collateral
 

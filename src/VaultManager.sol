@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.22;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/utils/Pausable.sol";
-import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "./interfaces/IAssetVault.sol";
 import "./AssetVault.sol";
@@ -12,7 +13,7 @@ import "./AssetVault.sol";
 /**
  * @title VaultManager
  * @notice Factory contract to create and manage multiple AssetVault instances
- * @dev Manages vaults for individual project tokens with Blocksense Oracle - Non-upgradeable
+ * @dev Manages vaults for individual project tokens with Blocksense Oracle - UUPS Upgradeable
  *
  * NEW FEATURES:
  * - Create vaults for individual project tokens (one vault per project token)
@@ -22,7 +23,13 @@ import "./AssetVault.sol";
  * - Partial liquidity system support
  * - Blocksense Oracle integration
  */
-contract VaultManager is Ownable, ReentrancyGuard, Pausable {
+contract VaultManager is
+    Initializable,
+    OwnableUpgradeable,
+    ReentrancyGuardUpgradeable,
+    PausableUpgradeable,
+    UUPSUpgradeable
+{
     // ========================================================================
     // STATE VARIABLES
     // ========================================================================
@@ -50,12 +57,7 @@ contract VaultManager is Ownable, ReentrancyGuard, Pausable {
     // EVENTS
     // ========================================================================
 
-    event VaultCreated(
-        address indexed projectToken,
-        address indexed monToken,
-        address vaultAddress,
-        uint256 timestamp
-    );
+    event VaultCreated(address indexed projectToken, address vaultAddress, uint256 timestamp);
 
     event PositionManagerUpdated(address indexed oldAddress, address indexed newAddress);
 
@@ -100,15 +102,25 @@ contract VaultManager is Ownable, ReentrancyGuard, Pausable {
     }
 
     // ========================================================================
-    // CONSTRUCTOR
+    // CONSTRUCTOR / INITIALIZER
     // ========================================================================
 
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
     /**
-     * @notice Constructor
+     * @notice Initialize contract (replaces constructor)
      * @param initialOwner Owner address
      */
-    constructor(address initialOwner) Ownable(initialOwner) {
+    function initialize(address initialOwner) public initializer {
         if (initialOwner == address(0)) revert InvalidAddress();
+
+        __Ownable_init(initialOwner);
+        __ReentrancyGuard_init();
+        __Pausable_init();
+        __UUPSUpgradeable_init();
     }
 
     // ========================================================================
@@ -120,7 +132,6 @@ contract VaultManager is Ownable, ReentrancyGuard, Pausable {
      * @param _projectToken Project token address
      * @param _projectTokenBase Base token address for price feed
      * @param _projectTokenQuote Quote token address for price feed
-     * @param _monToken MON token address (unused, kept for compatibility)
      * @param _maxPayoutBps Max payout in bps
      * @param _perBetUtilBps Per bet utilization in bps
      * @param _maxUtilizationBps Max utilization in bps
@@ -133,7 +144,6 @@ contract VaultManager is Ownable, ReentrancyGuard, Pausable {
         address _projectToken,
         address _projectTokenBase,
         address _projectTokenQuote,
-        address _monToken,
         uint16 _maxPayoutBps,
         uint16 _perBetUtilBps,
         uint16 _maxUtilizationBps,
@@ -172,7 +182,7 @@ contract VaultManager is Ownable, ReentrancyGuard, Pausable {
         isValidVault[vaultAddress] = true;
         vaultProjectToken[vaultAddress] = _projectToken;
 
-        emit VaultCreated(_projectToken, _monToken, vaultAddress, block.timestamp);
+        emit VaultCreated(_projectToken, vaultAddress, block.timestamp);
 
         return vaultAddress;
     }
@@ -387,6 +397,11 @@ contract VaultManager is Ownable, ReentrancyGuard, Pausable {
         _unpause();
     }
 
+    /**
+     * @notice Authorize upgrade (UUPS pattern)
+     */
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner { }
+
     // ========================================================================
     // VIEW FUNCTIONS
     // ========================================================================
@@ -407,5 +422,12 @@ contract VaultManager is Ownable, ReentrancyGuard, Pausable {
     function getTokenBalance(address token) external view returns (uint256 balance) {
         if (token == address(0)) revert InvalidAddress();
         return IERC20(token).balanceOf(address(this));
+    }
+
+    /**
+     * @notice Get contract version
+     */
+    function version() external pure returns (string memory) {
+        return "1.0.0-vault-manager";
     }
 }
