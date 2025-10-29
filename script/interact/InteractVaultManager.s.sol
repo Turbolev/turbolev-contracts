@@ -138,9 +138,6 @@ contract InteractVaultManager is DeployHelper {
         address projectToken,
         address projectTokenBase,
         address projectTokenQuote,
-        uint16 maxPayoutBps,
-        uint16 perBetUtilBps,
-        uint16 maxUtilizationBps,
         uint256 minBetAmount,
         uint256 maxBetAmount,
         uint256 graduationThreshold
@@ -149,25 +146,13 @@ contract InteractVaultManager is DeployHelper {
         console.log("Project Token:", projectToken);
         console.log("Project Token Base:", projectTokenBase);
         console.log("Project Token Quote:", projectTokenQuote);
-        console.log("Max Payout BPS:", maxPayoutBps);
-        console.log("Per Bet Util BPS:", perBetUtilBps);
-        console.log("Max Utilization BPS:", maxUtilizationBps);
         console.log("Min Bet Amount:", minBetAmount);
         console.log("Max Bet Amount:", maxBetAmount);
         console.log("Graduation Threshold:", graduationThreshold);
 
         vm.startBroadcast(deployer);
-        address vaultAddr = vaultMgr.createVault(
-            projectToken,
-            projectTokenBase,
-            projectTokenQuote,
-            maxPayoutBps,
-            perBetUtilBps,
-            maxUtilizationBps,
-            minBetAmount,
-            maxBetAmount,
-            graduationThreshold
-        );
+        address vaultAddr =
+            vaultMgr.createVault(projectToken, minBetAmount, maxBetAmount, graduationThreshold);
         console.log("Vault created at:", vaultAddr);
         vm.stopBroadcast();
     }
@@ -421,12 +406,8 @@ contract InteractVaultManager is DeployHelper {
 
         AssetVault.VaultParams memory params = vault.getVaultParams();
 
-        console.log("Max Payout BPS:", params.maxPayoutBps);
-        console.log("Per Bet Util BPS:", params.perBetUtilBps);
-        console.log("Max Utilization BPS:", params.maxUtilizationBps);
         console.log("Min Bet Amount:", params.minBetAmount);
         console.log("Max Bet Amount:", params.maxBetAmount);
-        console.log("Max Leverage Exposure BPS:", params.maxLeverageExposureBps);
         console.log("Max Position Size Percent BPS:", params.maxPositionSizePercentBps);
         console.log("Min Liquidity Amount:", params.minLiquidityAmount);
     }
@@ -653,12 +634,8 @@ contract InteractVaultManager is DeployHelper {
      */
     function updateVaultParams(
         address projectToken,
-        uint16 maxPayoutBps,
-        uint16 perBetUtilBps,
-        uint16 maxUtilizationBps,
         uint256 minBetAmount,
         uint256 maxBetAmount,
-        uint16 maxLeverageExposureBps,
         uint16 maxPositionSizePercentBps
     ) public {
         console.log("\n=== Update Vault Parameters ===");
@@ -668,15 +645,7 @@ contract InteractVaultManager is DeployHelper {
         AssetVault vault = AssetVault(payable(vaultAddr));
 
         vm.startBroadcast(deployer);
-        vault.updateVaultParams(
-            maxPayoutBps,
-            perBetUtilBps,
-            maxUtilizationBps,
-            minBetAmount,
-            maxBetAmount,
-            maxLeverageExposureBps,
-            maxPositionSizePercentBps
-        );
+        vault.updateVaultParams(minBetAmount, maxBetAmount, maxPositionSizePercentBps);
         console.log("Vault parameters updated successfully");
         vm.stopBroadcast();
     }

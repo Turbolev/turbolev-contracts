@@ -30,15 +30,14 @@ contract InteractBlocksenseOracle is DeployHelper {
     // ========================================================================
 
     /**
-     * @notice Get price for a base/quote pair
-     * @dev Usage: forge script script/interact/InteractBlocksenseOracle.s.sol:InteractBlocksenseOracle --sig "getPrice(address,address)" <base> <quote> --rpc-url $RPC
+     * @notice Get price from CLAggregatorAdapter
+     * @dev Usage: forge script script/interact/InteractBlocksenseOracle.s.sol:InteractBlocksenseOracle --sig "getPrice(address)" <adapter> --rpc-url $RPC
      */
-    function getPrice(address base, address quote) public view {
+    function getPrice(address adapter) public view {
         console.log("\n=== Get Price ===");
-        console.log("Base:", base);
-        console.log("Quote:", quote);
+        console.log("Adapter:", adapter);
 
-        try oracle.getPrice(base, quote) returns (int256 price, uint256 updatedAt) {
+        try oracle.getPrice(adapter) returns (int256 price, uint256 updatedAt) {
             console.log("Price:", uint256(price));
             console.log("Updated At:", updatedAt);
             console.log("Age (seconds):", block.timestamp - updatedAt);
@@ -50,12 +49,11 @@ contract InteractBlocksenseOracle is DeployHelper {
     /**
      * @notice Get price unsafe (no staleness check)
      */
-    function getPriceUnsafe(address base, address quote) public view {
+    function getPriceUnsafe(address adapter) public view {
         console.log("\n=== Get Price Unsafe ===");
-        console.log("Base:", base);
-        console.log("Quote:", quote);
+        console.log("Adapter:", adapter);
 
-        try oracle.getPriceUnsafe(base, quote) returns (int256 price, uint256 updatedAt) {
+        try oracle.getPriceUnsafe(adapter) returns (int256 price, uint256 updatedAt) {
             console.log("Price:", uint256(price));
             console.log("Updated At:", updatedAt);
         } catch Error(string memory reason) {
@@ -66,16 +64,13 @@ contract InteractBlocksenseOracle is DeployHelper {
     /**
      * @notice Get price with custom max age
      */
-    function getPriceNoOlderThan(address base, address quote, uint256 maxAge) public {
+    function getPriceNoOlderThan(address adapter, uint256 maxAge) public {
         console.log("\n=== Get Price No Older Than ===");
-        console.log("Base:", base);
-        console.log("Quote:", quote);
+        console.log("Adapter:", adapter);
         console.log("Max Age:", maxAge);
 
         vm.startBroadcast(deployer);
-        try oracle.getPriceNoOlderThan(base, quote, maxAge) returns (
-            int256 price, uint256 updatedAt
-        ) {
+        try oracle.getPriceNoOlderThan(adapter, maxAge) returns (int256 price, uint256 updatedAt) {
             console.log("Price:", uint256(price));
             console.log("Updated At:", updatedAt);
         } catch Error(string memory reason) {
@@ -89,8 +84,6 @@ contract InteractBlocksenseOracle is DeployHelper {
      */
     function viewConfig() public view {
         console.log("\n=== Oracle Configuration ===");
-        console.log("Registry:");
-        console.logAddress(address(oracle.registry()));
         console.log("Max Price Age:", oracle.maxPriceAge());
         console.log("Max Price Change BPS:", oracle.maxPriceChangeBps());
         console.log("Min Price Update Interval:", oracle.minPriceUpdateInterval());
@@ -103,19 +96,6 @@ contract InteractBlocksenseOracle is DeployHelper {
     // ========================================================================
     // ADMIN FUNCTIONS
     // ========================================================================
-
-    /**
-     * @notice Set registry contract address
-     */
-    function setRegistryContract(address newRegistry) public {
-        console.log("\n=== Set Registry Contract ===");
-        console.log("New Registry:", newRegistry);
-
-        vm.startBroadcast(deployer);
-        oracle.setRegistryContract(newRegistry);
-        console.log("Registry updated successfully");
-        vm.stopBroadcast();
-    }
 
     /**
      * @notice Set max price age

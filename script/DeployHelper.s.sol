@@ -51,9 +51,6 @@ contract DeployHelper is Script {
     uint256 public constant MIN_POSITION_HOLD_TIME = 60; // 60 seconds
 
     // Vault config
-    uint16 public constant MAX_PAYOUT_BPS = 500; // 5%
-    uint16 public constant PER_BET_UTIL_BPS = 1000; // 10%
-    uint16 public constant MAX_UTIL_BPS = 8000; // 80%
     uint256 public constant GRADUATION_THRESHOLD = 10_000 ether;
 
     // ========================================================================

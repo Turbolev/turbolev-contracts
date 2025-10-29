@@ -5,6 +5,7 @@ import "forge-std/Script.sol";
 import "./DeployHelper.s.sol";
 
 import "../src/VaultManager.sol";
+import "../src/VaultManagerHelper.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 /**
@@ -40,6 +41,12 @@ contract DeployVaultManager is DeployHelper {
 
         _logDeployment("VaultManager", vaultManager);
         _logDeployment("VaultManager Implementation", impl);
+
+        // Deploy VaultManagerHelper
+        console.log("\nDeploying VaultManagerHelper...");
+        address vaultManagerHelper = address(new VaultManagerHelper(vaultManager));
+
+        _logDeployment("VaultManagerHelper", vaultManagerHelper);
 
         vm.stopBroadcast();
     }

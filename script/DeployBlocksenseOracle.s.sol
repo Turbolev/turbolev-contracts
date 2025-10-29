@@ -26,7 +26,6 @@ contract DeployBlocksenseOracle is DeployHelper {
         console.log("\nDeploying BlocksenseOracle...");
         console.log("Chain ID:", block.chainid);
         console.log("Owner:", owner);
-        console.log("Registry:", blocksenseRegistry);
         console.log("Max Price Age:", ORACLE_MAX_PRICE_AGE);
 
         // Deploy implementation
@@ -35,7 +34,7 @@ contract DeployBlocksenseOracle is DeployHelper {
 
         // Prepare initialization data
         bytes memory initData = abi.encodeWithSelector(
-            BlocksenseOracle.initialize.selector, owner, blocksenseRegistry, ORACLE_MAX_PRICE_AGE
+            BlocksenseOracle.initialize.selector, owner, ORACLE_MAX_PRICE_AGE
         );
 
         // Deploy proxy
