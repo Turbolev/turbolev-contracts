@@ -5,6 +5,7 @@ import "forge-std/Script.sol";
 import "./DeployHelper.s.sol";
 
 import "../src/VaultManager.sol";
+import "../src/VaultManagerHelper.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 /**
@@ -14,6 +15,14 @@ import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 contract DeployVaultManager is DeployHelper {
     function run() public {
         vm.startBroadcast(deployer);
+
+        // Check if already deployed
+        if (_isContractDeployed(vaultManager)) {
+            console.log("\nVaultManager already deployed!");
+            console.log("Using existing address:", vaultManager);
+            vm.stopBroadcast();
+            return;
+        }
 
         console.log("\nDeploying VaultManager...");
         console.log("Owner:", owner);
@@ -32,6 +41,12 @@ contract DeployVaultManager is DeployHelper {
 
         _logDeployment("VaultManager", vaultManager);
         _logDeployment("VaultManager Implementation", impl);
+
+        // Deploy VaultManagerHelper
+        console.log("\nDeploying VaultManagerHelper...");
+        address vaultManagerHelper = address(new VaultManagerHelper(vaultManager));
+
+        _logDeployment("VaultManagerHelper", vaultManagerHelper);
 
         vm.stopBroadcast();
     }

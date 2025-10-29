@@ -165,9 +165,10 @@ forge script script/interact/InteractPositionManager.s.sol:InteractPositionManag
 
 ### 4. InteractVaultManager.s.sol
 
-Interact with VaultManager contract.
+Interact with VaultManager contract and individual vaults. 
 
-**View Functions:**
+
+#### VaultManager View Functions:
 ```bash
 # View configuration
 forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
@@ -179,18 +180,181 @@ forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
   --sig "getAllVaults()" \
   --rpc-url $RPC_URL
 
+# Get vault for project token
+forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
+  --sig "getVault(address)" 0xPROJECT_TOKEN \
+  --rpc-url $RPC_URL
+
+# Check if vault is supported
+forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
+  --sig "isVaultSupported(address)" 0xPROJECT_TOKEN \
+  --rpc-url $RPC_URL
+
 # Check if vault is graduated
 forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
   --sig "isVaultGraduated(address)" 0xVAULT \
   --rpc-url $RPC_URL
+
+# Check position risk
+forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
+  --sig "checkPositionRisk(address,uint256,uint8)" 0xPROJECT_TOKEN 1000000000000000000 10 \
+  --rpc-url $RPC_URL
 ```
 
-**Admin Functions:**
+#### Vault LP Functions (Liquidity Provider):
+```bash
+# Get LP position for user
+forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
+  --sig "getLPPosition(address,address)" 0xPROJECT_TOKEN 0xUSER \
+  --rpc-url $RPC_URL
+
+# Add liquidity to vault (approve tokens first!)
+forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
+  --sig "addLiquidity(address,uint256)" 0xPROJECT_TOKEN 1000000000000000000 \
+  --rpc-url $RPC_URL \
+  --broadcast
+
+# Remove liquidity from vault
+forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
+  --sig "removeLiquidity(address,uint256)" 0xPROJECT_TOKEN 1000000000000000000 \
+  --rpc-url $RPC_URL \
+  --broadcast
+
+# Claim rewards
+forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
+  --sig "claimRewards(address)" 0xPROJECT_TOKEN \
+  --rpc-url $RPC_URL \
+  --broadcast
+
+# Calculate withdrawal amount (with fee)
+forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
+  --sig "calculateWithdrawalAmount(address,address,uint256)" 0xPROJECT_TOKEN 0xUSER 1000000000000000000 \
+  --rpc-url $RPC_URL
+
+# Get remaining lock time
+forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
+  --sig "getRemainingLockTime(address,address)" 0xPROJECT_TOKEN 0xUSER \
+  --rpc-url $RPC_URL
+```
+
+#### Vault Info View Functions:
+```bash
+# Get complete vault info
+forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
+  --sig "getVaultInfo(address)" 0xPROJECT_TOKEN \
+  --rpc-url $RPC_URL
+
+# Get vault parameters (risk settings)
+forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
+  --sig "getVaultParams(address)" 0xPROJECT_TOKEN \
+  --rpc-url $RPC_URL
+
+# Get fee configuration
+forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
+  --sig "getFeeConfig(address)" 0xPROJECT_TOKEN \
+  --rpc-url $RPC_URL
+
+# Get all LPs in vault
+forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
+  --sig "getAllLPs(address)" 0xPROJECT_TOKEN \
+  --rpc-url $RPC_URL
+
+# Get pending payout queue
+forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
+  --sig "getPendingPayoutQueue(address)" 0xPROJECT_TOKEN \
+  --rpc-url $RPC_URL
+
+# Get daily snapshot
+forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
+  --sig "getDailySnapshot(address,uint256)" 0xPROJECT_TOKEN 19800 \
+  --rpc-url $RPC_URL
+```
+
+#### Vault Maintenance Functions:
+```bash
+# Process pending payouts manually
+forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
+  --sig "processPendingPayouts(address)" 0xPROJECT_TOKEN \
+  --rpc-url $RPC_URL \
+  --broadcast
+
+# Check graduation status
+forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
+  --sig "checkGraduation(address)" 0xPROJECT_TOKEN \
+  --rpc-url $RPC_URL \
+  --broadcast
+```
+
+#### VaultManager Admin Functions:
 ```bash
 # Create vault
 forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
-  --sig "createVault(address,address,address,address,uint16,uint16,uint16,uint256,uint256,uint256)" \
-  0xPROJECT_TOKEN 0xBASE 0xQUOTE 0xMON 500 1000 8000 1000000000000000 1000000000000000000000 10000000000000000000000 \
+  --sig "createVault(address,address,address,uint16,uint16,uint16,uint256,uint256,uint256)" \
+  0xPROJECT_TOKEN 0xBASE 0xQUOTE 500 1000 8000 1000000000000000 1000000000000000000000 10000000000000000000000 \
+  --rpc-url $RPC_URL \
+  --broadcast
+
+# Set position manager
+forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
+  --sig "setPositionManager(address)" 0xNEW_POSITION_MANAGER \
+  --rpc-url $RPC_URL \
+  --broadcast
+
+# Set settlement engine
+forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
+  --sig "setSettlementEngine(address)" 0xNEW_SETTLEMENT_ENGINE \
+  --rpc-url $RPC_URL \
+  --broadcast
+
+# Pause/unpause vault manager
+forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
+  --sig "pauseVaultManager()" \
+  --rpc-url $RPC_URL \
+  --broadcast
+```
+
+#### Vault-Specific Admin Functions:
+```bash
+# Pause specific vault
+forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
+  --sig "pauseVault(address)" 0xPROJECT_TOKEN \
+  --rpc-url $RPC_URL \
+  --broadcast
+
+# Unpause specific vault
+forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
+  --sig "unpauseVault(address)" 0xPROJECT_TOKEN \
+  --rpc-url $RPC_URL \
+  --broadcast
+
+# Enable/disable trading
+forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
+  --sig "setTradingEnabled(address,bool)" 0xPROJECT_TOKEN true \
+  --rpc-url $RPC_URL \
+  --broadcast
+
+# Update vault parameters
+forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
+  --sig "updateVaultParams(address,uint16,uint16,uint16,uint256,uint256,uint16,uint16)" \
+  0xPROJECT_TOKEN 500 1000 8000 1000000000000000 1000000000000000000000 10000 200 \
+  --rpc-url $RPC_URL \
+  --broadcast
+
+# Set graduation threshold
+forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
+  --sig "setGraduationThreshold(address,uint256)" 0xPROJECT_TOKEN 10000000000000000000000 \
+  --rpc-url $RPC_URL \
+  --broadcast
+
+# Add backend bot
+forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
+  --sig "addBackend(address,address)" 0xPROJECT_TOKEN 0xBACKEND \
+  --rpc-url $RPC_URL \
+  --broadcast
+
+# Set Blocksense Oracle
+forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
+  --sig "setBlocksenseOracle(address,address)" 0xPROJECT_TOKEN 0xORACLE \
   --rpc-url $RPC_URL \
   --broadcast
 ```
@@ -274,7 +438,7 @@ forge script script/interact/InteractAssetVault.s.sol:InteractAssetVault \
 
 ## Examples
 
-### Complete Flow Example
+### Complete Flow Example (New Improved Flow)
 
 1. **Deploy contracts:**
 ```bash
@@ -287,24 +451,39 @@ forge script script/interact/InteractBlocksenseOracle.s.sol:InteractBlocksenseOr
   --sig "viewConfig()" --rpc-url $RPC_URL
 ```
 
-3. **Create vault:**
+3. **Create vault using VaultManager:**
 ```bash
 forge script script/CreateVault.s.sol --rpc-url $RPC_URL --broadcast
 ```
 
-4. **Add liquidity:**
+4. **Check vault info:**
+```bash
+# View vault info using project token address
+forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
+  --sig "getVaultInfo(address)" $PROJECT_TOKEN \
+  --rpc-url $RPC_URL
+```
+
+5. **Add liquidity (Stake tokens):**
 ```bash
 # Approve tokens first
 cast send $PROJECT_TOKEN "approve(address,uint256)" $VAULT_ADDRESS 1000000000000000000000 \
   --rpc-url $RPC_URL --private-key $PRIVATE_KEY
 
-# Add liquidity
-forge script script/interact/InteractAssetVault.s.sol:InteractAssetVault \
-  --sig "addLiquidity(uint256)" 1000000000000000000 \
+# Add liquidity using project token address (NOT vault address!)
+forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
+  --sig "addLiquidity(address,uint256)" $PROJECT_TOKEN 1000000000000000000 \
   --rpc-url $RPC_URL --broadcast
 ```
 
-5. **Open position:**
+6. **Check LP position:**
+```bash
+forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
+  --sig "getLPPosition(address,address)" $PROJECT_TOKEN $YOUR_ADDRESS \
+  --rpc-url $RPC_URL
+```
+
+7. **Open position (Trade):**
 ```bash
 # Approve tokens
 cast send $PROJECT_TOKEN "approve(address,uint256)" $POSITION_MANAGER 1000000000000000000 \
@@ -314,5 +493,40 @@ cast send $PROJECT_TOKEN "approve(address,uint256)" $POSITION_MANAGER 1000000000
 forge script script/interact/InteractPositionManager.s.sol:InteractPositionManager \
   --sig "openPosition(address,uint256,uint8,uint8,uint256)" \
   $PROJECT_TOKEN 1000000000000000000 10 1 0 \
+  --rpc-url $RPC_URL --broadcast
+```
+
+8. **Check position:**
+```bash
+forge script script/interact/InteractPositionManager.s.sol:InteractPositionManager \
+  --sig "getPosition(uint64)" 1 \
+  --rpc-url $RPC_URL
+```
+
+9. **Close position:**
+```bash
+forge script script/interact/InteractPositionManager.s.sol:InteractPositionManager \
+  --sig "closePosition(uint64,uint256)" 1 1234567890 \
+  --rpc-url $RPC_URL --broadcast
+```
+
+10. **Claim LP rewards:**
+```bash
+forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
+  --sig "claimRewards(address)" $PROJECT_TOKEN \
+  --rpc-url $RPC_URL --broadcast
+```
+
+11. **Remove liquidity (Unstake):**
+```bash
+# Calculate withdrawal amount first
+forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
+  --sig "calculateWithdrawalAmount(address,address,uint256)" \
+  $PROJECT_TOKEN $YOUR_ADDRESS 1000000000000000000 \
+  --rpc-url $RPC_URL
+
+# Remove liquidity
+forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
+  --sig "removeLiquidity(address,uint256)" $PROJECT_TOKEN 1000000000000000000 \
   --rpc-url $RPC_URL --broadcast
 ```

@@ -141,7 +141,12 @@ contract InteractPositionManager is DeployHelper {
 
         vm.startBroadcast(deployer);
         uint64 positionId = positionMgr.openPosition(
-            projectToken, collateralAmount, leverage, direction, maxAcceptablePrice
+            projectToken,
+            collateralAmount,
+            leverage,
+            direction,
+            maxAcceptablePrice,
+            block.timestamp + 3600 // deadline = 1 hour
         );
         console.log("Position opened with ID:", positionId);
         vm.stopBroadcast();
@@ -156,7 +161,7 @@ contract InteractPositionManager is DeployHelper {
         console.log("Deadline:", deadline);
 
         vm.startBroadcast(deployer);
-        positionMgr.closePosition(positionId, deadline);
+        positionMgr.closePosition(positionId, deadline, 0); // maxAcceptablePrice = 0 (no limit)
         console.log("Position closed successfully");
         vm.stopBroadcast();
     }
@@ -170,7 +175,7 @@ contract InteractPositionManager is DeployHelper {
         console.log("Margin Amount:", marginAmount);
 
         vm.startBroadcast(deployer);
-        positionMgr.addMargin(positionId, marginAmount);
+        positionMgr.addMargin(positionId, marginAmount, 0, block.timestamp + 3600); // maxAcceptablePrice = 0 (no limit), deadline = 1 hour
         console.log("Margin added successfully");
         vm.stopBroadcast();
     }

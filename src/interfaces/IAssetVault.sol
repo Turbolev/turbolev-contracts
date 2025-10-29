@@ -28,12 +28,8 @@ interface IAssetVault {
     }
 
     struct VaultParams {
-        uint16 maxPayoutBps;
-        uint16 perBetUtilBps;
-        uint16 maxUtilizationBps;
         uint256 minBetAmount;
         uint256 maxBetAmount;
-        uint16 maxLeverageExposureBps;
         uint16 maxPositionSizePercentBps;
         uint256 minLiquidityAmount;
     }
@@ -241,6 +237,18 @@ interface IAssetVault {
      * @param blocksenseOracle Blocksense Oracle contract address
      */
     function setBlocksenseOracle(address blocksenseOracle) external;
+
+    /**
+     * @notice Set Oracle Adapter address
+     * @param oracleAdapter CLAggregatorAdapter contract address
+     */
+    function setOracleAdapter(address oracleAdapter) external;
+
+    /**
+     * @notice Get oracle adapter address for price feed
+     * @return adapter CLAggregatorAdapter address
+     */
+    function oracleAdapter() external view returns (address);
 
     // ========================================================================
     // STAKER REWARD FUNCTIONS

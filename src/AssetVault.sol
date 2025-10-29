@@ -7,6 +7,7 @@ import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./libraries/BackendAccessControl.sol";
+import "./interfaces/IBlocksenseOracle.sol";
 
 /**
  * @title AssetVault
@@ -28,7 +29,12 @@ import "./libraries/BackendAccessControl.sol";
  *
  * Note: Project token must be on Monad network for direct trading
  */
-contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl {
+contract AssetVault is
+    Ownable,
+    ReentrancyGuard,
+    Pausable,
+    BackendAccessControl
+{
     using SafeERC20 for IERC20;
 
     // ========================================================================
@@ -45,15 +51,11 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
     /// @dev This is the ONLY token vault accepts for staking and trading
     address public projectToken;
 
-    /// @notice Base token address for price feed (project token)
-    /// @dev Used with BlocksenseOracle for price feeds
-    address public projectTokenBase;
-
-    /// @notice Quote token address for price feed (usually USDC for USD prices)
-    address public projectTokenQuote;
-
     /// @notice BlocksenseOracle contract address
     address public blocksenseOracle;
+
+    /// @notice CLAggregatorAdapter address for this vault's price feed
+    address public oracleAdapter;
 
     /// @notice Vault information
     VaultInfo public vaultInfo;
@@ -103,7 +105,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
     uint256 public constant MIN_LOCK_PERIOD = 30 days;
 
     // ========================================================================
-    // PHASE 4: STAKER REWARD STATE VARIABLES
+    // STAKER REWARD STATE VARIABLES
     // ========================================================================
 
     /// @notice Daily snapshots mapping: day => snapshot
@@ -123,6 +125,10 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
 
     /// @notice Minimum stake period before rewards (1 day)
     uint256 public constant REWARD_MIN_STAKE_PERIOD = 1 days;
+
+    uint256 public constant DEFAULT_MAX_STAKING_FEE_BPS = 2000; // 20%
+    uint256 public constant DEFAULT_EARLY_WITHDRAWAL_FEE_BPS = 1000; // 10%
+    uint256 public constant DEFAULT_MAX_POSITION_SIZE_PERCENT_BPS = 3000; // 30%
 
     // ========================================================================
     // STRUCTS
@@ -150,12 +156,8 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
     }
 
     struct VaultParams {
-        uint16 maxPayoutBps; // Max payout % per bet (e.g., 500 = 5%)
-        uint16 perBetUtilBps; // Max utilization per bet (e.g., 1000 = 10%)
-        uint16 maxUtilizationBps; // Max total utilization (e.g., 8000 = 80%)
         uint256 minBetAmount; // Min bet amount (collateral)
         uint256 maxBetAmount; // Max bet amount (collateral)
-        uint16 maxLeverageExposureBps; // Max leverage exposure vs liquidity (e.g., 10000 = 100%)
         uint16 maxPositionSizePercentBps; // Max position size as % of TVL (e.g., 200 = 2%)
         uint256 minLiquidityAmount; // Min liquidity deposit (separate from bet)
     }
@@ -225,9 +227,17 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
         uint256 timestamp
     );
 
-    event CollateralDeposited(uint256 amount, uint256 positionSize, uint256 timestamp);
+    event CollateralDeposited(
+        uint256 amount,
+        uint256 positionSize,
+        uint256 timestamp
+    );
 
-    event PayoutExecuted(address indexed user, uint256 amount, uint256 timestamp);
+    event PayoutExecuted(
+        address indexed user,
+        uint256 amount,
+        uint256 timestamp
+    );
 
     event PayoutQueued(
         uint64 indexed positionId,
@@ -254,18 +264,30 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
         uint256 timestamp
     );
 
-    event LeverageExposureUpdated(uint256 newExposure, uint256 maxExposure, uint256 timestamp);
+    event LeverageExposureUpdated(
+        uint256 newExposure,
+        uint256 maxExposure,
+        uint256 timestamp
+    );
 
     event VaultParamsUpdated(
-        uint16 maxPayoutBps, uint16 perBetUtilBps, uint16 maxUtilizationBps, uint256 timestamp
+        uint256 minBetAmount,
+        uint256 maxBetAmount,
+        uint256 timestamp
     );
 
     event StakingFeeCollected(
-        address indexed user, uint256 fee, uint256 netAmount, uint256 timestamp
+        address indexed user,
+        uint256 fee,
+        uint256 netAmount,
+        uint256 timestamp
     );
 
     event EarlyWithdrawalFeeApplied(
-        address indexed user, uint256 fee, uint256 remainingLockTime, uint256 timestamp
+        address indexed user,
+        uint256 fee,
+        uint256 remainingLockTime,
+        uint256 timestamp
     );
 
     event StakingFeeBpsUpdated(uint16 oldBps, uint16 newBps);
@@ -277,9 +299,19 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
         uint256 thresholdUSD,
         uint256 timestamp
     );
-    event GraduationThresholdUpdated(uint256 oldThreshold, uint256 newThreshold);
+    event GraduationThresholdUpdated(
+        uint256 oldThreshold,
+        uint256 newThreshold
+    );
     event TradingEnabledUpdated(bool enabled);
-    event BlocksenseOracleUpdated(address indexed oldOracle, address indexed newOracle);
+    event BlocksenseOracleUpdated(
+        address indexed oldOracle,
+        address indexed newOracle
+    );
+    event OracleAdapterUpdated(
+        address indexed oldAdapter,
+        address indexed newAdapter
+    );
 
     event DailyRewardFinalized(
         uint256 indexed day,
@@ -290,14 +322,24 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
     );
 
     event RewardsClaimed(
-        address indexed user, uint256 amount, uint256 daysProcessed, uint256 timestamp
+        address indexed user,
+        uint256 amount,
+        uint256 daysProcessed,
+        uint256 timestamp
     );
 
     event RewardsCapped(
-        address indexed user, uint256 requestedAmount, uint256 actualAmount, uint256 timestamp
+        address indexed user,
+        uint256 requestedAmount,
+        uint256 actualAmount,
+        uint256 timestamp
     );
 
-    event PayoutQueueCleaned(uint256 itemsRemoved, uint256 newLength, uint256 timestamp);
+    event PayoutQueueCleaned(
+        uint256 itemsRemoved,
+        uint256 newLength,
+        uint256 timestamp
+    );
 
     event PayoutFailed(
         uint64 indexed positionId,
@@ -344,7 +386,11 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
     // ========================================================================
 
     modifier onlyPositionManager() {
-        if (msg.sender != positionManager) revert NotAuthorized();
+        // Allow both PositionManager and VaultManager to call
+        // (VaultManager acts as proxy for PositionManager)
+        if (msg.sender != positionManager && msg.sender != vaultManager) {
+            revert NotAuthorized();
+        }
         _;
     }
 
@@ -365,41 +411,26 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
     /**
      * @notice Constructor
      * @param _projectToken Project token address
-     * @param _projectTokenBase Base token address for price feed
-     * @param _projectTokenQuote Quote token address for price feed
      * @param _vaultManager VaultManager address
      * @param _positionManager PositionManager contract address
-     * @param _maxPayoutBps Max payout in bps
-     * @param _perBetUtilBps Per bet utilization in bps
-     * @param _maxUtilizationBps Max utilization in bps
      * @param _minBetAmount Min bet amount
      * @param _maxBetAmount Max bet amount
      * @param _graduationThreshold Token amount threshold for graduation
      */
     constructor(
         address _projectToken,
-        address _projectTokenBase,
-        address _projectTokenQuote,
         address _vaultManager,
         address _positionManager,
-        uint16 _maxPayoutBps,
-        uint16 _perBetUtilBps,
-        uint16 _maxUtilizationBps,
         uint256 _minBetAmount,
         uint256 _maxBetAmount,
         uint256 _graduationThreshold
     ) Ownable(msg.sender) {
         if (_projectToken == address(0)) revert InvalidAddress();
-        if (_projectTokenBase == address(0) || _projectTokenQuote == address(0)) {
-            revert InvalidAddress();
-        }
         if (_vaultManager == address(0) || _positionManager == address(0)) {
             revert InvalidAddress();
         }
 
         projectToken = _projectToken;
-        projectTokenBase = _projectTokenBase;
-        projectTokenQuote = _projectTokenQuote;
         vaultManager = _vaultManager;
         positionManager = _positionManager;
 
@@ -409,25 +440,20 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
         vaultInfo.tradingEnabled = false;
 
         vaultParams = VaultParams({
-            maxPayoutBps: _maxPayoutBps,
-            perBetUtilBps: _perBetUtilBps,
-            maxUtilizationBps: _maxUtilizationBps,
             minBetAmount: _minBetAmount,
             maxBetAmount: _maxBetAmount,
-            maxLeverageExposureBps: uint16(BASIS_POINTS),
-            maxPositionSizePercentBps: 200,
+            maxPositionSizePercentBps: DEFAULT_MAX_POSITION_SIZE_PERCENT_BPS,
             minLiquidityAmount: _minBetAmount
         });
-
-        stakingFeeBps = 200;
-        earlyWithdrawalFeeBps = 1000;
+        stakingFeeBps = DEFAULT_MAX_STAKING_FEE_BPS;
+        earlyWithdrawalFeeBps = DEFAULT_EARLY_WITHDRAWAL_FEE_BPS;
 
         emit VaultInitialized(
             _projectToken,
             bytes32(0),
             address(0),
-            _projectTokenBase,
-            _projectTokenQuote,
+            address(0),
+            address(0),
             false,
             block.timestamp
         );
@@ -441,7 +467,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
         // Accept native token transfers
     }
 
-    fallback() external payable { }
+    fallback() external payable {}
 
     // ========================================================================
     // LP FUNCTIONS
@@ -452,7 +478,9 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
      * @param amount Amount of project tokens to add (including staking fee)
      * @dev Future versions will support multi-currency with auto-swap
      */
-    function addLiquidity(uint256 amount) external payable nonReentrant whenVaultNotPaused {
+    function addLiquidity(
+        uint256 amount
+    ) external payable nonReentrant whenVaultNotPaused {
         if (amount == 0) revert InvalidAmount();
 
         // Calculate staking fee
@@ -470,7 +498,11 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
         } else {
             // ERC20 project token (most common)
             if (msg.value != 0) revert InvalidAmount();
-            IERC20(projectToken).safeTransferFrom(msg.sender, address(this), amount);
+            IERC20(projectToken).safeTransferFrom(
+                msg.sender,
+                address(this),
+                amount
+            );
         }
 
         // Calculate shares based on NET amount (after fee)
@@ -480,7 +512,9 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
             shares = netAmount * INITIAL_SHARE_MULTIPLIER;
         } else {
             // Subsequent deposits: shares = (netAmount * totalShares) / totalLiquidity
-            shares = (netAmount * vaultInfo.totalShares) / vaultInfo.totalLiquidity;
+            shares =
+                (netAmount * vaultInfo.totalShares) /
+                vaultInfo.totalLiquidity;
         }
 
         if (shares == 0) revert InvalidAmount();
@@ -506,10 +540,19 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
         vaultInfo.totalStakingFees += stakingFee;
 
         emit LiquidityAdded(
-            msg.sender, netAmount, shares, vaultInfo.totalLiquidity, block.timestamp
+            msg.sender,
+            netAmount,
+            shares,
+            vaultInfo.totalLiquidity,
+            block.timestamp
         );
 
-        emit StakingFeeCollected(msg.sender, stakingFee, netAmount, block.timestamp);
+        emit StakingFeeCollected(
+            msg.sender,
+            stakingFee,
+            netAmount,
+            block.timestamp
+        );
 
         // Check graduation after adding liquidity
         checkGraduation();
@@ -519,7 +562,9 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
      * @notice Remove liquidity from vault
      * @param shares Amount of shares to burn
      */
-    function removeLiquidity(uint256 shares) external nonReentrant whenVaultNotPaused {
+    function removeLiquidity(
+        uint256 shares
+    ) external nonReentrant whenVaultNotPaused {
         // ============================================================
         // CHECKS
         // ============================================================
@@ -531,7 +576,8 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
         VaultInfo storage vault = vaultInfo;
 
         // Calculate gross amount based on total liquidity
-        uint256 grossAmount = (shares * vault.totalLiquidity) / vault.totalShares;
+        uint256 grossAmount = (shares * vault.totalLiquidity) /
+            vault.totalShares;
 
         // Check early withdrawal and calculate fee
         // Early withdrawal penalty only applies AFTER vault has graduated
@@ -542,7 +588,9 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
 
         if (isEarlyWithdrawal && vault.isGraduated) {
             // Apply early withdrawal fee (only if vault has graduated)
-            withdrawalFee = (grossAmount * earlyWithdrawalFeeBps) / BASIS_POINTS;
+            withdrawalFee =
+                (grossAmount * earlyWithdrawalFeeBps) /
+                BASIS_POINTS;
             netPayout = grossAmount - withdrawalFee;
         }
 
@@ -573,11 +621,20 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
         // Emit events BEFORE external calls
         if (isEarlyWithdrawal && vault.isGraduated && withdrawalFee > 0) {
             emit EarlyWithdrawalFeeApplied(
-                msg.sender, withdrawalFee, lockEndTime - block.timestamp, block.timestamp
+                msg.sender,
+                withdrawalFee,
+                lockEndTime - block.timestamp,
+                block.timestamp
             );
         }
 
-        emit LiquidityRemoved(msg.sender, netPayout, shares, vault.totalLiquidity, block.timestamp);
+        emit LiquidityRemoved(
+            msg.sender,
+            netPayout,
+            shares,
+            vault.totalLiquidity,
+            block.timestamp
+        );
 
         // ============================================================
         // INTERACTIONS - EXTERNAL CALLS LAST
@@ -586,7 +643,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
         // Transfer tokens (net amount after fee) - ONLY project token
         if (projectToken == address(0)) {
             // Native project token
-            (bool success,) = msg.sender.call{ value: netPayout }("");
+            (bool success, ) = msg.sender.call{value: netPayout}("");
             if (!success) revert TransferFailed();
         } else {
             // ERC20 project token
@@ -603,12 +660,10 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
      * @param amount Collateral amount in project tokens
      * @param positionSize Position size (amount * leverage)
      */
-    function depositFromBet(uint256 amount, uint256 positionSize)
-        external
-        payable
-        onlyPositionManager
-        nonReentrant
-    {
+    function depositFromBet(
+        uint256 amount,
+        uint256 positionSize
+    ) external payable onlyPositionManager nonReentrant {
         if (amount == 0) revert InvalidAmount();
 
         // Handle token transfer - ONLY project token accepted
@@ -633,7 +688,9 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
         emit CollateralDeposited(amount, positionSize, block.timestamp);
 
         emit LeverageExposureUpdated(
-            vaultInfo.totalLeverageExposure, vaultInfo.maxLeverageExposure, block.timestamp
+            vaultInfo.totalLeverageExposure,
+            vaultInfo.maxLeverageExposure,
+            block.timestamp
         );
     }
 
@@ -644,11 +701,11 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
      * @param positionId Position ID for tracking partial payouts
      * @dev NEW: Supports partial liquidity - queues payout if insufficient liquidity
      */
-    function executePayout(address user, uint256 amount, uint64 positionId)
-        external
-        onlyPositionManager
-        nonReentrant
-    {
+    function executePayout(
+        address user,
+        uint256 amount,
+        uint64 positionId
+    ) external onlyPositionManager nonReentrant {
         // ============================================================
         // CHECKS
         // ============================================================
@@ -690,7 +747,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
         // Transfer tokens - ONLY project token
         if (projectToken == address(0)) {
             // Native project token
-            (bool success,) = user.call{ value: amount }("");
+            (bool success, ) = user.call{value: amount}("");
             if (!success) revert TransferFailed();
         } else {
             // ERC20 project token
@@ -784,7 +841,9 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
         );
 
         emit LeverageExposureUpdated(
-            vaultInfo.totalLeverageExposure, vaultInfo.maxLeverageExposure, block.timestamp
+            vaultInfo.totalLeverageExposure,
+            vaultInfo.maxLeverageExposure,
+            block.timestamp
         );
     }
 
@@ -799,11 +858,10 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
      * @return canOpen Whether position can be opened
      * @return reason Reason if cannot open
      */
-    function checkPositionRisk(uint256 positionSize, uint8 leverage)
-        external
-        view
-        returns (bool canOpen, string memory reason)
-    {
+    function checkPositionRisk(
+        uint256 positionSize,
+        uint8 leverage
+    ) external view returns (bool canOpen, string memory reason) {
         // Check if vault is paused
         if (paused()) {
             return (false, "Vault is paused");
@@ -814,44 +872,31 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
             return (false, "Vault not graduated - trading disabled");
         }
 
-        // Check min/max bet amount (based on collateral)
+        // Check min bet amount (based on collateral)
         // collateral = positionSize / leverage
-        uint256 collateral = leverage > 0 ? positionSize / leverage : positionSize;
+        uint256 collateral = leverage > 0
+            ? positionSize / leverage
+            : positionSize;
         if (collateral < vaultParams.minBetAmount) {
             return (false, "Below minimum bet amount");
         }
-        if (collateral > vaultParams.maxBetAmount) {
-            return (false, "Exceeds maximum bet amount");
-        }
 
-        // Check position size as % of TVL (e.g., max 2% TVL per position)
+        // Check max bet amount using min(maxBetAmount, MAX_VAULT_RATE_PER_TRADE * totalVault)
         uint256 totalLiquidity = vaultInfo.totalLiquidity;
+        uint256 maxAllowedBet = vaultParams.maxBetAmount;
+
+        // Calculate max bet based on vault rate per trade (maxPositionSizePercentBps)
         if (totalLiquidity > 0 && vaultParams.maxPositionSizePercentBps > 0) {
-            uint256 maxPositionByTVL =
-                (totalLiquidity * vaultParams.maxPositionSizePercentBps) / BASIS_POINTS;
-            if (positionSize > maxPositionByTVL) {
-                return (false, "Position size exceeds TVL limit");
-            }
+            uint256 maxBetByVaultRate = (totalLiquidity *
+                vaultParams.maxPositionSizePercentBps) / BASIS_POINTS;
+            // Use the minimum of the two limits
+            maxAllowedBet = maxAllowedBet < maxBetByVaultRate
+                ? maxAllowedBet
+                : maxBetByVaultRate;
         }
 
-        // Check per-bet utilization
-        uint256 maxPerBetUtil =
-            (vaultInfo.totalLiquidity * vaultParams.perBetUtilBps) / BASIS_POINTS;
-        if (positionSize > maxPerBetUtil) {
-            return (false, "Exceeds per-bet utilization limit");
-        }
-
-        // Check total utilization (simplified in new system)
-        uint256 maxTotalUtil = (totalLiquidity * vaultParams.maxUtilizationBps) / BASIS_POINTS;
-        if (positionSize > maxTotalUtil) {
-            return (false, "Exceeds total utilization limit");
-        }
-
-        // Check leverage exposure
-        uint256 maxLevExposure =
-            (totalLiquidity * vaultParams.maxLeverageExposureBps) / BASIS_POINTS;
-        if (vaultInfo.totalLeverageExposure + positionSize > maxLevExposure) {
-            return (false, "Exceeds leverage exposure limit");
+        if (collateral > maxAllowedBet) {
+            return (false, "Exceeds maximum bet amount");
         }
 
         return (true, "");
@@ -904,7 +949,11 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
         delete dailyPositionIds; // Clear position IDs array
 
         emit DailyRewardFinalized(
-            today, vaultInfo.totalLiquidity, vaultInfo.totalShares, finalizedPnL, block.timestamp
+            today,
+            vaultInfo.totalLiquidity,
+            vaultInfo.totalShares,
+            finalizedPnL,
+            block.timestamp
         );
     }
 
@@ -914,11 +963,9 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
      * @return pendingRewards Total pending rewards (in tokens)
      * @return processableDays Number of days that can be processed
      */
-    function calculatePendingRewards(address user)
-        public
-        view
-        returns (uint256 pendingRewards, uint256 processableDays)
-    {
+    function calculatePendingRewards(
+        address user
+    ) public view returns (uint256 pendingRewards, uint256 processableDays) {
         LPPosition memory lpPos = lpPositions[user];
 
         if (lpPos.shares == 0) {
@@ -952,7 +999,8 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
             // Only distribute if net profit > 0
             if (snapshot.netPnL > 0 && snapshot.totalShares > 0) {
                 // Calculate user's share of profit
-                uint256 userShare = (lpPos.shares * uint256(snapshot.netPnL)) / snapshot.totalShares;
+                uint256 userShare = (lpPos.shares * uint256(snapshot.netPnL)) /
+                    snapshot.totalShares;
                 pendingRewards += userShare;
             }
             // If netPnL <= 0, no rewards for this day (stakers don't lose principal)
@@ -975,7 +1023,9 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
         }
 
         // Calculate pending rewards
-        (uint256 rewards, uint256 daysProcessed) = calculatePendingRewards(msg.sender);
+        (uint256 rewards, uint256 daysProcessed) = calculatePendingRewards(
+            msg.sender
+        );
 
         if (rewards == 0) {
             revert NoRewardsToClaim();
@@ -998,7 +1048,12 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
             actualRewards = vaultBalance;
             wasCapped = true;
 
-            emit RewardsCapped(msg.sender, rewards, actualRewards, block.timestamp);
+            emit RewardsCapped(
+                msg.sender,
+                rewards,
+                actualRewards,
+                block.timestamp
+            );
         }
 
         // Only revert if there's absolutely nothing to pay
@@ -1013,13 +1068,18 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
 
         // Transfer rewards (capped amount) - ONLY project token
         if (projectToken == address(0)) {
-            (bool success,) = msg.sender.call{ value: actualRewards }("");
+            (bool success, ) = msg.sender.call{value: actualRewards}("");
             if (!success) revert TransferFailed();
         } else {
             IERC20(projectToken).safeTransfer(msg.sender, actualRewards);
         }
 
-        emit RewardsClaimed(msg.sender, actualRewards, daysProcessed, block.timestamp);
+        emit RewardsClaimed(
+            msg.sender,
+            actualRewards,
+            daysProcessed,
+            block.timestamp
+        );
     }
 
     // ========================================================================
@@ -1037,12 +1097,18 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
 
         uint256 queueLength = pendingPayoutQueue.length;
 
-        uint256 maxIterations = queueLength > MAX_PAYOUTS_PER_TX ? MAX_PAYOUTS_PER_TX : queueLength;
+        uint256 maxIterations = queueLength > MAX_PAYOUTS_PER_TX
+            ? MAX_PAYOUTS_PER_TX
+            : queueLength;
 
         uint256 processed = 0;
 
         // Process pending payouts in FIFO order
-        for (uint256 i = 0; i < maxIterations && vaultInfo.totalLiquidity > 0;) {
+        for (
+            uint256 i = 0;
+            i < maxIterations && vaultInfo.totalLiquidity > 0;
+
+        ) {
             uint64 positionId = pendingPayoutQueue[i];
 
             // Skip if already processed
@@ -1072,7 +1138,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
                 // Transfer tokens
                 if (projectToken == address(0)) {
                     // Native project token
-                    (bool success,) = user.call{ value: amount }("");
+                    (bool success, ) = user.call{value: amount}("");
                     if (!success) {
                         uint8 retries = payoutRetryCount[positionId];
                         if (retries >= MAX_PAYOUT_RETRIES) {
@@ -1080,7 +1146,13 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
                             failedPayouts[positionId] = amount;
                             failedPayoutUsers[positionId] = user;
 
-                            emit PayoutFailed(positionId, user, amount, retries, block.timestamp);
+                            emit PayoutFailed(
+                                positionId,
+                                user,
+                                amount,
+                                retries,
+                                block.timestamp
+                            );
 
                             // Remove from queue
                             delete positionPayouts[positionId];
@@ -1138,7 +1210,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
         uint256 writeIndex = 0;
         uint256 length = pendingPayoutQueue.length;
 
-        for (uint256 i = 0; i < length;) {
+        for (uint256 i = 0; i < length; ) {
             if (positionPayouts[pendingPayoutQueue[i]] != 0) {
                 // Keep this item - move it to writeIndex
                 if (writeIndex != i) {
@@ -1160,7 +1232,11 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
         }
 
         if (itemsRemoved > 0) {
-            emit PayoutQueueCleaned(itemsRemoved, pendingPayoutQueue.length, block.timestamp);
+            emit PayoutQueueCleaned(
+                itemsRemoved,
+                pendingPayoutQueue.length,
+                block.timestamp
+            );
         }
     }
 
@@ -1191,7 +1267,10 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
      * @param newRecipient New recipient address (or original user if they fixed their contract)
      * @dev Only owner can call this for positions that failed after MAX_PAYOUT_RETRIES
      */
-    function rescueFailedPayout(uint64 positionId, address newRecipient) external onlyOwner {
+    function rescueFailedPayout(
+        uint64 positionId,
+        address newRecipient
+    ) external onlyOwner {
         if (newRecipient == address(0)) revert InvalidAddress();
 
         uint256 amount = failedPayouts[positionId];
@@ -1206,48 +1285,42 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
         // Transfer to new recipient
         if (projectToken == address(0)) {
             // Native token
-            (bool success,) = newRecipient.call{ value: amount }("");
+            (bool success, ) = newRecipient.call{value: amount}("");
             if (!success) revert TransferFailed();
         } else {
             // ERC20 token
             IERC20(projectToken).safeTransfer(newRecipient, amount);
         }
 
-        emit FailedPayoutRescued(positionId, originalUser, newRecipient, amount, block.timestamp);
+        emit FailedPayoutRescued(
+            positionId,
+            originalUser,
+            newRecipient,
+            amount,
+            block.timestamp
+        );
     }
 
     /**
      * @notice Update vault parameters
      */
     function updateVaultParams(
-        uint16 _maxPayoutBps,
-        uint16 _perBetUtilBps,
-        uint16 _maxUtilizationBps,
         uint256 _minBetAmount,
         uint256 _maxBetAmount,
-        uint16 _maxLeverageExposureBps,
         uint16 _maxPositionSizePercentBps
     ) external onlyOwner {
-        if (
-            _maxPayoutBps > BASIS_POINTS || _perBetUtilBps > BASIS_POINTS
-                || _maxUtilizationBps > BASIS_POINTS || _maxLeverageExposureBps > BASIS_POINTS
-                || _maxPositionSizePercentBps > BASIS_POINTS
-        ) revert InvalidParameters();
+        if (_maxPositionSizePercentBps > BASIS_POINTS) {
+            revert InvalidParameters();
+        }
 
         if (_minBetAmount >= _maxBetAmount) revert InvalidParameters();
         if (_minBetAmount == 0) revert InvalidAmount();
 
-        if (_perBetUtilBps > _maxUtilizationBps) revert InvalidParameters();
-
-        vaultParams.maxPayoutBps = _maxPayoutBps;
-        vaultParams.perBetUtilBps = _perBetUtilBps;
-        vaultParams.maxUtilizationBps = _maxUtilizationBps;
         vaultParams.minBetAmount = _minBetAmount;
         vaultParams.maxBetAmount = _maxBetAmount;
-        vaultParams.maxLeverageExposureBps = _maxLeverageExposureBps;
         vaultParams.maxPositionSizePercentBps = _maxPositionSizePercentBps;
 
-        emit VaultParamsUpdated(_maxPayoutBps, _perBetUtilBps, _maxUtilizationBps, block.timestamp);
+        emit VaultParamsUpdated(_minBetAmount, _maxBetAmount, block.timestamp);
     }
 
     /**
@@ -1285,12 +1358,12 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
         uint256 totalLiquidity = vaultInfo.totalLiquidity;
         if (totalLiquidity == 0) return 0;
         address oracle = blocksenseOracle;
-        address tokenBase = projectTokenBase;
-        address tokenQuote = projectTokenQuote;
+        address adapter = oracleAdapter;
 
-        if (oracle != address(0) && tokenBase != address(0) && tokenQuote != address(0)) {
-            try IBlocksenseOracle(oracle).getPrice(tokenBase, tokenQuote) returns (
-                int256 price, uint256
+        if (oracle != address(0) && adapter != address(0)) {
+            try IBlocksenseOracle(oracle).getPrice(adapter) returns (
+                int256 price,
+                uint256
             ) {
                 if (price > 0) {
                     return (totalLiquidity * uint256(price)) / 1e18;
@@ -1338,7 +1411,9 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
     /**
      * @notice Get LP position
      */
-    function getLPPosition(address user) external view returns (LPPosition memory) {
+    function getLPPosition(
+        address user
+    ) external view returns (LPPosition memory) {
         return lpPositions[user];
     }
 
@@ -1368,7 +1443,9 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
      * @param shares Number of shares
      * @return value Value in combined tokens (project + MON)
      */
-    function calculateShareValue(uint256 shares) external view returns (uint256 value) {
+    function calculateShareValue(
+        uint256 shares
+    ) external view returns (uint256 value) {
         if (vaultInfo.totalShares == 0) return 0;
         uint256 totalLiquidity = vaultInfo.totalLiquidity;
         return (shares * totalLiquidity) / vaultInfo.totalShares;
@@ -1379,7 +1456,9 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
      * @param day Day number
      * @return snapshot Daily snapshot data
      */
-    function getDailySnapshot(uint256 day) external view returns (DailySnapshot memory) {
+    function getDailySnapshot(
+        uint256 day
+    ) external view returns (DailySnapshot memory) {
         return dailySnapshots[day];
     }
 
@@ -1388,7 +1467,9 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
      * @param day Day number
      * @return positionIds Array of position IDs
      */
-    function getDailyPositionIds(uint256 day) external view returns (uint64[] memory) {
+    function getDailyPositionIds(
+        uint256 day
+    ) external view returns (uint64[] memory) {
         return dailySnapshots[day].positionIds;
     }
 
@@ -1396,7 +1477,11 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
      * @notice Get current day's position IDs (before snapshot)
      * @return positionIds Array of position IDs settled today
      */
-    function getCurrentDailyPositionIds() external view returns (uint64[] memory) {
+    function getCurrentDailyPositionIds()
+        external
+        view
+        returns (uint64[] memory)
+    {
         return dailyPositionIds;
     }
 
@@ -1409,7 +1494,9 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
      * @param user User address
      * @return remainingTime Remaining lock time in seconds (0 if lock period passed)
      */
-    function getRemainingLockTime(address user) external view returns (uint256) {
+    function getRemainingLockTime(
+        address user
+    ) external view returns (uint256) {
         LPPosition storage lpPos = lpPositions[user];
         if (lpPos.user == address(0)) return 0;
 
@@ -1428,10 +1515,18 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
      * @return netAmount Net amount user will receive
      * @return isEarlyWithdrawal Whether this would be an early withdrawal
      */
-    function calculateWithdrawalAmount(address user, uint256 shares)
+    function calculateWithdrawalAmount(
+        address user,
+        uint256 shares
+    )
         external
         view
-        returns (uint256 grossAmount, uint256 fee, uint256 netAmount, bool isEarlyWithdrawal)
+        returns (
+            uint256 grossAmount,
+            uint256 fee,
+            uint256 netAmount,
+            bool isEarlyWithdrawal
+        )
     {
         LPPosition storage lpPos = lpPositions[user];
         if (lpPos.shares < shares) revert InsufficientShares();
@@ -1465,7 +1560,11 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
     function getFeeConfig()
         external
         view
-        returns (uint16 _stakingFeeBps, uint16 _earlyWithdrawalFeeBps, uint256 _minLockPeriod)
+        returns (
+            uint16 _stakingFeeBps,
+            uint16 _earlyWithdrawalFeeBps,
+            uint256 _minLockPeriod
+        )
     {
         return (stakingFeeBps, earlyWithdrawalFeeBps, MIN_LOCK_PERIOD);
     }
@@ -1482,7 +1581,9 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
         returns (uint256 total, uint256 staking, uint256 withdrawal)
     {
         return (
-            vaultInfo.totalFeesCollected, vaultInfo.totalStakingFees, vaultInfo.totalWithdrawalFees
+            vaultInfo.totalFeesCollected,
+            vaultInfo.totalStakingFees,
+            vaultInfo.totalWithdrawalFees
         );
     }
 
@@ -1505,7 +1606,9 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
      * @notice Update early withdrawal fee
      * @param _earlyWithdrawalFeeBps New early withdrawal fee in basis points
      */
-    function setEarlyWithdrawalFeeBps(uint16 _earlyWithdrawalFeeBps) external onlyOwner {
+    function setEarlyWithdrawalFeeBps(
+        uint16 _earlyWithdrawalFeeBps
+    ) external onlyOwner {
         if (_earlyWithdrawalFeeBps > 5000) revert InvalidParameters(); // Max 50%
         uint16 oldBps = earlyWithdrawalFeeBps;
         earlyWithdrawalFeeBps = _earlyWithdrawalFeeBps;
@@ -1564,15 +1667,15 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
         blocksenseOracle = _blocksenseOracle;
         emit BlocksenseOracleUpdated(oldOracle, _blocksenseOracle);
     }
-}
 
-// ========================================================================
-// INTERFACES
-// ========================================================================
-
-interface IBlocksenseOracle {
-    function getPrice(address base, address quote)
-        external
-        view
-        returns (int256 price, uint256 updatedAt);
+    /**
+     * @notice Set Oracle Adapter address
+     * @param _oracleAdapter CLAggregatorAdapter contract address
+     */
+    function setOracleAdapter(address _oracleAdapter) external onlyOwner {
+        if (_oracleAdapter == address(0)) revert InvalidAddress();
+        address oldAdapter = oracleAdapter;
+        oracleAdapter = _oracleAdapter;
+        emit OracleAdapterUpdated(oldAdapter, _oracleAdapter);
+    }
 }

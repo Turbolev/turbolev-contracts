@@ -15,6 +15,14 @@ contract DeploySettlementEngine is DeployHelper {
     function run() public {
         vm.startBroadcast(deployer);
 
+        // Check if already deployed
+        if (_isContractDeployed(settlementEngine)) {
+            console.log("\nSettlementEngine already deployed!");
+            console.log("Using existing address:", settlementEngine);
+            vm.stopBroadcast();
+            return;
+        }
+
         console.log("\nDeploying SettlementEngine...");
         console.log("Owner:", owner);
 

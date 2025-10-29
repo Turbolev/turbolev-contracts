@@ -44,8 +44,6 @@ artifacts/
 cache_hardhat/
 
 # Foundry
-lib/
-
 broadcast/
 deployments/
 

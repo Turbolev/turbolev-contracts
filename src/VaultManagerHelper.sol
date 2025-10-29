@@ -143,6 +143,24 @@ contract VaultManagerHelper {
         return totalUSD;
     }
 
+    /**
+     * @notice Get balance of native tokens in VaultManager
+     * @return balance Native token balance
+     */
+    function getNativeBalance() external view returns (uint256 balance) {
+        return address(this).balance;
+    }
+
+    /**
+     * @notice Get balance of ERC20 tokens in VaultManager
+     * @param token Token address
+     * @return balance Token balance
+     */
+    function getTokenBalance(address token) external view returns (uint256 balance) {
+        if (token == address(0)) revert InvalidAddress();
+        return IERC20(token).balanceOf(address(this));
+    }
+
     // ========================================================================
     // ADMIN FORWARDING FUNCTIONS
     // ========================================================================
@@ -208,19 +226,5 @@ contract VaultManagerHelper {
         if (vaultAddress == address(0)) revert VaultNotFound();
 
         IAssetVault(vaultAddress).setGraduationThreshold(threshold);
-    }
-
-    /**
-     * @notice Pause VaultManager factory
-     */
-    function pauseFactory() external onlyOwner {
-        IVaultManager(vaultManager).pause();
-    }
-
-    /**
-     * @notice Unpause VaultManager factory
-     */
-    function unpauseFactory() external onlyOwner {
-        IVaultManager(vaultManager).unpause();
     }
 }

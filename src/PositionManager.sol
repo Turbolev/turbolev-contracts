@@ -64,16 +64,9 @@ contract PositionManager is
     /// @notice Minimum time a position must be held before closing (configurable)
     uint256 public minPositionHoldTime;
 
-    /// @notice Maximum allowed price slippage in basis points (default: 100 = 1%)
-    /// @dev Prevents closing position if price moved unfavorably by more than this %
-    uint16 public maxSlippageBps;
-
     // ========================================================================
     // CONSTANTS
     // ========================================================================
-
-    /// @notice Maximum price age for oracle price
-    uint256 public constant PRICE_MAX_AGE = 60 seconds;
 
     // ========================================================================
     // EVENTS
@@ -153,7 +146,6 @@ contract PositionManager is
     error DeadlineExpired();
     error SlippageExceeded();
     error PriceStale();
-    error SlippageExceededOnOpen();
 
     // ========================================================================
     // CONSTRUCTOR / INITIALIZER
@@ -189,8 +181,6 @@ contract PositionManager is
         maxLeverage = uint8(PositionLib.MAX_LEVERAGE); // 100x
 
         minPositionHoldTime = PositionLib.MIN_POSITION_HOLD_TIME; // 60 seconds
-
-        maxSlippageBps = 100; // 1% default slippage tolerance
     }
 
     // ========================================================================
@@ -214,6 +204,7 @@ contract PositionManager is
      * @param leverage Leverage multiplier (1-100x)
      * @param direction 1 = LONG (predict price increase), 2 = SHORT (predict price decrease)
      * @param maxAcceptablePrice Maximum acceptable open price (0 = no limit)
+     * @param deadline Deadline timestamp for transaction execution
      * @return positionId Position ID
      */
     function openPosition(
@@ -221,8 +212,12 @@ contract PositionManager is
         uint256 collateralAmount,
         uint8 leverage,
         uint8 direction,
-        uint256 maxAcceptablePrice
+        uint256 maxAcceptablePrice,
+        uint256 deadline
     ) external payable nonReentrant whenNotPaused returns (uint64 positionId) {
+        // Check deadline
+        if (block.timestamp > deadline) revert DeadlineExpired();
+
         // Validate inputs
         if (leverage < minLeverage || leverage > maxLeverage) {
             revert InvalidLeverage();
@@ -256,12 +251,14 @@ contract PositionManager is
         }
 
         // Get price from Blocksense Oracle via SettlementEngine
+        // Use deadline as maxAge for price validation
+        uint256 maxAge = deadline > block.timestamp ? deadline - block.timestamp : 60;
         (openPrice, pricePublishTime) =
-            ISettlementEngine(settlementEngine).getSettlementPrice(projectToken);
+            ISettlementEngine(settlementEngine).getSettlementPrice(projectToken, maxAge);
 
         if (openPrice == 0) revert InvalidPrice();
 
-        if (block.timestamp > pricePublishTime + PRICE_MAX_AGE) {
+        if (block.timestamp > pricePublishTime + maxAge) {
             revert PriceStale();
         }
 
@@ -269,12 +266,12 @@ contract PositionManager is
             if (direction == PositionLib.BET_DIRECTION_LONG) {
                 // LONG: User wants to buy, so limit max price
                 if (openPrice > maxAcceptablePrice) {
-                    revert SlippageExceededOnOpen();
+                    revert SlippageExceeded();
                 }
             } else {
                 // SHORT: User wants to sell, so limit min price
                 if (openPrice < maxAcceptablePrice) {
-                    revert SlippageExceededOnOpen();
+                    revert SlippageExceeded();
                 }
             }
         }
@@ -285,8 +282,6 @@ contract PositionManager is
                 revert InvalidAddress();
             }
         }
-
-        // Asset validation removed - vault validation handled by VaultManager
 
         // Calculate position size (for risk check)
         uint256 positionSize = amount * leverage;
@@ -361,8 +356,9 @@ contract PositionManager is
      * @notice Close position (user initiated, v1: uses Blocksense Oracle)
      * @param positionId Position ID
      * @param deadline Deadline timestamp for transaction execution
+     * @param maxAcceptablePrice Maximum acceptable close price (0 = no limit)
      */
-    function closePosition(uint64 positionId, uint256 deadline)
+    function closePosition(uint64 positionId, uint256 deadline, uint256 maxAcceptablePrice)
         external
         nonReentrant
         whenNotPaused
@@ -384,33 +380,24 @@ contract PositionManager is
 
         // Get close price from Blocksense Oracle via SettlementEngine
         if (settlementEngine == address(0)) revert InvalidAddress();
+        // Use deadline as maxAge for price validation
+        uint256 maxAge = deadline > block.timestamp ? deadline - block.timestamp : 60;
         (uint256 closePrice, uint256 pricePublishTime) =
-            ISettlementEngine(settlementEngine).getSettlementPrice(pos.projectToken);
+            ISettlementEngine(settlementEngine).getSettlementPrice(pos.projectToken, maxAge);
         if (closePrice == 0) revert InvalidPrice();
 
-        if (maxSlippageBps > 0) {
-            uint256 priceChange;
-            bool unfavorable;
-
+        // Check maxAcceptablePrice if specified
+        if (maxAcceptablePrice > 0) {
             if (pos.direction == PositionLib.BET_DIRECTION_LONG) {
-                // LONG: Unfavorable if price went down
-                unfavorable = closePrice < pos.openPrice;
-                if (unfavorable) {
-                    priceChange =
-                        ((pos.openPrice - closePrice) * PositionLib.BASIS_POINTS) / pos.openPrice;
+                // LONG: User wants to sell, so limit min price
+                if (closePrice < maxAcceptablePrice) {
+                    revert SlippageExceeded();
                 }
             } else {
-                // SHORT: Unfavorable if price went up
-                unfavorable = closePrice > pos.openPrice;
-                if (unfavorable) {
-                    priceChange =
-                        ((closePrice - pos.openPrice) * PositionLib.BASIS_POINTS) / pos.openPrice;
+                // SHORT: User wants to buy back, so limit max price
+                if (closePrice > maxAcceptablePrice) {
+                    revert SlippageExceeded();
                 }
-            }
-
-            // Revert if unfavorable price movement exceeds max slippage
-            if (unfavorable && priceChange > maxSlippageBps) {
-                revert SlippageExceeded();
             }
         }
 
@@ -427,13 +414,18 @@ contract PositionManager is
      * @notice Add margin to existing position to avoid liquidation (v1: Blocksense Oracle)
      * @param positionId Position ID
      * @param marginAmount Amount of margin to add (in project token)
+     * @param maxAcceptablePrice Maximum acceptable current price for validation (0 = no limit)
+     * @param deadline Deadline timestamp for transaction execution
      */
-    function addMargin(uint64 positionId, uint256 marginAmount)
-        external
-        payable
-        nonReentrant
-        whenNotPaused
-    {
+    function addMargin(
+        uint64 positionId,
+        uint256 marginAmount,
+        uint256 maxAcceptablePrice,
+        uint256 deadline
+    ) external payable nonReentrant whenNotPaused {
+        // Check deadline
+        if (block.timestamp > deadline) revert DeadlineExpired();
+
         PositionLib.Position storage pos = positions[positionId];
 
         // Validate position
@@ -447,8 +439,25 @@ contract PositionManager is
         // Get current price from Blocksense Oracle to verify position is not liquidated
         uint256 currentPrice;
         if (settlementEngine != address(0)) {
+            // Use deadline as maxAge for price validation
+            uint256 maxAge = deadline > block.timestamp ? deadline - block.timestamp : 60;
             (currentPrice,) =
-                ISettlementEngine(settlementEngine).getSettlementPrice(pos.projectToken);
+                ISettlementEngine(settlementEngine).getSettlementPrice(pos.projectToken, maxAge);
+
+            // Check maxAcceptablePrice if specified
+            if (maxAcceptablePrice > 0) {
+                if (pos.direction == PositionLib.BET_DIRECTION_LONG) {
+                    // LONG: Limit max current price
+                    if (currentPrice > maxAcceptablePrice) {
+                        revert SlippageExceeded();
+                    }
+                } else {
+                    // SHORT: Limit min current price
+                    if (currentPrice < maxAcceptablePrice) {
+                        revert SlippageExceeded();
+                    }
+                }
+            }
 
             if (PositionLib.isLiquidated(pos, currentPrice)) {
                 revert PositionAlreadyLiquidated();
@@ -530,8 +539,10 @@ contract PositionManager is
 
         // Get close price from Blocksense Oracle via SettlementEngine
         if (settlementEngine == address(0)) revert InvalidAddress();
+        // Use default maxAge for backend operations
+        uint256 maxAge = 60; // 60 seconds default for backend operations
         (uint256 closePrice, uint256 pricePublishTime) =
-            ISettlementEngine(settlementEngine).getSettlementPrice(pos.projectToken);
+            ISettlementEngine(settlementEngine).getSettlementPrice(pos.projectToken, maxAge);
         if (closePrice == 0) revert InvalidPrice();
 
         if (isLiquidation) {

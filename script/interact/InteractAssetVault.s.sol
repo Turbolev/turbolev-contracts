@@ -65,12 +65,8 @@ contract InteractAssetVault is DeployHelper {
 
         AssetVault.VaultParams memory params = vault.getVaultParams();
 
-        console.log("Max Payout BPS:", params.maxPayoutBps);
-        console.log("Per Bet Util BPS:", params.perBetUtilBps);
-        console.log("Max Utilization BPS:", params.maxUtilizationBps);
         console.log("Min Bet Amount:", params.minBetAmount);
         console.log("Max Bet Amount:", params.maxBetAmount);
-        console.log("Max Leverage Exposure BPS:", params.maxLeverageExposureBps);
         console.log("Max Position Size Percent BPS:", params.maxPositionSizePercentBps);
         console.log("Min Liquidity Amount:", params.minLiquidityAmount);
     }
@@ -183,7 +179,11 @@ contract InteractAssetVault is DeployHelper {
         console.log("Amount:", amount);
 
         vm.startBroadcast(deployer);
-        vault.addLiquidity(amount);
+        address projectToken = vault.projectToken();
+        if (projectToken != address(0)) {
+            IERC20(projectToken).approve(address(vault), amount);
+            vault.addLiquidity(amount);
+        }
         console.log("Liquidity added successfully");
         vm.stopBroadcast();
     }
@@ -233,26 +233,14 @@ contract InteractAssetVault is DeployHelper {
      * @notice Update vault parameters
      */
     function updateVaultParams(
-        uint16 maxPayoutBps,
-        uint16 perBetUtilBps,
-        uint16 maxUtilizationBps,
         uint256 minBetAmount,
         uint256 maxBetAmount,
-        uint16 maxLeverageExposureBps,
         uint16 maxPositionSizePercentBps
     ) public {
         console.log("\n=== Update Vault Parameters ===");
 
         vm.startBroadcast(deployer);
-        vault.updateVaultParams(
-            maxPayoutBps,
-            perBetUtilBps,
-            maxUtilizationBps,
-            minBetAmount,
-            maxBetAmount,
-            maxLeverageExposureBps,
-            maxPositionSizePercentBps
-        );
+        vault.updateVaultParams(minBetAmount, maxBetAmount, maxPositionSizePercentBps);
         console.log("Vault parameters updated successfully");
         vm.stopBroadcast();
     }

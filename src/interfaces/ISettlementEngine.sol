@@ -61,12 +61,25 @@ interface ISettlementEngine {
         );
 
     /**
-     * @notice Get settlement price from Blocksense Oracle (v1: push oracle, no updates needed)
+     * @notice Get settlement price from Blocksense Oracle with custom max age
      * @param projectToken Project token address
+     * @param maxAge Maximum acceptable price age in seconds
      * @return closePrice Price from oracle (converted to uint256)
      * @return publishTime When price was published
      */
-    function getSettlementPrice(address projectToken)
+    function getSettlementPrice(address projectToken, uint256 maxAge)
+        external
+        view
+        returns (uint256 closePrice, uint256 publishTime);
+
+    /**
+     * @notice Get settlement price from CLAggregatorAdapter
+     * @param adapter CLAggregatorAdapter address for price feed
+     * @param maxAge Maximum acceptable price age
+     * @return closePrice Price from oracle (converted to uint256)
+     * @return publishTime When price was published
+     */
+    function getSettlementPriceFromAdapter(address adapter, uint256 maxAge)
         external
         view
         returns (uint256 closePrice, uint256 publishTime);

@@ -57,6 +57,30 @@ contract InteractSettlementEngine is DeployHelper {
     }
 
     /**
+     * @notice View settlement price for a project token
+     */
+    function viewSettlementPrice(address projectToken) public view {
+        console.log("\n=== Settlement Price ===");
+        console.log("Project Token:", projectToken);
+
+        (uint256 closePrice, uint256 publishTime) =
+            settlement.getSettlementPrice(projectToken, 3600); // maxAge = 1 hour
+        console.log("Close Price:", closePrice);
+        console.log("Publish Time:", publishTime);
+    }
+
+    function viewSettlementPrice(address base, address quote, uint256 maxAge) public view {
+        console.log("\n=== Settlement Price ===");
+        console.log("Base:", base);
+        console.log("Quote:", quote);
+        console.log("Max Age:", maxAge);
+
+        (uint256 closePrice, uint256 publishTime) = settlement.getSettlementPrice(base, maxAge);
+        console.log("Close Price:", closePrice);
+        console.log("Publish Time:", publishTime);
+    }
+
+    /**
      * @notice Calculate potential payout for an amount
      */
     function calculatePotentialPayout(uint256 amount) public view {

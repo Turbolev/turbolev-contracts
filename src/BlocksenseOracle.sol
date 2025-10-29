@@ -4,28 +4,25 @@ pragma solidity ^0.8.22;
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import "./interfaces/ICLFeedRegistryAdapter.sol";
+import "./interfaces/ICLAggregatorAdapter.sol";
 
 /**
  * @title BlocksenseOracle
  * @notice Oracle integration contract for Blocksense price feeds
- * @dev Wraps Blocksense CL Feed Registry Adapter for price data retrieval
+ * @dev Wraps Blocksense CL Aggregator Adapters for price data retrieval
  *
- * Reference: https://docs.blocksense.network/docs/contracts/integration-guide/using-data-feeds/cl-feed-registry-adapter
+ * Reference: https://docs.blocksense.network/docs/contracts/integration-guide/using-data-feeds/cl-aggregator-adapter
  *
  * Key Features:
- * - Get real-time prices from Blocksense Network via base/quote pairs
+ * - Get real-time prices from Blocksense Network via individual aggregator adapters
  * - Validate price updates and freshness
  * - Circuit breaker for price manipulation protection
- * - Simple interface: just pass base and quote addresses directly
+ * - Manage multiple feed adapters for different asset pairs
  */
 contract BlocksenseOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgradeable {
     // ========================================================================
     // STATE VARIABLES
     // ========================================================================
-
-    /// @notice Blocksense CL Feed Registry Adapter contract
-    ICLFeedRegistryAdapter public registry;
 
     /// @notice Maximum price age (seconds)
     uint256 public maxPriceAge;
@@ -36,7 +33,7 @@ contract BlocksenseOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgrad
         uint256 timestamp;
     }
 
-    mapping(address => mapping(address => LastPrice)) public lastValidPrices;
+    mapping(address => LastPrice) public lastValidPrices;
 
     // ========================================================================
     // PRICE VALIDATION
@@ -52,20 +49,14 @@ contract BlocksenseOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgrad
     // EVENTS
     // ========================================================================
 
-    event BlocksenseOracleInitialized(address indexed registryContract, uint256 maxPriceAge);
-
-    event RegistryContractUpdated(address indexed oldContract, address indexed newContract);
+    event BlocksenseOracleInitialized(uint256 maxPriceAge);
 
     event MaxPriceAgeUpdated(uint256 oldAge, uint256 newAge);
 
     event PriceValidationConfigUpdated(uint256 maxPriceChangeBps, uint256 minPriceUpdateInterval);
 
     event CircuitBreakerTriggered(
-        address indexed base,
-        address indexed quote,
-        int256 oldPrice,
-        int256 newPrice,
-        uint256 changePercent
+        address indexed adapter, int256 oldPrice, int256 newPrice, uint256 changePercent
     );
 
     // ========================================================================
@@ -91,14 +82,10 @@ contract BlocksenseOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgrad
     /**
      * @notice Initialize contract
      * @param initialOwner Owner address
-     * @param _registry Blocksense CL Feed Registry Adapter address
      * @param _maxPriceAge Maximum price age in seconds
      */
-    function initialize(address initialOwner, address _registry, uint256 _maxPriceAge)
-        public
-        initializer
-    {
-        if (initialOwner == address(0) || _registry == address(0)) {
+    function initialize(address initialOwner, uint256 _maxPriceAge) public initializer {
+        if (initialOwner == address(0)) {
             revert InvalidAddress();
         }
         if (_maxPriceAge == 0) revert InvalidPriceAge();
@@ -107,13 +94,12 @@ contract BlocksenseOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgrad
         __Pausable_init();
         __UUPSUpgradeable_init();
 
-        registry = ICLFeedRegistryAdapter(_registry);
         maxPriceAge = _maxPriceAge;
 
         maxPriceChangeBps = 1000;
         minPriceUpdateInterval = 1;
 
-        emit BlocksenseOracleInitialized(_registry, _maxPriceAge);
+        emit BlocksenseOracleInitialized(_maxPriceAge);
     }
 
     // ========================================================================
@@ -122,25 +108,26 @@ contract BlocksenseOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgrad
 
     /**
      * @notice Get price with validation
-     * @param base Base asset address (e.g., WETH)
-     * @param quote Quote asset address (e.g., USDC)
+     * @param adapter CLAggregatorAdapter address for the specific feed
      * @return price Price in int256 format (scaled to 18 decimals)
      * @return updatedAt When price was last updated
      */
-    function getPrice(address base, address quote)
+    function getPrice(address adapter)
         external
         view
         whenNotPaused
         returns (int256 price, uint256 updatedAt)
     {
-        if (base == address(0) || quote == address(0)) revert InvalidAddress();
+        if (adapter == address(0)) revert InvalidAddress();
 
-        (, int256 answer,, uint256 timestamp,) = registry.latestRoundData(base, quote);
+        ICLAggregatorAdapter feed = ICLAggregatorAdapter(adapter);
+
+        (, int256 answer,, uint256 timestamp,) = feed.latestRoundData();
 
         if (block.timestamp - timestamp > maxPriceAge) revert PriceStale();
         if (answer <= 0) revert InvalidPrice();
 
-        uint8 feedDecimals = registry.decimals(base, quote);
+        uint8 feedDecimals = feed.decimals();
         int256 scaledPrice = _scalePrice(answer, feedDecimals);
 
         return (scaledPrice, timestamp);
@@ -148,24 +135,25 @@ contract BlocksenseOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgrad
 
     /**
      * @notice Get price unsafe (no staleness check)
-     * @param base Base asset address
-     * @param quote Quote asset address
+     * @param adapter CLAggregatorAdapter address for the specific feed
      * @return price Price in int256 format (scaled to 18 decimals)
      * @return updatedAt When price was last updated
      */
-    function getPriceUnsafe(address base, address quote)
+    function getPriceUnsafe(address adapter)
         external
         view
         whenNotPaused
         returns (int256 price, uint256 updatedAt)
     {
-        if (base == address(0) || quote == address(0)) revert InvalidAddress();
+        if (adapter == address(0)) revert InvalidAddress();
 
-        (, int256 answer,, uint256 timestamp,) = registry.latestRoundData(base, quote);
+        ICLAggregatorAdapter feed = ICLAggregatorAdapter(adapter);
+
+        (, int256 answer,, uint256 timestamp,) = feed.latestRoundData();
 
         if (answer <= 0) revert InvalidPrice();
 
-        uint8 feedDecimals = registry.decimals(base, quote);
+        uint8 feedDecimals = feed.decimals();
         int256 scaledPrice = _scalePrice(answer, feedDecimals);
 
         return (scaledPrice, timestamp);
@@ -173,29 +161,30 @@ contract BlocksenseOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgrad
 
     /**
      * @notice Get price no older than specified age with validation
-     * @param base Base asset address
-     * @param quote Quote asset address
+     * @param adapter CLAggregatorAdapter address for the specific feed
      * @param maxAge Maximum acceptable age in seconds
      * @return price Price in int256 format (scaled to 18 decimals)
      * @return updatedAt When price was last updated
      * @dev Includes circuit breaker validation
      */
-    function getPriceNoOlderThan(address base, address quote, uint256 maxAge)
+    function getPriceNoOlderThan(address adapter, uint256 maxAge)
         external
         whenNotPaused
         returns (int256 price, uint256 updatedAt)
     {
-        if (base == address(0) || quote == address(0)) revert InvalidAddress();
+        if (adapter == address(0)) revert InvalidAddress();
 
-        (, int256 answer,, uint256 timestamp,) = registry.latestRoundData(base, quote);
+        ICLAggregatorAdapter feed = ICLAggregatorAdapter(adapter);
+
+        (, int256 answer,, uint256 timestamp,) = feed.latestRoundData();
 
         if (block.timestamp - timestamp > maxAge) revert PriceStale();
         if (answer <= 0) revert InvalidPrice();
 
-        uint8 feedDecimals = registry.decimals(base, quote);
+        uint8 feedDecimals = feed.decimals();
         int256 scaledPrice = _scalePrice(answer, feedDecimals);
 
-        _validatePrice(base, quote, scaledPrice, timestamp);
+        _validatePrice(adapter, scaledPrice, timestamp);
 
         return (scaledPrice, timestamp);
     }
@@ -222,28 +211,25 @@ contract BlocksenseOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgrad
 
     /**
      * @notice Validate price with circuit breaker
-     * @param base Base asset address
-     * @param quote Quote asset address
+     * @param adapter CLAggregatorAdapter address
      * @param price Scaled price
      * @param timestamp Update timestamp
      */
-    function _validatePrice(address base, address quote, int256 price, uint256 timestamp)
-        internal
-    {
-        LastPrice memory lastPrice = lastValidPrices[base][quote];
+    function _validatePrice(address adapter, int256 price, uint256 timestamp) internal {
+        LastPrice memory lastPrice = lastValidPrices[adapter];
 
         if (lastPrice.timestamp == 0 || maxPriceChangeBps == 0) {
-            _updateLastValidPrice(base, quote, price, timestamp);
+            _updateLastValidPrice(adapter, price, timestamp);
             return;
         }
 
         if (block.timestamp < lastPrice.timestamp + minPriceUpdateInterval) {
-            _updateLastValidPrice(base, quote, price, timestamp);
+            _updateLastValidPrice(adapter, price, timestamp);
             return;
         }
 
         if (lastPrice.price <= 0) {
-            _updateLastValidPrice(base, quote, price, timestamp);
+            _updateLastValidPrice(adapter, price, timestamp);
             return;
         }
 
@@ -255,40 +241,26 @@ contract BlocksenseOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgrad
         uint256 changePercent = (priceChange * BASIS_POINTS) / uint256(lastPrice.price);
 
         if (changePercent > maxPriceChangeBps) {
-            emit CircuitBreakerTriggered(base, quote, lastPrice.price, price, changePercent);
+            emit CircuitBreakerTriggered(adapter, lastPrice.price, price, changePercent);
             revert PriceChangeTooLarge();
         }
 
-        _updateLastValidPrice(base, quote, price, timestamp);
+        _updateLastValidPrice(adapter, price, timestamp);
     }
 
     /**
      * @notice Update last valid price for circuit breaker
-     * @param base Base asset address
-     * @param quote Quote asset address
+     * @param adapter CLAggregatorAdapter address
      * @param price Validated price
      * @param timestamp Price timestamp
      */
-    function _updateLastValidPrice(address base, address quote, int256 price, uint256 timestamp)
-        internal
-    {
-        lastValidPrices[base][quote] = LastPrice({ price: price, timestamp: timestamp });
+    function _updateLastValidPrice(address adapter, int256 price, uint256 timestamp) internal {
+        lastValidPrices[adapter] = LastPrice({ price: price, timestamp: timestamp });
     }
 
     // ========================================================================
     // ADMIN FUNCTIONS
     // ========================================================================
-
-    /**
-     * @notice Update registry contract address
-     * @param _registry New registry contract address
-     */
-    function setRegistryContract(address _registry) external onlyOwner {
-        if (_registry == address(0)) revert InvalidAddress();
-        address oldContract = address(registry);
-        registry = ICLFeedRegistryAdapter(_registry);
-        emit RegistryContractUpdated(oldContract, _registry);
-    }
 
     /**
      * @notice Update maximum price age

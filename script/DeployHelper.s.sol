@@ -51,9 +51,6 @@ contract DeployHelper is Script {
     uint256 public constant MIN_POSITION_HOLD_TIME = 60; // 60 seconds
 
     // Vault config
-    uint16 public constant MAX_PAYOUT_BPS = 500; // 5%
-    uint16 public constant PER_BET_UTIL_BPS = 1000; // 10%
-    uint16 public constant MAX_UTIL_BPS = 8000; // 80%
     uint256 public constant GRADUATION_THRESHOLD = 10_000 ether;
 
     // ========================================================================
@@ -86,12 +83,19 @@ contract DeployHelper is Script {
         blocksenseRegistry =
             vm.envOr("BLOCKSENSE_REGISTRY_ADDRESS", _getBlocksenseRegistry(block.chainid));
 
+        // Try to load already deployed contract addresses from environment
+        _loadDeployedAddressesFromEnv();
+
         console.log("=== Deployment Configuration ===");
         console.log("Chain ID:", block.chainid);
         console.log("Owner:", owner);
         console.log("Backend:", backend);
         console.log("Deployer:", deployer);
         console.log("Blocksense Registry:", blocksenseRegistry);
+        console.log("BlocksenseOracle:", blocksenseOracle);
+        console.log("SettlementEngine:", settlementEngine);
+        console.log("PositionManager:", positionManager);
+        console.log("VaultManager:", vaultManager);
     }
 
     // ========================================================================
@@ -120,6 +124,27 @@ contract DeployHelper is Script {
             // Local/dev network - will deploy mock registry
             return address(0);
         }
+    }
+
+    /**
+     * @notice Load already deployed contract addresses from environment variables
+     * @dev If addresses are set in env, they will be used instead of deploying
+     */
+    function _loadDeployedAddressesFromEnv() internal {
+        // Try to load from environment (returns zero if not found)
+        blocksenseOracle = vm.envOr("BLOCKSENSE_ORACLE_ADDRESS", address(0));
+        settlementEngine = vm.envOr("SETTLEMENT_ENGINE_ADDRESS", address(0));
+        positionManager = vm.envOr("POSITION_MANAGER_ADDRESS", address(0));
+        vaultManager = vm.envOr("VAULT_MANAGER_ADDRESS", address(0));
+    }
+
+    /**
+     * @notice Check if a contract is already deployed
+     * @param addr Contract address
+     * @return true if address is not zero
+     */
+    function _isContractDeployed(address addr) internal pure returns (bool) {
+        return addr != address(0);
     }
 
     /**

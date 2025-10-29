@@ -15,6 +15,14 @@ contract DeployPositionManager is DeployHelper {
     function run() public {
         vm.startBroadcast(deployer);
 
+        // Check if already deployed
+        if (_isContractDeployed(positionManager)) {
+            console.log("\nPositionManager already deployed!");
+            console.log("Using existing address:", positionManager);
+            vm.stopBroadcast();
+            return;
+        }
+
         console.log("\nDeploying PositionManager...");
         console.log("Owner:", owner);
         console.log("Backend:", backend);
