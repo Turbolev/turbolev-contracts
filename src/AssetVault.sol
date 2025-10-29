@@ -442,11 +442,13 @@ contract AssetVault is
         vaultParams = VaultParams({
             minBetAmount: _minBetAmount,
             maxBetAmount: _maxBetAmount,
-            maxPositionSizePercentBps: DEFAULT_MAX_POSITION_SIZE_PERCENT_BPS,
+            maxPositionSizePercentBps: uint16(
+                DEFAULT_MAX_POSITION_SIZE_PERCENT_BPS
+            ),
             minLiquidityAmount: _minBetAmount
         });
-        stakingFeeBps = DEFAULT_MAX_STAKING_FEE_BPS;
-        earlyWithdrawalFeeBps = DEFAULT_EARLY_WITHDRAWAL_FEE_BPS;
+        stakingFeeBps = uint16(DEFAULT_MAX_STAKING_FEE_BPS);
+        earlyWithdrawalFeeBps = uint16(DEFAULT_EARLY_WITHDRAWAL_FEE_BPS);
 
         emit VaultInitialized(
             _projectToken,
