@@ -46,3 +46,5 @@ cache_hardhat/
 # Foundry
 broadcast/
 deployments/
+
+.claude
