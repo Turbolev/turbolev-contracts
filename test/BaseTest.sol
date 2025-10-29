@@ -11,7 +11,68 @@ import "../src/SettlementEngine.sol";
 import "../src/BlocksenseOracle.sol";
 import "../src/VaultManagerHelper.sol";
 import "../src/interfaces/ICLFeedRegistryAdapter.sol";
+import "../src/interfaces/ICLAggregatorAdapter.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+
+contract MockAdapter is ICLAggregatorAdapter {
+    address public dataFeedStore;
+    uint256 public id;
+    uint256 public mockTimestamp;
+    address public baseToken;
+    address public quoteToken;
+
+    constructor(address _dataFeedStore, uint256 _id) {
+        dataFeedStore = _dataFeedStore;
+        id = _id;
+        mockTimestamp = block.timestamp;
+    }
+
+    function setTokens(address _baseToken, address _quoteToken) external {
+        baseToken = _baseToken;
+        quoteToken = _quoteToken;
+    }
+
+    function setMockTimestamp(uint256 _timestamp) external {
+        mockTimestamp = _timestamp;
+    }
+
+    function latestRoundData() external view returns (uint80, int256, uint256, uint256, uint80) {
+        if (baseToken != address(0) && quoteToken != address(0)) {
+            // Get price from MockRegistry
+            int256 price = MockRegistry(dataFeedStore).latestAnswer(baseToken, quoteToken);
+            return (1, price, mockTimestamp, mockTimestamp, 1);
+        }
+        return (1, 100e18, mockTimestamp, mockTimestamp, 1);
+    }
+
+    function decimals() external pure returns (uint8) {
+        return 18;
+    }
+
+    function description() external pure returns (string memory) {
+        return "Mock Adapter";
+    }
+
+    function version() external pure returns (uint256) {
+        return 1;
+    }
+
+    function getRoundData(uint80)
+        external
+        view
+        returns (uint80, int256, uint256, uint256, uint80)
+    {
+        return (1, 100e18, block.timestamp, block.timestamp, 1);
+    }
+
+    function latestAnswer() external pure returns (int256) {
+        return 100e18;
+    }
+
+    function latestRound() external pure returns (uint256) {
+        return 1;
+    }
+}
 
 contract MockRegistry is ICLFeedRegistryAdapter {
     mapping(address => mapping(address => int256)) public prices;
@@ -138,6 +199,7 @@ contract BaseTest is Test {
 
     // Mock contracts
     MockRegistry public mockRegistry;
+    MockAdapter public mockAdapter;
     MockERC20 public projectToken;
     MockERC20 public usdc;
 
@@ -204,6 +266,9 @@ contract BaseTest is Test {
         // Deploy mock registry
         mockRegistry = new MockRegistry();
 
+        // Deploy mock adapter
+        mockAdapter = new MockAdapter(address(mockRegistry), 1);
+
         // Deploy BlocksenseOracle (upgradeable via ERC1967Proxy)
         BlocksenseOracle oracleImpl = new BlocksenseOracle();
         bytes memory oracleInitData = abi.encodeWithSelector(
@@ -252,17 +317,12 @@ contract BaseTest is Test {
         // Set oracle in Settlement Engine
         settlementEngine.setBlocksenseOracle(address(blocksenseOracle));
 
+        // Set default price decimals for mock registry
+        mockRegistry.setDecimals(address(projectToken), address(usdc), 18);
+
         // Create vault for project token
         address vaultAddr = vaultManager.createVault(
-            address(projectToken),
-            address(projectToken), // base
-            address(usdc), // quote
-            DEFAULT_MAX_PAYOUT_BPS,
-            DEFAULT_PER_BET_UTIL_BPS,
-            DEFAULT_MAX_UTIL_BPS,
-            DEFAULT_MIN_BET,
-            DEFAULT_MAX_BET,
-            DEFAULT_GRADUATION_THRESHOLD
+            address(projectToken), DEFAULT_MIN_BET, DEFAULT_MAX_BET, DEFAULT_GRADUATION_THRESHOLD
         );
         assetVault = AssetVault(payable(vaultAddr));
 
@@ -273,6 +333,19 @@ contract BaseTest is Test {
 
         // Set oracle in vault
         assetVault.setBlocksenseOracle(address(blocksenseOracle));
+
+        // Set oracle adapter in vault (use mock adapter for testing)
+        assetVault.setOracleAdapter(address(mockAdapter));
+
+        // Set tokens for mock adapter now that they're created
+        mockAdapter.setTokens(address(projectToken), address(usdc));
+
+        // Set position manager in vault so it can accept deposits
+        // Note: Already set in constructor by VaultManager, but we re-set to be sure
+        assetVault.setPositionManager(address(positionManager));
+
+        console.log("AssetVault address:", address(assetVault));
+        console.log("PositionManager address:", address(positionManager));
     }
 
     // Helper functions
@@ -302,7 +375,8 @@ contract BaseTest is Test {
             amount,
             leverage,
             direction,
-            0 // no price limit
+            0, // no price limit
+            block.timestamp + 3600 // deadline = 1 hour
         );
         vm.stopPrank();
     }

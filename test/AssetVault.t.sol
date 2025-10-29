@@ -23,7 +23,6 @@ contract AssetVaultTest is BaseTest {
     function test_GetVaultParams_Success() public {
         AssetVault.VaultParams memory params = assetVault.getVaultParams();
 
-        assertEq(params.maxPayoutBps, 500, "Max payout should be 500");
         assertGt(params.minBetAmount, 0, "Min bet should be > 0");
         assertGt(params.maxBetAmount, 0, "Max bet should be > 0");
     }
@@ -98,17 +97,13 @@ contract AssetVaultTest is BaseTest {
 
     function test_UpdateVaultParams_Success() public {
         assetVault.updateVaultParams(
-            1000, // maxPayoutBps
-            2000, // perBetUtilBps
-            8000, // maxUtilizationBps
             0.01 ether, // minBetAmount
             100 ether, // maxBetAmount
-            5000, // maxLeverageExposureBps
             1000 // maxPositionSizePercentBps
         );
 
         AssetVault.VaultParams memory params = assetVault.getVaultParams();
-        assertEq(params.maxPayoutBps, 1000, "Max payout should be updated");
+        assertEq(params.maxPositionSizePercentBps, 1000, "Max position size should be updated");
         assertEq(params.minBetAmount, 0.01 ether, "Min bet should be updated");
     }
 

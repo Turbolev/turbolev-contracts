@@ -54,7 +54,6 @@ contract VaultManagerHelperTest is BaseTest {
         IAssetVault.VaultParams memory params = helper.getVaultParams(address(projectToken));
 
         // Check that params are set (values from BaseTest setup)
-        assertEq(params.maxPayoutBps, 500, "Max payout should be 500");
         assertGt(params.minBetAmount, 0, "Min bet should be > 0");
         assertGt(params.maxBetAmount, 0, "Max bet should be > 0");
     }
@@ -115,12 +114,6 @@ contract VaultManagerHelperTest is BaseTest {
         vm.prank(user1);
         vm.expectRevert(abi.encodeWithSelector(VaultManagerHelper.NotAuthorized.selector));
         helper.pauseVault(address(projectToken));
-    }
-
-    function test_PauseFactory_RevertsWhenNotOwner() public {
-        vm.prank(user1);
-        vm.expectRevert(abi.encodeWithSelector(VaultManagerHelper.NotAuthorized.selector));
-        helper.pauseFactory();
     }
 
     function test_AdminFunctions_RevertsOnInvalidVault() public {

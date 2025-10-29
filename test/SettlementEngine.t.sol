@@ -185,7 +185,7 @@ contract SettlementEngineTest is BaseTest {
         _updatePrice(address(projectToken), address(usdc), 100e18);
 
         (uint256 price, uint256 publishTime) =
-            settlementEngine.getSettlementPrice(address(projectToken), address(usdc), 3600);
+            settlementEngine.getSettlementPrice(address(projectToken), 3600);
 
         assertEq(price, 100e18, "Price should be 100");
         assertEq(publishTime, block.timestamp, "Publish time should match");
@@ -196,17 +196,20 @@ contract SettlementEngineTest is BaseTest {
         settlementEngine.pause();
 
         vm.expectRevert();
-        settlementEngine.getSettlementPrice(address(projectToken), address(usdc), 3600);
+        settlementEngine.getSettlementPrice(address(projectToken), 3600);
     }
 
     function test_GetSettlementPrice_RevertsOnStalePrice() public {
         _updatePrice(address(projectToken), address(usdc), 100e18);
 
-        // Warp time forward
-        vm.warp(block.timestamp + 3601);
+        // Set old timestamp in mock adapter (1 hour ago)
+        mockAdapter.setMockTimestamp(1);
 
-        // Oracle throws PriceStale, not InvalidOraclePrice
-        vm.expectRevert(abi.encodeWithSelector(BlocksenseOracle.PriceStale.selector));
-        settlementEngine.getSettlementPrice(address(projectToken), address(usdc), 3600);
+        // Warp to make sure current time is much later
+        vm.warp(block.timestamp + 7200); // 2 hours later
+
+        // Oracle throws InvalidOraclePrice for stale price
+        vm.expectRevert(abi.encodeWithSelector(SettlementEngine.InvalidOraclePrice.selector));
+        settlementEngine.getSettlementPrice(address(projectToken), 3600);
     }
 }
