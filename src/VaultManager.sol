@@ -130,11 +130,6 @@ contract VaultManager is
     /**
      * @notice Create new vault for a project token
      * @param _projectToken Project token address
-     * @param _projectTokenBase Base token address for price feed
-     * @param _projectTokenQuote Quote token address for price feed
-     * @param _maxPayoutBps Max payout in bps
-     * @param _perBetUtilBps Per bet utilization in bps
-     * @param _maxUtilizationBps Max utilization in bps
      * @param _minBetAmount Min bet amount
      * @param _maxBetAmount Max bet amount
      * @param _graduationThreshold Token amount threshold for graduation
@@ -142,19 +137,11 @@ contract VaultManager is
      */
     function createVault(
         address _projectToken,
-        address _projectTokenBase,
-        address _projectTokenQuote,
-        uint16 _maxPayoutBps,
-        uint16 _perBetUtilBps,
-        uint16 _maxUtilizationBps,
         uint256 _minBetAmount,
         uint256 _maxBetAmount,
         uint256 _graduationThreshold
     ) external onlyOwner returns (address vaultAddress) {
         if (_projectToken == address(0)) revert InvalidAddress();
-        if (_projectTokenBase == address(0) || _projectTokenQuote == address(0)) {
-            revert InvalidAddress();
-        }
 
         if (vaultsByProjectToken[_projectToken] != address(0)) {
             revert DuplicateProjectToken();
@@ -162,13 +149,8 @@ contract VaultManager is
 
         AssetVault vault = new AssetVault(
             _projectToken,
-            _projectTokenBase,
-            _projectTokenQuote,
             address(this),
             positionManager,
-            _maxPayoutBps,
-            _perBetUtilBps,
-            _maxUtilizationBps,
             _minBetAmount,
             _maxBetAmount,
             _graduationThreshold
@@ -401,28 +383,6 @@ contract VaultManager is
      * @notice Authorize upgrade (UUPS pattern)
      */
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner { }
-
-    // ========================================================================
-    // VIEW FUNCTIONS
-    // ========================================================================
-
-    /**
-     * @notice Get balance of native tokens in VaultManager
-     * @return balance Native token balance
-     */
-    function getNativeBalance() external view returns (uint256 balance) {
-        return address(this).balance;
-    }
-
-    /**
-     * @notice Get balance of ERC20 tokens in VaultManager
-     * @param token Token address
-     * @return balance Token balance
-     */
-    function getTokenBalance(address token) external view returns (uint256 balance) {
-        if (token == address(0)) revert InvalidAddress();
-        return IERC20(token).balanceOf(address(this));
-    }
 
     /**
      * @notice Get contract version

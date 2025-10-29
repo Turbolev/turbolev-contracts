@@ -299,15 +299,50 @@ contract SettlementEngine is
     }
 
     /**
-     * @notice Get settlement price (for backend settlement)
-     * @param base Base token address for price feed
-     * @param quote Quote token address for price feed
+     * @notice Get settlement price for project token with custom max age
+     * @param projectToken Project token address
+     * @param maxAge Maximum acceptable price age in seconds
+     * @return closePrice Settlement price
+     * @return publishTime When price was last updated
+     * @dev Gets base/quote from vault manager and queries oracle
+     */
+    function getSettlementPrice(address projectToken, uint256 maxAge)
+        external
+        view
+        whenNotPaused
+        returns (uint256 closePrice, uint256 publishTime)
+    {
+        if (blocksenseOracle == address(0)) revert InvalidAddress();
+        if (vaultManager == address(0)) revert InvalidAddress();
+
+        // Get vault for project token from VaultManager
+        address vaultAddr = IVaultManager(vaultManager).getVault(projectToken);
+        if (vaultAddr == address(0)) revert InvalidAddress();
+
+        // Get oracle adapter from vault
+        IAssetVault vault = IAssetVault(vaultAddr);
+        address adapter = vault.oracleAdapter();
+
+        // Get price from oracle
+        (int256 price, uint256 updatedAt) = BlocksenseOracle(blocksenseOracle).getPrice(adapter);
+
+        // Check price age with custom maxAge
+        if (block.timestamp - updatedAt > maxAge) revert InvalidOraclePrice();
+
+        // Convert to uint256 (price should always be positive for assets)
+        if (price <= 0) revert InvalidOraclePrice();
+        return (uint256(price), updatedAt);
+    }
+
+    /**
+     * @notice Get settlement price from adapter (for backend settlement)
+     * @param adapter CLAggregatorAdapter address for price feed
      * @param maxAge Maximum acceptable price age
      * @return closePrice Settlement price
      * @return publishTime When price was last updated
      * @dev Public wrapper for external calls - internal logic uses direct oracle call
      */
-    function getSettlementPrice(address base, address quote, uint256 maxAge)
+    function getSettlementPriceFromAdapter(address adapter, uint256 maxAge)
         external
         view
         whenNotPaused
@@ -315,7 +350,7 @@ contract SettlementEngine is
     {
         if (blocksenseOracle == address(0)) revert InvalidAddress();
 
-        (int256 price, uint256 updatedAt) = BlocksenseOracle(blocksenseOracle).getPrice(base, quote);
+        (int256 price, uint256 updatedAt) = BlocksenseOracle(blocksenseOracle).getPrice(adapter);
 
         // Check price age
         if (block.timestamp - updatedAt > maxAge) revert InvalidOraclePrice();
