@@ -8,6 +8,7 @@ import "../src/BlocksenseOracle.sol";
 import "../src/SettlementEngine.sol";
 import "../src/PositionManager.sol";
 import "../src/VaultManager.sol";
+import "../src/VaultManagerHelper.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 /**
@@ -27,6 +28,9 @@ contract DeployAll is DeployHelper {
     address public settlementEngineProxy;
     address public positionManagerProxy;
     address public vaultManagerProxy;
+
+    // Non-upgradeable helper contract
+    address public vaultManagerHelper;
 
     function run() public {
         vm.startBroadcast(deployer);
@@ -52,13 +56,16 @@ contract DeployAll is DeployHelper {
         // Step 4: Deploy VaultManager
         _deployVaultManager();
 
-        // Step 5: Setup contract connections
+        // Step 5: Deploy VaultManagerHelper
+        _deployVaultManagerHelper();
+
+        // Step 6: Setup contract connections
         _setupConnections();
 
-        // Step 6: Verify deployment
+        // Step 7: Verify deployment
         _verifyDeployment();
 
-        // Step 7: Save addresses
+        // Step 8: Save addresses
         // _saveDeploymentAddresses();
 
         console.log("\n===========================================");
@@ -75,120 +82,166 @@ contract DeployAll is DeployHelper {
     // ========================================================================
 
     function _deployBlocksenseOracle() internal {
-        // Check if already deployed
-        if (_isContractDeployed(blocksenseOracle)) {
-            console.log("\nBlocksenseOracle already deployed, skipping...");
-            return;
-        }
-
         console.log("\nStep 1: Deploying BlocksenseOracle...");
 
-        // Deploy implementation
+        // Deploy new implementation
         blocksenseOracleImpl = address(new BlocksenseOracle());
         console.log("Implementation deployed:", blocksenseOracleImpl);
 
-        // Prepare initialization data
-        bytes memory initData = abi.encodeWithSelector(
-            BlocksenseOracle.initialize.selector, owner, blocksenseRegistry, ORACLE_MAX_PRICE_AGE
-        );
+        // Check if proxy already exists
+        if (_isContractDeployed(blocksenseOracle)) {
+            console.log("Proxy already exists at:", blocksenseOracle);
+            console.log("Upgrading to new implementation...");
 
-        // Deploy proxy
-        blocksenseOracleProxy = address(new ERC1967Proxy(blocksenseOracleImpl, initData));
+            // Upgrade existing proxy to new implementation
+            BlocksenseOracle(blocksenseOracle).upgradeToAndCall(blocksenseOracleImpl, "");
+            console.log("[UPGRADED] BlocksenseOracle");
+        } else {
+            console.log("Deploying new proxy...");
 
-        blocksenseOracle = blocksenseOracleProxy;
+            // Prepare initialization data
+            bytes memory initData = abi.encodeWithSelector(
+                BlocksenseOracle.initialize.selector,
+                owner,
+                blocksenseRegistry,
+                ORACLE_MAX_PRICE_AGE
+            );
+
+            // Deploy proxy
+            blocksenseOracleProxy = address(new ERC1967Proxy(blocksenseOracleImpl, initData));
+            blocksenseOracle = blocksenseOracleProxy;
+
+            console.log("[NEW] BlocksenseOracle proxy deployed:", blocksenseOracle);
+        }
 
         _logDeployment("BlocksenseOracle", blocksenseOracle);
         _logDeployment("BlocksenseOracle Implementation", blocksenseOracleImpl);
     }
 
     function _deploySettlementEngine() internal {
-        // Check if already deployed
-        if (_isContractDeployed(settlementEngine)) {
-            console.log("\nSettlementEngine already deployed, skipping...");
-            return;
-        }
-
         console.log("\nStep 2: Deploying SettlementEngine...");
 
-        // Deploy implementation
+        // Deploy new implementation
         settlementEngineImpl = address(new SettlementEngine());
         console.log("Implementation deployed:", settlementEngineImpl);
 
-        // Prepare initialization data
-        bytes memory initData = abi.encodeWithSelector(SettlementEngine.initialize.selector, owner);
+        // Check if proxy already exists
+        if (_isContractDeployed(settlementEngine)) {
+            console.log("Proxy already exists at:", settlementEngine);
+            console.log("Upgrading to new implementation...");
 
-        // Deploy proxy
-        settlementEngineProxy = address(new ERC1967Proxy(settlementEngineImpl, initData));
+            // Upgrade existing proxy to new implementation
+            SettlementEngine(settlementEngine).upgradeToAndCall(settlementEngineImpl, "");
+            console.log("[UPGRADED] SettlementEngine");
+        } else {
+            console.log("Deploying new proxy...");
 
-        settlementEngine = settlementEngineProxy;
+            // Prepare initialization data
+            bytes memory initData =
+                abi.encodeWithSelector(SettlementEngine.initialize.selector, owner);
 
-        // Update settlement config
-        SettlementEngine(settlementEngine).updateConfig(
-            HOUSE_EDGE_BPS, WIN_MULTIPLIER_BPS, MIN_BET_AMOUNT, MAX_BET_AMOUNT
-        );
+            // Deploy proxy
+            settlementEngineProxy = address(new ERC1967Proxy(settlementEngineImpl, initData));
+            settlementEngine = settlementEngineProxy;
 
-        SettlementEngine(settlementEngine).setMaxProfitCapBps(MAX_PROFIT_CAP_BPS);
+            // Update settlement config (only for new deployments)
+            SettlementEngine(settlementEngine).updateConfig(
+                HOUSE_EDGE_BPS, WIN_MULTIPLIER_BPS, MIN_BET_AMOUNT, MAX_BET_AMOUNT
+            );
+            SettlementEngine(settlementEngine).setMaxProfitCapBps(MAX_PROFIT_CAP_BPS);
+
+            console.log("[NEW] SettlementEngine proxy deployed:", settlementEngine);
+        }
 
         _logDeployment("SettlementEngine", settlementEngine);
         _logDeployment("SettlementEngine Implementation", settlementEngineImpl);
     }
 
     function _deployPositionManager() internal {
-        // Check if already deployed
-        if (_isContractDeployed(positionManager)) {
-            console.log("\nPositionManager already deployed, skipping...");
-            return;
-        }
-
         console.log("\nStep 3: Deploying PositionManager...");
 
-        // Deploy implementation
+        // Deploy new implementation
         positionManagerImpl = address(new PositionManager());
         console.log("Implementation deployed:", positionManagerImpl);
 
-        // Prepare initialization data
-        bytes memory initData =
-            abi.encodeWithSelector(PositionManager.initialize.selector, owner, backend);
+        // Check if proxy already exists
+        if (_isContractDeployed(positionManager)) {
+            console.log("Proxy already exists at:", positionManager);
+            console.log("Upgrading to new implementation...");
 
-        // Deploy proxy
-        positionManagerProxy = address(new ERC1967Proxy(positionManagerImpl, initData));
+            // Upgrade existing proxy to new implementation
+            PositionManager(payable(positionManager)).upgradeToAndCall(positionManagerImpl, "");
+            console.log("[UPGRADED] PositionManager");
+        } else {
+            console.log("Deploying new proxy...");
 
-        positionManager = positionManagerProxy;
+            // Prepare initialization data
+            bytes memory initData =
+                abi.encodeWithSelector(PositionManager.initialize.selector, owner, backend);
 
-        // Update config
-        PositionManager(payable(positionManager)).setMaintenanceMarginRatio(
-            MAINTENANCE_MARGIN_RATIO
-        );
-        PositionManager(payable(positionManager)).setLeverageLimits(MIN_LEVERAGE, MAX_LEVERAGE);
-        PositionManager(payable(positionManager)).setMinPositionHoldTime(MIN_POSITION_HOLD_TIME);
+            // Deploy proxy
+            positionManagerProxy = address(new ERC1967Proxy(positionManagerImpl, initData));
+            positionManager = positionManagerProxy;
+
+            // Update config (only for new deployments)
+            PositionManager(payable(positionManager)).setMaintenanceMarginRatio(
+                MAINTENANCE_MARGIN_RATIO
+            );
+            PositionManager(payable(positionManager)).setLeverageLimits(MIN_LEVERAGE, MAX_LEVERAGE);
+            PositionManager(payable(positionManager)).setMinPositionHoldTime(MIN_POSITION_HOLD_TIME);
+
+            console.log("[NEW] PositionManager proxy deployed:", positionManager);
+        }
 
         _logDeployment("PositionManager", positionManager);
         _logDeployment("PositionManager Implementation", positionManagerImpl);
     }
 
     function _deployVaultManager() internal {
-        // Check if already deployed
-        if (_isContractDeployed(vaultManager)) {
-            console.log("\nVaultManager already deployed, skipping...");
-            return;
-        }
-
         console.log("\nStep 4: Deploying VaultManager...");
 
-        // Deploy implementation
+        // Deploy new implementation
         vaultManagerImpl = address(new VaultManager());
         console.log("Implementation deployed:", vaultManagerImpl);
 
-        // Prepare initialization data
-        bytes memory initData = abi.encodeWithSelector(VaultManager.initialize.selector, owner);
+        // Check if proxy already exists
+        if (_isContractDeployed(vaultManager)) {
+            console.log("Proxy already exists at:", vaultManager);
+            console.log("Upgrading to new implementation...");
 
-        // Deploy proxy
-        vaultManagerProxy = address(new ERC1967Proxy(vaultManagerImpl, initData));
+            // Upgrade existing proxy to new implementation
+            VaultManager(vaultManager).upgradeToAndCall(vaultManagerImpl, "");
+            console.log("[UPGRADED] VaultManager");
+        } else {
+            console.log("Deploying new proxy...");
 
-        vaultManager = vaultManagerProxy;
+            // Prepare initialization data
+            bytes memory initData = abi.encodeWithSelector(VaultManager.initialize.selector, owner);
+
+            // Deploy proxy
+            vaultManagerProxy = address(new ERC1967Proxy(vaultManagerImpl, initData));
+            vaultManager = vaultManagerProxy;
+
+            console.log("[NEW] VaultManager proxy deployed:", vaultManager);
+        }
 
         _logDeployment("VaultManager", vaultManager);
         _logDeployment("VaultManager Implementation", vaultManagerImpl);
+    }
+
+    function _deployVaultManagerHelper() internal {
+        // Check if already deployed
+        if (_isContractDeployed(vaultManagerHelper)) {
+            console.log("\nVaultManagerHelper already deployed, skipping...");
+            return;
+        }
+
+        console.log("\nStep 5: Deploying VaultManagerHelper...");
+
+        // Deploy VaultManagerHelper (non-upgradeable)
+        vaultManagerHelper = address(new VaultManagerHelper(vaultManager));
+
+        _logDeployment("VaultManagerHelper", vaultManagerHelper);
     }
 
     // ========================================================================
@@ -196,7 +249,7 @@ contract DeployAll is DeployHelper {
     // ========================================================================
 
     function _setupConnections() internal {
-        console.log("\nStep 5: Setting up contract connections...");
+        console.log("\nStep 6: Setting up contract connections...");
 
         // BlocksenseOracle: Set in SettlementEngine
         SettlementEngine(settlementEngine).setBlocksenseOracle(blocksenseOracle);
@@ -224,12 +277,13 @@ contract DeployAll is DeployHelper {
     // ========================================================================
 
     function _verifyDeployment() internal view {
-        console.log("\nStep 6: Verifying deployment...");
+        console.log("\nStep 7: Verifying deployment...");
 
         require(blocksenseOracle != address(0), "BlocksenseOracle not deployed");
         require(settlementEngine != address(0), "SettlementEngine not deployed");
         require(positionManager != address(0), "PositionManager not deployed");
         require(vaultManager != address(0), "VaultManager not deployed");
+        require(vaultManagerHelper != address(0), "VaultManagerHelper not deployed");
 
         // Verify owner
         require(Ownable(blocksenseOracle).owner() == owner, "Wrong BlocksenseOracle owner");
@@ -273,6 +327,7 @@ contract DeployAll is DeployHelper {
         console.log("- SettlementEngine:", settlementEngine);
         console.log("- PositionManager:", positionManager);
         console.log("- VaultManager:", vaultManager);
+        console.log("- VaultManagerHelper:", vaultManagerHelper);
         console.log("\nImplementations:");
         console.log("- BlocksenseOracle Impl:", blocksenseOracleImpl);
         console.log("- SettlementEngine Impl:", settlementEngineImpl);

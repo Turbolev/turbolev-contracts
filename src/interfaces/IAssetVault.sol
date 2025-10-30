@@ -6,15 +6,23 @@ pragma solidity ^0.8.22;
  * @notice Interface for AssetVault contract
  */
 interface IAssetVault {
+    enum LiquidityOperationType {
+        USER_DEPOSIT, // User deposits liquidity
+        USER_WITHDRAW, // User withdraws liquidity
+        CLOSE_POSITION, // Liquidity change from position closure
+        BET_DEPOSIT, // Liquidity from bet collateral deposit
+        PAYOUT_EXECUTION // Liquidity change from payout execution
+
+    }
+
     struct VaultInfo {
-        uint256 totalLiquidity;
+        uint256 totalLiquidity; // Total LP liquidity only
         uint256 totalShares;
         uint256 lifetimePnL;
         bool isNegativePnL;
         uint256 totalVolume;
         uint256 totalPositionsSettled;
         uint256 totalLeverageExposure;
-        uint256 maxLeverageExposure;
         uint256 createdAt;
         uint256 totalFeesCollected;
         uint256 totalStakingFees;
@@ -23,7 +31,6 @@ interface IAssetVault {
         uint256 graduationThreshold;
         uint256 graduatedAt;
         bool tradingEnabled;
-        uint256 totalExcessProfit;
         uint256 pendingPositions;
     }
 
@@ -70,10 +77,17 @@ interface IAssetVault {
 
     /**
      * @notice Deposit collateral from bet
+     * @param positionId Position ID
      * @param amount Collateral amount in project tokens
      * @param positionSize Position size
+     * @param isMarginAdd True if adding margin to existing position, false if opening new position
      */
-    function depositFromBet(uint256 amount, uint256 positionSize) external payable;
+    function depositFromBet(
+        uint64 positionId,
+        uint256 amount,
+        uint256 positionSize,
+        bool isMarginAdd
+    ) external payable;
 
     /**
      * @notice Execute payout to user
@@ -90,15 +104,13 @@ interface IAssetVault {
      * @param vaultPnL Vault P&L
      * @param fee Fee collected
      * @param positionSize Position size
-     * @param excessProfit Excess profit from capped trades
      */
     function updateVaultPnL(
         uint64 positionId,
         uint256 collateral,
         int256 vaultPnL,
         uint256 fee,
-        uint256 positionSize,
-        uint256 excessProfit
+        uint256 positionSize
     ) external;
 
     /**

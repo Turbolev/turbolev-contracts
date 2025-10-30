@@ -113,6 +113,7 @@ contract SettlementEngine is
     error InvalidAddress();
     error NotPositionManager();
     error InvalidOraclePrice();
+    error DirectTransferNotAllowed();
 
     // ========================================================================
     // MODIFIERS
@@ -150,6 +151,20 @@ contract SettlementEngine is
         minBetAmount = 0.001 ether; // 0.001 MON
         maxBetAmount = 1000 ether; // 1000 MON
         maxProfitCapBps = 200;
+    }
+
+    // ========================================================================
+    // RECEIVE / FALLBACK
+    // ========================================================================
+
+    /// @notice Reject direct native token transfers
+    receive() external payable {
+        revert DirectTransferNotAllowed();
+    }
+
+    /// @notice Reject fallback calls
+    fallback() external payable {
+        revert DirectTransferNotAllowed();
     }
 
     // ========================================================================
@@ -469,7 +484,7 @@ contract SettlementEngine is
         }
 
         IAssetVault.VaultInfo memory vaultInfo = IAssetVault(vaultAddress).getVaultInfo();
-        uint256 vaultLiquidity = vaultInfo.totalLiquidity;
+        uint256 vaultLiquidity = vaultInfo.totalLiquidity; // Use total LP liquidity for cap calculation
 
         if (vaultLiquidity == 0) {
             return 0;

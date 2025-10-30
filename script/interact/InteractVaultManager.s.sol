@@ -368,13 +368,11 @@ contract InteractVaultManager is DeployHelper {
         console.log("\n--- P&L ---");
         console.log("Lifetime P&L:", info.lifetimePnL);
         console.log("Is Negative P&L:", info.isNegativePnL);
-        console.log("Total Excess Profit:", info.totalExcessProfit);
 
         console.log("\n--- Trading Stats ---");
         console.log("Total Volume:", info.totalVolume);
         console.log("Total Positions Settled:", info.totalPositionsSettled);
         console.log("Total Leverage Exposure:", info.totalLeverageExposure);
-        console.log("Max Leverage Exposure:", info.maxLeverageExposure);
 
         console.log("\n--- Fees ---");
         console.log("Total Fees Collected:", info.totalFeesCollected);

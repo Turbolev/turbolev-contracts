@@ -65,10 +65,6 @@ contract PositionManager is
     uint256 public minPositionHoldTime;
 
     // ========================================================================
-    // CONSTANTS
-    // ========================================================================
-
-    // ========================================================================
     // EVENTS
     // ========================================================================
 
@@ -118,6 +114,7 @@ contract PositionManager is
         address indexed user,
         uint256 marginAmount,
         uint256 newTotalMargin,
+        uint256 newPositionSize,
         uint256 newLiquidationPrice,
         uint256 timestamp
     );
@@ -146,6 +143,7 @@ contract PositionManager is
     error DeadlineExpired();
     error SlippageExceeded();
     error PriceStale();
+    error DirectTransferNotAllowed();
 
     // ========================================================================
     // CONSTRUCTOR / INITIALIZER
@@ -187,11 +185,15 @@ contract PositionManager is
     // RECEIVE / FALLBACK
     // ========================================================================
 
-    /// @notice Accept native token transfers
-    receive() external payable { }
+    /// @notice Reject direct native token transfers
+    receive() external payable {
+        revert DirectTransferNotAllowed();
+    }
 
-    /// @notice Fallback function
-    fallback() external payable { }
+    /// @notice Reject fallback calls
+    fallback() external payable {
+        revert DirectTransferNotAllowed();
+    }
 
     // ========================================================================
     // USER FUNCTIONS
@@ -293,6 +295,9 @@ contract PositionManager is
             if (!canOpen) revert RiskLimitExceeded();
         }
 
+        // Create position ID first
+        positionId = nextPositionId++;
+
         // Transfer collateral to VaultManager
         if (vaultManager != address(0)) {
             if (projectToken != address(0)) {
@@ -302,11 +307,8 @@ contract PositionManager is
 
             IVaultManager(vaultManager).depositFromBet{
                 value: projectToken == address(0) ? amount : 0
-            }(projectToken, amount, positionSize);
+            }(projectToken, positionId, amount, positionSize, false); // false = opening new position
         }
-
-        // Create position with leverage
-        positionId = nextPositionId++;
         PositionLib.Position storage pos = positions[positionId];
 
         pos.positionId = positionId;
@@ -412,6 +414,11 @@ contract PositionManager is
 
     /**
      * @notice Add margin to existing position to avoid liquidation (v1: Blocksense Oracle)
+     * @dev Adds margin to reduce effective leverage and improve liquidation price
+     * - Adds margin to collateral
+     * - Position size stays the same
+     * - Effective leverage decreases
+     * - Liquidation price improves (moves further from current price)
      * @param positionId Position ID
      * @param marginAmount Amount of margin to add (in project token)
      * @param maxAcceptablePrice Maximum acceptable current price for validation (0 = no limit)
@@ -473,7 +480,7 @@ contract PositionManager is
             IERC20(pos.tokenAddress).transferFrom(msg.sender, address(this), marginAmount);
         }
 
-        // Update position margin
+        // Update position margin (position size stays the same)
         pos.amount += marginAmount;
         pos.addedMargin += marginAmount;
         pos.lastModifiedTimestamp = block.timestamp;
@@ -489,7 +496,7 @@ contract PositionManager is
         pos.liquidationPrice = PositionLib.calculateLiquidationPrice(
             pos.openPrice,
             pos.direction,
-            effectiveLeverage, // Use effective leverage instead of original
+            effectiveLeverage, // Use new effective leverage (lower than original)
             maintenanceMarginRatio
         );
 
@@ -507,13 +514,21 @@ contract PositionManager is
                     : (!useProjectToken ? marginAmount : 0)
             }(
                 pos.projectToken,
+                positionId,
                 marginAmount,
-                0 // No position size increase
+                0, // No position size increase
+                true // true = adding margin
             );
         }
 
         emit MarginAdded(
-            positionId, msg.sender, marginAmount, pos.amount, pos.liquidationPrice, block.timestamp
+            positionId,
+            msg.sender,
+            marginAmount,
+            pos.amount,
+            pos.positionSize,
+            pos.liquidationPrice,
+            block.timestamp
         );
     }
 
@@ -576,15 +591,8 @@ contract PositionManager is
         if (settlementEngine == address(0)) revert InvalidAddress();
 
         // Process settlement and get result - direct call (no more low-level call)
-        (
-            bool won,
-            uint256 payout,
-            uint256 fee,
-            int256 pnl,
-            int256 vaultPnL,
-            uint8 finalState,
-            uint256 excessProfit
-        ) = ISettlementEngine(settlementEngine).processSettlement(pos, closePrice, isLiquidation);
+        (bool won, uint256 payout, uint256 fee, int256 pnl, int256 vaultPnL, uint8 finalState,) =
+            ISettlementEngine(settlementEngine).processSettlement(pos, closePrice, isLiquidation);
 
         // Update vault P&L
         if (vaultManager != address(0)) {
@@ -594,8 +602,7 @@ contract PositionManager is
                 pos.amount,
                 vaultPnL,
                 fee,
-                pos.positionSize,
-                excessProfit
+                pos.positionSize
             );
         }
 

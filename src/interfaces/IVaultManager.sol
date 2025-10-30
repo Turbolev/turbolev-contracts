@@ -36,12 +36,18 @@ interface IVaultManager {
     /**
      * @notice Deposit collateral from bet (v1: project token only)
      * @param _projectToken Project token address
+     * @param positionId Position ID
      * @param amount Collateral amount in project tokens
      * @param positionSize Position size
+     * @param isMarginAdd True if adding margin to existing position
      */
-    function depositFromBet(address _projectToken, uint256 amount, uint256 positionSize)
-        external
-        payable;
+    function depositFromBet(
+        address _projectToken,
+        uint64 positionId,
+        uint256 amount,
+        uint256 positionSize,
+        bool isMarginAdd
+    ) external payable;
 
     /**
      * @notice Execute payout to user (v1: project token only)
@@ -61,7 +67,6 @@ interface IVaultManager {
      * @param vaultPnL Vault P&L
      * @param fee Fee collected
      * @param positionSize Position size
-     * @param excessProfit Excess profit from capped trades
      */
     function updateVaultPnLWithLeverage(
         address _projectToken,
@@ -69,8 +74,7 @@ interface IVaultManager {
         uint256 collateral,
         int256 vaultPnL,
         uint256 fee,
-        uint256 positionSize,
-        uint256 excessProfit
+        uint256 positionSize
     ) external;
 
     /**
@@ -98,4 +102,37 @@ interface IVaultManager {
      * @notice Unpause factory
      */
     function unpause() external;
+
+    /**
+     * @notice Update PositionManager for a specific vault
+     * @param _projectToken Project token address
+     * @param _positionManager New PositionManager address
+     */
+    function updateVaultPositionManager(address _projectToken, address _positionManager) external;
+
+    /**
+     * @notice Pause a specific vault
+     * @param _projectToken Project token address
+     */
+    function pauseVault(address _projectToken) external;
+
+    /**
+     * @notice Unpause a specific vault
+     * @param _projectToken Project token address
+     */
+    function unpauseVault(address _projectToken) external;
+
+    /**
+     * @notice Set BlocksenseOracle for a vault
+     * @param _projectToken Project token address
+     * @param _blocksenseOracle BlocksenseOracle address
+     */
+    function setVaultBlocksenseOracle(address _projectToken, address _blocksenseOracle) external;
+
+    /**
+     * @notice Set graduation threshold for a vault
+     * @param _projectToken Project token address
+     * @param _threshold New graduation threshold
+     */
+    function setVaultGraduationThreshold(address _projectToken, uint256 _threshold) external;
 }

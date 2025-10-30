@@ -29,6 +29,7 @@ contract DeployHelper is Script {
     address public settlementEngine;
     address public positionManager;
     address public vaultManager;
+    address public vaultManagerHelper;
 
     // ========================================================================
     // CONFIGURATION CONSTANTS
@@ -136,6 +137,7 @@ contract DeployHelper is Script {
         settlementEngine = vm.envOr("SETTLEMENT_ENGINE_ADDRESS", address(0));
         positionManager = vm.envOr("POSITION_MANAGER_ADDRESS", address(0));
         vaultManager = vm.envOr("VAULT_MANAGER_ADDRESS", address(0));
+        vaultManagerHelper = vm.envOr("VAULT_MANAGER_HELPER_ADDRESS", address(0));
     }
 
     /**

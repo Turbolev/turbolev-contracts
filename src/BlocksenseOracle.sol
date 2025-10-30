@@ -69,6 +69,7 @@ contract BlocksenseOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgrad
     error InvalidPrice();
     error PriceChangeTooLarge();
     error InvalidValidationConfig();
+    error DirectTransferNotAllowed();
 
     // ========================================================================
     // CONSTRUCTOR / INITIALIZER
@@ -100,6 +101,20 @@ contract BlocksenseOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgrad
         minPriceUpdateInterval = 1;
 
         emit BlocksenseOracleInitialized(_maxPriceAge);
+    }
+
+    // ========================================================================
+    // RECEIVE / FALLBACK
+    // ========================================================================
+
+    /// @notice Reject direct native token transfers
+    receive() external payable {
+        revert DirectTransferNotAllowed();
+    }
+
+    /// @notice Reject fallback calls
+    fallback() external payable {
+        revert DirectTransferNotAllowed();
     }
 
     // ========================================================================

@@ -44,7 +44,6 @@ contract InteractAssetVault is DeployHelper {
         console.log("Total Volume:", info.totalVolume);
         console.log("Total Positions Settled:", info.totalPositionsSettled);
         console.log("Total Leverage Exposure:", info.totalLeverageExposure);
-        console.log("Max Leverage Exposure:", info.maxLeverageExposure);
         console.log("Created At:", info.createdAt);
         console.log("Total Fees Collected:", info.totalFeesCollected);
         console.log("Total Staking Fees:", info.totalStakingFees);
@@ -53,7 +52,6 @@ contract InteractAssetVault is DeployHelper {
         console.log("Graduation Threshold:", info.graduationThreshold);
         console.log("Graduated At:", info.graduatedAt);
         console.log("Trading Enabled:", info.tradingEnabled);
-        console.log("Total Excess Profit:", info.totalExcessProfit);
         console.log("Pending Positions:", info.pendingPositions);
     }
 

@@ -86,6 +86,7 @@ contract VaultManager is
     error InvalidAmount();
     error InvalidPriceFeedId();
     error TransferFailed();
+    error DirectTransferNotAllowed();
 
     // ========================================================================
     // MODIFIERS
@@ -121,6 +122,20 @@ contract VaultManager is
         __ReentrancyGuard_init();
         __Pausable_init();
         __UUPSUpgradeable_init();
+    }
+
+    // ========================================================================
+    // RECEIVE / FALLBACK
+    // ========================================================================
+
+    /// @notice Reject direct native token transfers
+    receive() external payable {
+        revert DirectTransferNotAllowed();
+    }
+
+    /// @notice Reject fallback calls
+    fallback() external payable {
+        revert DirectTransferNotAllowed();
     }
 
     // ========================================================================
@@ -277,20 +292,26 @@ contract VaultManager is
     /**
      * @notice Deposit collateral from bet (v1: project token only)
      * @param _projectToken Project token address
+     * @param positionId Position ID
      * @param amount Collateral amount in project tokens
      * @param positionSize Position size
+     * @param isMarginAdd True if adding margin to existing position
      */
-    function depositFromBet(address _projectToken, uint256 amount, uint256 positionSize)
-        external
-        payable
-        onlyPositionManager
-    {
+    function depositFromBet(
+        address _projectToken,
+        uint64 positionId,
+        uint256 amount,
+        uint256 positionSize,
+        bool isMarginAdd
+    ) external payable onlyPositionManager {
         address vaultAddress = vaultsByProjectToken[_projectToken];
         if (vaultAddress == address(0)) revert VaultNotFound();
 
         if (vaultAddress.code.length == 0) revert VaultNotFound();
 
-        IAssetVault(vaultAddress).depositFromBet{ value: msg.value }(amount, positionSize);
+        IAssetVault(vaultAddress).depositFromBet{ value: msg.value }(
+            positionId, amount, positionSize, isMarginAdd
+        );
 
         emit CollateralDepositedFromBet(
             vaultAddress, _projectToken, amount, positionSize, block.timestamp
@@ -322,7 +343,6 @@ contract VaultManager is
      * @param vaultPnL Vault P&L
      * @param fee Fee collected
      * @param positionSize Position size
-     * @param excessProfit Excess profit from capped trades
      */
     function updateVaultPnLWithLeverage(
         address _projectToken,
@@ -330,14 +350,13 @@ contract VaultManager is
         uint256 collateral,
         int256 vaultPnL,
         uint256 fee,
-        uint256 positionSize,
-        uint256 excessProfit
+        uint256 positionSize
     ) external onlyPositionManager {
         address vaultAddress = vaultsByProjectToken[_projectToken];
         if (vaultAddress == address(0)) revert VaultNotFound();
 
         IAssetVault(vaultAddress).updateVaultPnL(
-            positionId, collateral, vaultPnL, fee, positionSize, excessProfit
+            positionId, collateral, vaultPnL, fee, positionSize
         );
     }
 
@@ -377,6 +396,82 @@ contract VaultManager is
      */
     function unpause() external onlyOwner {
         _unpause();
+    }
+
+    // ========================================================================
+    // VAULT ADMIN PROXY FUNCTIONS
+    // ========================================================================
+
+    /**
+     * @notice Update PositionManager for a specific vault
+     * @param _projectToken Project token address
+     * @param _positionManager New PositionManager address
+     * @dev Only callable by owner, forwards call to vault
+     */
+    function updateVaultPositionManager(address _projectToken, address _positionManager)
+        external
+        onlyOwner
+    {
+        address vaultAddress = vaultsByProjectToken[_projectToken];
+        if (vaultAddress == address(0)) revert VaultNotFound();
+
+        IAssetVault(vaultAddress).setPositionManager(_positionManager);
+    }
+
+    /**
+     * @notice Pause a specific vault
+     * @param _projectToken Project token address
+     * @dev Only callable by owner, forwards call to vault
+     */
+    function pauseVault(address _projectToken) external onlyOwner {
+        address vaultAddress = vaultsByProjectToken[_projectToken];
+        if (vaultAddress == address(0)) revert VaultNotFound();
+
+        IAssetVault(vaultAddress).pause();
+    }
+
+    /**
+     * @notice Unpause a specific vault
+     * @param _projectToken Project token address
+     * @dev Only callable by owner, forwards call to vault
+     */
+    function unpauseVault(address _projectToken) external onlyOwner {
+        address vaultAddress = vaultsByProjectToken[_projectToken];
+        if (vaultAddress == address(0)) revert VaultNotFound();
+
+        IAssetVault(vaultAddress).unpause();
+    }
+
+    /**
+     * @notice Set BlocksenseOracle for a vault
+     * @param _projectToken Project token address
+     * @param _blocksenseOracle BlocksenseOracle address
+     * @dev Only callable by owner, forwards call to vault
+     */
+    function setVaultBlocksenseOracle(address _projectToken, address _blocksenseOracle)
+        external
+        onlyOwner
+    {
+        address vaultAddress = vaultsByProjectToken[_projectToken];
+        if (vaultAddress == address(0)) revert VaultNotFound();
+
+        IAssetVault(vaultAddress).setBlocksenseOracle(_blocksenseOracle);
+    }
+
+    /**
+     * @notice Set graduation threshold for a vault
+     * @param _projectToken Project token address
+     * @param _threshold New graduation threshold
+     * @dev Only callable by owner, forwards call to vault
+     */
+    function setVaultGraduationThreshold(address _projectToken, uint256 _threshold)
+        external
+        onlyOwner
+    {
+        address vaultAddress = vaultsByProjectToken[_projectToken];
+        if (vaultAddress == address(0)) revert VaultNotFound();
+
+        IAssetVault(vaultAddress).setGraduationThreshold(_threshold);
     }
 
     /**
