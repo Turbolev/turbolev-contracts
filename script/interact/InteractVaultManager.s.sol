@@ -22,7 +22,7 @@ contract InteractVaultManager is DeployHelper {
         // Load vault manager address from env or deployment file
         address vaultMgrAddr = vm.envOr("VAULT_MANAGER_ADDRESS", vaultManager);
         require(vaultMgrAddr != address(0), "Vault Manager address not set");
-        vaultMgr = VaultManager(vaultMgrAddr);
+        vaultMgr = VaultManager(payable(vaultMgrAddr));
 
         console.log("Vault Manager Address:", address(vaultMgr));
     }

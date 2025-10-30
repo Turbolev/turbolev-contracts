@@ -25,10 +25,10 @@ contract DeployHelper is Script {
     // DEPLOYED CONTRACTS
     // ========================================================================
 
-    address public blocksenseOracle;
-    address public settlementEngine;
-    address public positionManager;
-    address public vaultManager;
+    address payable public blocksenseOracle;
+    address payable public settlementEngine;
+    address payable public positionManager;
+    address payable public vaultManager;
     address public vaultManagerHelper;
 
     // ========================================================================
@@ -133,10 +133,10 @@ contract DeployHelper is Script {
      */
     function _loadDeployedAddressesFromEnv() internal {
         // Try to load from environment (returns zero if not found)
-        blocksenseOracle = vm.envOr("BLOCKSENSE_ORACLE_ADDRESS", address(0));
-        settlementEngine = vm.envOr("SETTLEMENT_ENGINE_ADDRESS", address(0));
-        positionManager = vm.envOr("POSITION_MANAGER_ADDRESS", address(0));
-        vaultManager = vm.envOr("VAULT_MANAGER_ADDRESS", address(0));
+        blocksenseOracle = payable(vm.envOr("BLOCKSENSE_ORACLE_ADDRESS", address(0)));
+        settlementEngine = payable(vm.envOr("SETTLEMENT_ENGINE_ADDRESS", address(0)));
+        positionManager = payable(vm.envOr("POSITION_MANAGER_ADDRESS", address(0)));
+        vaultManager = payable(vm.envOr("VAULT_MANAGER_ADDRESS", address(0)));
         vaultManagerHelper = vm.envOr("VAULT_MANAGER_HELPER_ADDRESS", address(0));
     }
 
@@ -230,10 +230,10 @@ contract DeployHelper is Script {
         owner = vm.parseJsonAddress(json, ".owner");
         backend = vm.parseJsonAddress(json, ".backend");
         blocksenseRegistry = vm.parseJsonAddress(json, ".blocksenseRegistry");
-        blocksenseOracle = vm.parseJsonAddress(json, ".blocksenseOracle");
-        settlementEngine = vm.parseJsonAddress(json, ".settlementEngine");
-        positionManager = vm.parseJsonAddress(json, ".positionManager");
-        vaultManager = vm.parseJsonAddress(json, ".vaultManager");
+        blocksenseOracle = payable(vm.parseJsonAddress(json, ".blocksenseOracle"));
+        settlementEngine = payable(vm.parseJsonAddress(json, ".settlementEngine"));
+        positionManager = payable(vm.parseJsonAddress(json, ".positionManager"));
+        vaultManager = payable(vm.parseJsonAddress(json, ".vaultManager"));
 
         console.log("Deployment addresses loaded from:", file);
     }

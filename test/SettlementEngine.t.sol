@@ -136,14 +136,14 @@ contract SettlementEngineTest is BaseTest {
         );
         ERC1967Proxy proxy = new ERC1967Proxy(address(newOracle), initData);
 
-        settlementEngine.setBlocksenseOracle(address(proxy));
+        settlementEngine.setBlocksenseOracle(payable(address(proxy)));
 
         assertEq(settlementEngine.blocksenseOracle(), address(proxy), "Oracle should be updated");
     }
 
     function test_SetBlocksenseOracle_RevertsOnZeroAddress() public {
         vm.expectRevert(abi.encodeWithSelector(SettlementEngine.InvalidAddress.selector));
-        settlementEngine.setBlocksenseOracle(address(0));
+        settlementEngine.setBlocksenseOracle(payable(address(0)));
     }
 
     function test_Pause_Success() public {

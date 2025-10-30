@@ -54,7 +54,7 @@ contract DeployBlocksenseOracle is DeployHelper {
 
             // Deploy proxy
             address proxy = address(new ERC1967Proxy(newImplementation, initData));
-            blocksenseOracle = proxy;
+            blocksenseOracle = payable(proxy);
 
             console.log("[SUCCESS] Deployed new BlocksenseOracle proxy");
         }

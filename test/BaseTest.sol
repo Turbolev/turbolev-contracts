@@ -278,14 +278,14 @@ contract BaseTest is Test {
             3600 // max price age
         );
         ERC1967Proxy oracleProxy = new ERC1967Proxy(address(oracleImpl), oracleInitData);
-        blocksenseOracle = BlocksenseOracle(address(oracleProxy));
+        blocksenseOracle = BlocksenseOracle(payable(address(oracleProxy)));
 
         // Deploy SettlementEngine (upgradeable via ERC1967Proxy)
         SettlementEngine settlementImpl = new SettlementEngine();
         bytes memory settlementInitData =
             abi.encodeWithSelector(SettlementEngine.initialize.selector, owner);
         ERC1967Proxy settlementProxy = new ERC1967Proxy(address(settlementImpl), settlementInitData);
-        settlementEngine = SettlementEngine(address(settlementProxy));
+        settlementEngine = SettlementEngine(payable(address(settlementProxy)));
 
         // Deploy PositionManager (upgradeable via ERC1967Proxy)
         PositionManager positionImpl = new PositionManager();
@@ -298,7 +298,7 @@ contract BaseTest is Test {
         VaultManager vaultImpl = new VaultManager();
         bytes memory vaultInitData = abi.encodeWithSelector(VaultManager.initialize.selector, owner);
         ERC1967Proxy vaultProxy = new ERC1967Proxy(address(vaultImpl), vaultInitData);
-        vaultManager = VaultManager(address(vaultProxy));
+        vaultManager = VaultManager(payable(address(vaultProxy)));
 
         // Deploy VaultManagerHelper
         vaultManagerHelper = new VaultManagerHelper(address(vaultManager));
@@ -315,7 +315,7 @@ contract BaseTest is Test {
 
     function _setupContracts() internal {
         // Set oracle in Settlement Engine
-        settlementEngine.setBlocksenseOracle(address(blocksenseOracle));
+        settlementEngine.setBlocksenseOracle(payable(address(blocksenseOracle)));
 
         // Set default price decimals for mock registry
         mockRegistry.setDecimals(address(projectToken), address(usdc), 18);

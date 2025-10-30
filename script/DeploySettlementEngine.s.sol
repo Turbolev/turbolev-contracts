@@ -48,7 +48,7 @@ contract DeploySettlementEngine is DeployHelper {
 
             // Deploy proxy
             address proxy = address(new ERC1967Proxy(newImplementation, initData));
-            settlementEngine = proxy;
+            settlementEngine = payable(proxy);
 
             // Apply config (only for new deployments)
             console.log("Applying configuration...");

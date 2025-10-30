@@ -29,9 +29,6 @@ contract DeployAll is DeployHelper {
     address public positionManagerProxy;
     address public vaultManagerProxy;
 
-    // Non-upgradeable helper contract
-    address public vaultManagerHelper;
-
     function run() public {
         vm.startBroadcast(deployer);
 
@@ -109,7 +106,7 @@ contract DeployAll is DeployHelper {
 
             // Deploy proxy
             blocksenseOracleProxy = address(new ERC1967Proxy(blocksenseOracleImpl, initData));
-            blocksenseOracle = blocksenseOracleProxy;
+            blocksenseOracle = payable(blocksenseOracleProxy);
 
             console.log("[NEW] BlocksenseOracle proxy deployed:", blocksenseOracle);
         }
@@ -142,7 +139,7 @@ contract DeployAll is DeployHelper {
 
             // Deploy proxy
             settlementEngineProxy = address(new ERC1967Proxy(settlementEngineImpl, initData));
-            settlementEngine = settlementEngineProxy;
+            settlementEngine = payable(settlementEngineProxy);
 
             // Update settlement config (only for new deployments)
             SettlementEngine(settlementEngine).updateConfig(
@@ -181,7 +178,7 @@ contract DeployAll is DeployHelper {
 
             // Deploy proxy
             positionManagerProxy = address(new ERC1967Proxy(positionManagerImpl, initData));
-            positionManager = positionManagerProxy;
+            positionManager = payable(positionManagerProxy);
 
             // Update config (only for new deployments)
             PositionManager(payable(positionManager)).setMaintenanceMarginRatio(
@@ -220,7 +217,7 @@ contract DeployAll is DeployHelper {
 
             // Deploy proxy
             vaultManagerProxy = address(new ERC1967Proxy(vaultManagerImpl, initData));
-            vaultManager = vaultManagerProxy;
+            vaultManager = payable(vaultManagerProxy);
 
             console.log("[NEW] VaultManager proxy deployed:", vaultManager);
         }

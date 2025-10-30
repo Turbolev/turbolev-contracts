@@ -98,7 +98,7 @@ contract BlocksenseOracleTest is Test {
         bytes memory initData =
             abi.encodeWithSelector(BlocksenseOracle.initialize.selector, owner, MAX_PRICE_AGE);
         ERC1967Proxy proxy = new ERC1967Proxy(address(oracleImpl), initData);
-        blocksenseOracle = BlocksenseOracle(address(proxy));
+        blocksenseOracle = BlocksenseOracle(payable(address(proxy)));
     }
 
     function test_Initialize_Success() public {

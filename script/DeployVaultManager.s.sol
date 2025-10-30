@@ -49,7 +49,7 @@ contract DeployVaultManager is DeployHelper {
 
             // Deploy proxy
             address proxy = address(new ERC1967Proxy(newImplementation, initData));
-            vaultManager = proxy;
+            vaultManager = payable(proxy);
 
             console.log("[SUCCESS] Deployed new VaultManager proxy");
         }

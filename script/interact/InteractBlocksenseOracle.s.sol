@@ -20,7 +20,7 @@ contract InteractBlocksenseOracle is DeployHelper {
         // Load oracle address from env or deployment file
         address oracleAddr = vm.envOr("ORACLE_ADDRESS", blocksenseOracle);
         require(oracleAddr != address(0), "Oracle address not set");
-        oracle = BlocksenseOracle(oracleAddr);
+        oracle = BlocksenseOracle(payable(oracleAddr));
 
         console.log("Oracle Address:", address(oracle));
     }

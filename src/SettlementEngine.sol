@@ -52,7 +52,7 @@ contract SettlementEngine is
     address public vaultManager;
 
     /// @notice BlocksenseOracle contract address
-    address public blocksenseOracle;
+    address payable public blocksenseOracle;
 
     /// @notice Max profit cap in bps (200 = 2% of vault USD value)
     uint16 public maxProfitCapBps;
@@ -426,7 +426,7 @@ contract SettlementEngine is
     /**
      * @notice Set BlocksenseOracle address
      */
-    function setBlocksenseOracle(address _blocksenseOracle) external onlyOwner {
+    function setBlocksenseOracle(address payable _blocksenseOracle) external onlyOwner {
         if (_blocksenseOracle == address(0)) revert InvalidAddress();
         address oldAddress = blocksenseOracle;
         blocksenseOracle = _blocksenseOracle;

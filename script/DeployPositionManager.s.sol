@@ -49,7 +49,7 @@ contract DeployPositionManager is DeployHelper {
 
             // Deploy proxy
             address proxy = address(new ERC1967Proxy(newImplementation, initData));
-            positionManager = proxy;
+            positionManager = payable(proxy);
 
             // Apply config (only for new deployments)
             console.log("Applying configuration...");

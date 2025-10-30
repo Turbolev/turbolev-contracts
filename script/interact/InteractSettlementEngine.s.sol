@@ -20,7 +20,7 @@ contract InteractSettlementEngine is DeployHelper {
         // Load settlement engine address from env or deployment file
         address settlementAddr = vm.envOr("SETTLEMENT_ENGINE_ADDRESS", settlementEngine);
         require(settlementAddr != address(0), "Settlement Engine address not set");
-        settlement = SettlementEngine(settlementAddr);
+        settlement = SettlementEngine(payable(settlementAddr));
 
         console.log("Settlement Engine Address:", address(settlement));
     }
@@ -175,7 +175,7 @@ contract InteractSettlementEngine is DeployHelper {
         console.log("New Oracle:", newOracle);
 
         vm.startBroadcast(deployer);
-        settlement.setBlocksenseOracle(newOracle);
+        settlement.setBlocksenseOracle(payable(newOracle));
         console.log("Blocksense Oracle updated successfully");
         vm.stopBroadcast();
     }
