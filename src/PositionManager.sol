@@ -65,6 +65,14 @@ contract PositionManager is
     uint256 public minPositionHoldTime;
 
     // ========================================================================
+    // STORAGE GAP (for future upgrades)
+    // ========================================================================
+
+    /// @dev Storage gap to allow for new variables in future versions
+    /// @notice Currently using 8 storage slots, reserving 42 slots for future use
+    uint256[42] private __gap;
+
+    // ========================================================================
     // EVENTS
     // ========================================================================
 
@@ -240,19 +248,18 @@ contract PositionManager is
         uint256 openPrice;
         uint256 pricePublishTime;
 
-        // Handle collateral - ONLY project token accepted (v1)
-        if (projectToken == address(0)) {
-            // Native project token (rare case)
-            // TODO: Implement native token handling
+        if (msg.value > 0) {
+            // Native token is not allowed to be used as collateral
+            // Next version will support native token as collateral
             revert NativeTokenNotAllowed();
-        } else {
-            // ERC20 project token (most common)
-            amount = collateralAmount;
-            if (amount == 0) revert InvalidAmount();
-
-            // Transfer project token from user to this contract
-            IERC20(projectToken).transferFrom(msg.sender, address(this), amount);
         }
+
+        // ERC20 project token (most common)
+        amount = collateralAmount;
+        if (amount == 0) revert InvalidAmount();
+
+        // Transfer project token from user to this contract
+        IERC20(projectToken).transferFrom(msg.sender, address(this), amount);
 
         // Get price from Blocksense Oracle via SettlementEngine
         // Use deadline as maxAge for price validation

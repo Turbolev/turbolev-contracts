@@ -121,13 +121,6 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
     /// @notice Position IDs settled in current day (for tracking)
     uint64[] public dailyPositionIds;
 
-    /// @notice Minimum stake period before rewards (1 day)
-    uint256 public constant REWARD_MIN_STAKE_PERIOD = 1 days;
-
-    uint256 public constant DEFAULT_MAX_STAKING_FEE_BPS = 2000; // 20%
-    uint256 public constant DEFAULT_EARLY_WITHDRAWAL_FEE_BPS = 1000; // 10%
-    uint256 public constant DEFAULT_MAX_POSITION_SIZE_PERCENT_BPS = 3000; // 30%
-
     // ========================================================================
     // STRUCTS
     // ========================================================================
@@ -183,6 +176,13 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
     // ========================================================================
     // CONSTANTS
     // ========================================================================
+
+    /// @notice Minimum stake period before rewards (1 day)
+    uint256 public constant REWARD_MIN_STAKE_PERIOD = 1 days;
+
+    uint256 public constant DEFAULT_MAX_STAKING_FEE_BPS = 2000; // 20%
+    uint256 public constant DEFAULT_EARLY_WITHDRAWAL_FEE_BPS = 1000; // 10%
+    uint256 public constant DEFAULT_MAX_POSITION_SIZE_PERCENT_BPS = 3000; // 30%
 
     uint256 public constant BASIS_POINTS = 10_000;
     uint256 public constant INITIAL_SHARE_MULTIPLIER = 1e18;
@@ -382,6 +382,8 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
      * @param _projectToken Project token address
      * @param _vaultManager VaultManager address
      * @param _positionManager PositionManager contract address
+     * @param _blocksenseOracle BlocksenseOracle contract address
+     * @param _oracleAdapter Oracle adapter address for this vault's price feed
      * @param _minBetAmount Min bet amount
      * @param _maxBetAmount Max bet amount
      * @param _graduationThreshold Token amount threshold for graduation
@@ -390,6 +392,8 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
         address _projectToken,
         address _vaultManager,
         address _positionManager,
+        address _blocksenseOracle,
+        address _oracleAdapter,
         uint256 _minBetAmount,
         uint256 _maxBetAmount,
         uint256 _graduationThreshold
@@ -399,9 +403,15 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
             revert InvalidAddress();
         }
 
+        if (_blocksenseOracle == address(0) || _oracleAdapter == address(0)) {
+            revert InvalidAddress();
+        }
+
         projectToken = _projectToken;
         vaultManager = _vaultManager;
         positionManager = _positionManager;
+        blocksenseOracle = _blocksenseOracle;
+        oracleAdapter = _oracleAdapter;
 
         vaultInfo.createdAt = block.timestamp;
         vaultInfo.graduationThreshold = _graduationThreshold;

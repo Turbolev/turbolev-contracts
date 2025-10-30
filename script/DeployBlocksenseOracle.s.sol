@@ -5,6 +5,8 @@ import "forge-std/Script.sol";
 import "./DeployHelper.s.sol";
 
 import "../src/BlocksenseOracle.sol";
+import "../src/SettlementEngine.sol";
+import "../src/VaultManager.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 /**
@@ -40,6 +42,9 @@ contract DeployBlocksenseOracle is DeployHelper {
             BlocksenseOracle(blocksenseOracle).upgradeToAndCall(newImplementation, "");
 
             console.log("[SUCCESS] Upgraded BlocksenseOracle");
+
+            // Reconnect contracts after upgrade
+            _reconnectContracts();
         } else {
             console.log("\n[NEW DEPLOYMENT MODE]");
             console.log("No existing proxy found, deploying new...");
@@ -69,5 +74,30 @@ contract DeployBlocksenseOracle is DeployHelper {
         console.log("===========================================\n");
 
         vm.stopBroadcast();
+    }
+
+    /**
+     * @notice Reconnect contracts after upgrade
+     * @dev Ensures BlocksenseOracle is connected to other contracts that depend on it
+     */
+    function _reconnectContracts() internal {
+        console.log("\n--- Reconnecting Contracts ---");
+
+        // Reconnect BlocksenseOracle to contracts that use it
+        if (_isContractDeployed(settlementEngine)) {
+            SettlementEngine(settlementEngine).setBlocksenseOracle(blocksenseOracle);
+            console.log("Reconnected BlocksenseOracle to SettlementEngine");
+        } else {
+            console.log("WARNING: SettlementEngine not set - skipping connection");
+        }
+
+        if (_isContractDeployed(vaultManager)) {
+            VaultManager(vaultManager).setBlocksenseOracle(blocksenseOracle);
+            console.log("Reconnected BlocksenseOracle to VaultManager");
+        } else {
+            console.log("WARNING: VaultManager not set - skipping connection");
+        }
+
+        console.log("--- Contract Reconnection Complete ---\n");
     }
 }

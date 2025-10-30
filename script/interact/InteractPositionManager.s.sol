@@ -6,12 +6,13 @@ import "forge-std/console.sol";
 import "../DeployHelper.s.sol";
 import "../../src/PositionManager.sol";
 import "../../src/libraries/PositionLib.sol";
-
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 /**
  * @title InteractPositionManager
  * @notice Script to interact with PositionManager contract
  * @dev Includes user functions, view functions and admin functions
  */
+
 contract InteractPositionManager is DeployHelper {
     PositionManager public positionMgr;
 
@@ -140,6 +141,7 @@ contract InteractPositionManager is DeployHelper {
         console.log("Max Acceptable Price:", maxAcceptablePrice);
 
         vm.startBroadcast(deployer);
+        IERC20(projectToken).approve(address(positionMgr), collateralAmount);
         uint64 positionId = positionMgr.openPosition(
             projectToken,
             collateralAmount,
@@ -173,8 +175,9 @@ contract InteractPositionManager is DeployHelper {
         console.log("\n=== Add Margin ===");
         console.log("Position ID:", positionId);
         console.log("Margin Amount:", marginAmount);
-
         vm.startBroadcast(deployer);
+        PositionLib.Position memory pos = positionMgr.getPosition(positionId);
+        IERC20(pos.tokenAddress).approve(address(positionMgr), marginAmount);
         positionMgr.addMargin(positionId, marginAmount, 0, block.timestamp + 3600); // maxAcceptablePrice = 0 (no limit), deadline = 1 hour
         console.log("Margin added successfully");
         vm.stopBroadcast();

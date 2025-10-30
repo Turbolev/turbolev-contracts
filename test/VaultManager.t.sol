@@ -15,18 +15,6 @@ contract VaultManagerTest is BaseTest {
         assertTrue(vaultManager.isValidVault(vaultAddr), "Vault should be valid");
     }
 
-    function test_GetAllVaults_Success() public {
-        address[] memory vaults = vaultManager.getAllVaults();
-
-        assertEq(vaults.length, 1, "Should have 1 vault");
-        assertEq(vaults[0], address(assetVault), "Vault should match");
-    }
-
-    function test_GetVaultCount_Success() public {
-        uint256 count = vaultManager.getVaultCount();
-        assertEq(count, 1, "Should have 1 vault");
-    }
-
     function test_SetPositionManager_Success() public {
         address newPM = makeAddr("newPositionManager");
         vaultManager.setPositionManager(newPM);

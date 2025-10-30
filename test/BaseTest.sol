@@ -320,9 +320,16 @@ contract BaseTest is Test {
         // Set default price decimals for mock registry
         mockRegistry.setDecimals(address(projectToken), address(usdc), 18);
 
-        // Create vault for project token
+        // Set BlocksenseOracle in VaultManager before creating vault
+        vaultManager.setBlocksenseOracle(address(blocksenseOracle));
+
+        // Create vault for project token (now requires oracleAdapter)
         address vaultAddr = vaultManager.createVault(
-            address(projectToken), DEFAULT_MIN_BET, DEFAULT_MAX_BET, DEFAULT_GRADUATION_THRESHOLD
+            address(projectToken),
+            address(mockAdapter), // oracleAdapter parameter
+            DEFAULT_MIN_BET,
+            DEFAULT_MAX_BET,
+            DEFAULT_GRADUATION_THRESHOLD
         );
         assetVault = AssetVault(payable(vaultAddr));
 
@@ -330,12 +337,6 @@ contract BaseTest is Test {
         // AssetVault is owned by VaultManager after creation
         vm.prank(address(vaultManager));
         assetVault.transferOwnership(owner);
-
-        // Set oracle in vault
-        assetVault.setBlocksenseOracle(address(blocksenseOracle));
-
-        // Set oracle adapter in vault (use mock adapter for testing)
-        assetVault.setOracleAdapter(address(mockAdapter));
 
         // Set tokens for mock adapter now that they're created
         mockAdapter.setTokens(address(projectToken), address(usdc));

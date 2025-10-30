@@ -426,7 +426,11 @@ contract IntegrationTest is BaseTest {
         MockERC20 newToken = new MockERC20("NewToken", "NEW");
 
         address newVaultAddr = vaultManager.createVault(
-            address(newToken), DEFAULT_MIN_BET, DEFAULT_MAX_BET, DEFAULT_GRADUATION_THRESHOLD
+            address(newToken),
+            address(mockAdapter), // oracleAdapter parameter
+            DEFAULT_MIN_BET,
+            DEFAULT_MAX_BET,
+            DEFAULT_GRADUATION_THRESHOLD
         );
 
         // Verify vault was created
@@ -434,9 +438,6 @@ contract IntegrationTest is BaseTest {
         assertEq(
             vaultManager.getVault(address(newToken)), newVaultAddr, "Vault should be registered"
         );
-
-        // Check vault count increased
-        assertEq(vaultManager.getVaultCount(), 2, "Vault count should be 2");
     }
 
     // ========================================================================

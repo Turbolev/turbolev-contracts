@@ -38,6 +38,9 @@ contract DeploySettlementEngine is DeployHelper {
             SettlementEngine(settlementEngine).upgradeToAndCall(newImplementation, "");
 
             console.log("[SUCCESS] Upgraded SettlementEngine");
+
+            // Reconnect contracts after upgrade
+            _reconnectContracts();
         } else {
             console.log("\n[NEW DEPLOYMENT MODE]");
             console.log("No existing proxy found, deploying new...");
@@ -70,5 +73,23 @@ contract DeploySettlementEngine is DeployHelper {
         console.log("===========================================\n");
 
         vm.stopBroadcast();
+    }
+
+    /**
+     * @notice Reconnect contracts after upgrade
+     * @dev Ensures all dependencies are properly connected even after upgrade
+     */
+    function _reconnectContracts() internal {
+        console.log("\n--- Reconnecting Contracts ---");
+
+        // Only reconnect if dependencies are available
+        if (_isContractDeployed(blocksenseOracle)) {
+            SettlementEngine(settlementEngine).setBlocksenseOracle(blocksenseOracle);
+            console.log("Reconnected BlocksenseOracle to SettlementEngine");
+        } else {
+            console.log("WARNING: BlocksenseOracle not set - skipping connection");
+        }
+
+        console.log("--- Contract Reconnection Complete ---\n");
     }
 }

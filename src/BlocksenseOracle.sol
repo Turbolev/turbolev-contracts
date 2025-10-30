@@ -46,6 +46,14 @@ contract BlocksenseOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgrad
     uint256 public minPriceUpdateInterval;
 
     // ========================================================================
+    // STORAGE GAP (for future upgrades)
+    // ========================================================================
+
+    /// @dev Storage gap to allow for new variables in future versions
+    /// @notice Currently using 4 storage slots, reserving 46 slots for future use
+    uint256[46] private __gap;
+
+    // ========================================================================
     // EVENTS
     // ========================================================================
 
