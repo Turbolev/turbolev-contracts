@@ -37,10 +37,7 @@ contract DeployBlocksenseOracle is DeployHelper {
             console.log("Upgrading to new implementation...");
 
             // Upgrade existing proxy to new implementation
-            BlocksenseOracle(blocksenseOracle).upgradeToAndCall(
-                newImplementation,
-                ""
-            );
+            BlocksenseOracle(blocksenseOracle).upgradeToAndCall(newImplementation, "");
 
             console.log("[SUCCESS] Upgraded BlocksenseOracle");
         } else {
@@ -56,9 +53,7 @@ contract DeployBlocksenseOracle is DeployHelper {
             );
 
             // Deploy proxy
-            address proxy = address(
-                new ERC1967Proxy(newImplementation, initData)
-            );
+            address proxy = address(new ERC1967Proxy(newImplementation, initData));
             blocksenseOracle = payable(proxy);
 
             console.log("[SUCCESS] Deployed new BlocksenseOracle proxy");
