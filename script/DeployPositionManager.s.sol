@@ -39,6 +39,9 @@ contract DeployPositionManager is DeployHelper {
             PositionManager(payable(positionManager)).upgradeToAndCall(newImplementation, "");
 
             console.log("[SUCCESS] Upgraded PositionManager");
+
+            // Reconnect contracts after upgrade
+            _reconnectContracts();
         } else {
             console.log("\n[NEW DEPLOYMENT MODE]");
             console.log("No existing proxy found, deploying new...");
@@ -72,5 +75,30 @@ contract DeployPositionManager is DeployHelper {
         console.log("===========================================\n");
 
         vm.stopBroadcast();
+    }
+
+    /**
+     * @notice Reconnect contracts after upgrade
+     * @dev Ensures all dependencies are properly connected even after upgrade
+     */
+    function _reconnectContracts() internal {
+        console.log("\n--- Reconnecting Contracts ---");
+
+        // Only reconnect if dependencies are available
+        if (_isContractDeployed(settlementEngine)) {
+            PositionManager(payable(positionManager)).setSettlementEngine(settlementEngine);
+            console.log("Reconnected SettlementEngine to PositionManager");
+        } else {
+            console.log("WARNING: SettlementEngine not set - skipping connection");
+        }
+
+        if (_isContractDeployed(vaultManager)) {
+            PositionManager(payable(positionManager)).setVaultManager(vaultManager);
+            console.log("Reconnected VaultManager to PositionManager");
+        } else {
+            console.log("WARNING: VaultManager not set - skipping connection");
+        }
+
+        console.log("--- Contract Reconnection Complete ---\n");
     }
 }

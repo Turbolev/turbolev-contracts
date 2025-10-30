@@ -58,6 +58,14 @@ contract SettlementEngine is
     uint16 public maxProfitCapBps;
 
     // ========================================================================
+    // STORAGE GAP (for future upgrades)
+    // ========================================================================
+
+    /// @dev Storage gap to allow for new variables in future versions
+    /// @notice Currently using 8 storage slots, reserving 42 slots for future use
+    uint256[42] private __gap;
+
+    // ========================================================================
     // STRUCTS
     // ========================================================================
 

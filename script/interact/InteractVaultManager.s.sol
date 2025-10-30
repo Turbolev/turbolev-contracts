@@ -40,7 +40,6 @@ contract InteractVaultManager is DeployHelper {
         console.log("Position Manager:", vaultMgr.positionManager());
         console.log("Settlement Engine:", vaultMgr.settlementEngine());
         console.log("Paused:", vaultMgr.paused());
-        console.log("Total Vaults:", vaultMgr.getVaultCount());
     }
 
     /**
@@ -55,44 +54,6 @@ contract InteractVaultManager is DeployHelper {
         } catch Error(string memory reason) {
             console.log("Error:", reason);
         }
-    }
-
-    /**
-     * @notice Check if vault exists for project token
-     */
-    function isVaultSupported(address projectToken) public view {
-        console.log("\n=== Is Vault Supported ===");
-        console.log("Project Token:", projectToken);
-
-        bool supported = vaultMgr.isVaultSupported(projectToken);
-        console.log("Is Supported:", supported);
-    }
-
-    /**
-     * @notice Get all vault addresses
-     */
-    function getAllVaults() public view {
-        console.log("\n=== All Vaults ===");
-
-        address[] memory vaults = vaultMgr.getAllVaults();
-        console.log("Total Vaults:", vaults.length);
-
-        for (uint256 i = 0; i < vaults.length; i++) {
-            console.log("Vault", i, ":", vaults[i]);
-            address projectToken = vaultMgr.getVaultProjectToken(vaults[i]);
-            console.log("  Project Token:", projectToken);
-        }
-    }
-
-    /**
-     * @notice Check if vault is graduated
-     */
-    function isVaultGraduated(address vaultAddress) public view {
-        console.log("\n=== Is Vault Graduated ===");
-        console.log("Vault Address:", vaultAddress);
-
-        bool graduated = vaultMgr.isVaultGraduated(vaultAddress);
-        console.log("Is Graduated:", graduated);
     }
 
     /**
@@ -136,23 +97,23 @@ contract InteractVaultManager is DeployHelper {
      */
     function createVault(
         address projectToken,
-        address projectTokenBase,
-        address projectTokenQuote,
+        address oracleAdapter,
         uint256 minBetAmount,
         uint256 maxBetAmount,
         uint256 graduationThreshold
     ) public {
         console.log("\n=== Create Vault ===");
         console.log("Project Token:", projectToken);
-        console.log("Project Token Base:", projectTokenBase);
-        console.log("Project Token Quote:", projectTokenQuote);
+        console.log("Oracle Adapter:", oracleAdapter);
         console.log("Min Bet Amount:", minBetAmount);
         console.log("Max Bet Amount:", maxBetAmount);
         console.log("Graduation Threshold:", graduationThreshold);
 
         vm.startBroadcast(deployer);
-        address vaultAddr =
-            vaultMgr.createVault(projectToken, minBetAmount, maxBetAmount, graduationThreshold);
+
+        address vaultAddr = vaultMgr.createVault(
+            projectToken, oracleAdapter, minBetAmount, maxBetAmount, graduationThreshold
+        );
         console.log("Vault created at:", vaultAddr);
         vm.stopBroadcast();
     }
@@ -215,7 +176,7 @@ contract InteractVaultManager is DeployHelper {
      * @notice Helper to get vault from project token
      */
     function _getVaultAddress(address projectToken) internal view returns (address) {
-        address vaultAddr = vaultMgr.getVaultByProjectToken(projectToken);
+        address vaultAddr = vaultMgr.getVault(projectToken);
         require(vaultAddr != address(0), "Vault not found for project token");
         return vaultAddr;
     }
@@ -501,6 +462,18 @@ contract InteractVaultManager is DeployHelper {
             AssetVault.LPPosition memory pos = vault.getLPPosition(lps[i]);
             console.log("  Shares:", pos.shares);
             console.log("  Staked Amount:", pos.stakedAmount);
+        }
+    }
+
+    /**
+     * @notice Get all vaults
+     */
+    function getAllVaults() public view {
+        console.log("\n=== All Vaults ===");
+        address[] memory vaults = vaultMgr.getAllVaults();
+        console.log("Total Vaults:", vaults.length);
+        for (uint256 i = 0; i < vaults.length; i++) {
+            console.log("Vault", i, ":", vaults[i]);
         }
     }
 

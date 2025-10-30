@@ -9,7 +9,8 @@ import "../src/VaultManager.sol";
 /**
  * @title CreateVault
  * @notice Create new vault for a project token
- * @dev Set env variables: PROJECT_TOKEN, PROJECT_TOKEN_BASE, PROJECT_TOKEN_QUOTE
+ * @dev Required env variables: PROJECT_TOKEN, ORACLE_ADAPTER
+ * @dev Optional env variables: MIN_BET_AMOUNT, MAX_BET_AMOUNT, GRADUATION_THRESHOLD
  */
 contract CreateVault is DeployHelper {
     function run() public {
@@ -18,6 +19,7 @@ contract CreateVault is DeployHelper {
         require(vaultManager != address(0), "VaultManager not set in helper");
 
         address projectToken = vm.envAddress("PROJECT_TOKEN");
+        address oracleAdapter = vm.envAddress("ORACLE_ADAPTER");
 
         // Params can be overridden via ENV, otherwise use defaults from helper
         uint256 minBet = vm.envOr("MIN_BET_AMOUNT", MIN_BET_AMOUNT);
@@ -25,12 +27,13 @@ contract CreateVault is DeployHelper {
         uint256 graduationThreshold = vm.envOr("GRADUATION_THRESHOLD", GRADUATION_THRESHOLD);
 
         console.log("\nCreating vault for token:", projectToken);
+        console.log("Oracle Adapter:", oracleAdapter);
         console.log("Min Bet Amount:", minBet);
         console.log("Max Bet Amount:", maxBet);
         console.log("Graduation Threshold:", graduationThreshold);
 
         address vaultAddr = VaultManager(vaultManager).createVault(
-            projectToken, minBet, maxBet, graduationThreshold
+            projectToken, oracleAdapter, minBet, maxBet, graduationThreshold
         );
 
         console.log("\n===================================");

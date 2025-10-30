@@ -40,6 +40,9 @@ contract VaultManager is
     /// @notice SettlementEngine contract address
     address public settlementEngine;
 
+    /// @notice BlocksenseOracle contract address
+    address public blocksenseOracle;
+
     /// @notice Mapping: projectToken => vault address
     /// @dev One vault per project token
     mapping(address => address) public vaultsByProjectToken;
@@ -54,6 +57,14 @@ contract VaultManager is
     mapping(address => address) public vaultProjectToken;
 
     // ========================================================================
+    // STORAGE GAP (for future upgrades)
+    // ========================================================================
+
+    /// @dev Storage gap to allow for new variables in future versions
+    /// @notice Currently using 7 storage slots (added blocksenseOracle), reserving 43 slots for future use
+    uint256[43] private __gap;
+
+    // ========================================================================
     // EVENTS
     // ========================================================================
 
@@ -62,6 +73,8 @@ contract VaultManager is
     event PositionManagerUpdated(address indexed oldAddress, address indexed newAddress);
 
     event SettlementEngineUpdated(address indexed oldAddress, address indexed newAddress);
+
+    event BlocksenseOracleUpdated(address indexed oldAddress, address indexed newAddress);
 
     event CollateralDepositedFromBet(
         address indexed vault,
@@ -152,20 +165,26 @@ contract VaultManager is
      */
     function createVault(
         address _projectToken,
+        address _oracleAdapter,
         uint256 _minBetAmount,
         uint256 _maxBetAmount,
         uint256 _graduationThreshold
     ) external onlyOwner returns (address vaultAddress) {
         if (_projectToken == address(0)) revert InvalidAddress();
+        if (_oracleAdapter == address(0)) revert InvalidAddress();
 
         if (vaultsByProjectToken[_projectToken] != address(0)) {
             revert DuplicateProjectToken();
         }
 
+        // Note: oracleAdapter will be set separately after vault creation
+        // by calling setVaultOracleAdapter() with the appropriate adapter address
         AssetVault vault = new AssetVault(
             _projectToken,
             address(this),
             positionManager,
+            blocksenseOracle,
+            _oracleAdapter,
             _minBetAmount,
             _maxBetAmount,
             _graduationThreshold
@@ -200,58 +219,6 @@ contract VaultManager is
     }
 
     /**
-     * @notice Get vault address by project token (same as getVault but returns 0 if not found)
-     * @param _projectToken Project token address
-     * @return vaultAddress Vault address (address(0) if not found)
-     */
-    function getVaultByProjectToken(address _projectToken)
-        external
-        view
-        returns (address vaultAddress)
-    {
-        return vaultsByProjectToken[_projectToken];
-    }
-
-    /**
-     * @notice Check if vault exists for project token
-     * @param _projectToken Project token address
-     * @return exists Whether vault exists
-     */
-    function isVaultSupported(address _projectToken) external view returns (bool exists) {
-        return vaultsByProjectToken[_projectToken] != address(0);
-    }
-
-    /**
-     * @notice Get all vault addresses
-     * @return vaults Array of all vault addresses
-     */
-    function getAllVaults() external view returns (address[] memory vaults) {
-        return allVaults;
-    }
-
-    /**
-     * @notice Get vault count
-     * @return count Number of vaults
-     */
-    function getVaultCount() external view returns (uint256 count) {
-        return allVaults.length;
-    }
-
-    /**
-     * @notice Check if a vault is graduated
-     * @param _vaultAddress Vault address
-     * @return isGraduated Whether the vault is graduated
-     * @dev Reads from AssetVault directly
-     */
-    function isVaultGraduated(address _vaultAddress) external view returns (bool isGraduated) {
-        if (!isValidVault[_vaultAddress]) return false;
-
-        // Call getVaultInfo() which returns the full VaultInfo struct
-        IAssetVault.VaultInfo memory vaultInfo = IAssetVault(_vaultAddress).getVaultInfo();
-        return vaultInfo.isGraduated;
-    }
-
-    /**
      * @notice Get project token for a vault
      * @param _vaultAddress Vault address
      * @return projectToken Project token address
@@ -262,6 +229,23 @@ contract VaultManager is
         returns (address projectToken)
     {
         return vaultProjectToken[_vaultAddress];
+    }
+
+    /**
+     * @notice Check if vault is supported for a project token
+     * @param _projectToken Project token address
+     * @return supported Whether vault is supported
+     */
+    function isVaultSupported(address _projectToken) external view returns (bool supported) {
+        return vaultsByProjectToken[_projectToken] != address(0);
+    }
+
+    /**
+     * @notice Get all vaults
+     * @return Array of vault addresses
+     */
+    function getAllVaults() external view returns (address[] memory) {
+        return allVaults;
     }
 
     // ========================================================================
@@ -385,6 +369,16 @@ contract VaultManager is
     }
 
     /**
+     * @notice Set BlocksenseOracle contract address
+     */
+    function setBlocksenseOracle(address _blocksenseOracle) external onlyOwner {
+        if (_blocksenseOracle == address(0)) revert InvalidAddress();
+        address oldAddress = blocksenseOracle;
+        blocksenseOracle = _blocksenseOracle;
+        emit BlocksenseOracleUpdated(oldAddress, _blocksenseOracle);
+    }
+
+    /**
      * @notice Pause factory (prevents new vault creation)
      */
     function pause() external onlyOwner {
@@ -440,22 +434,6 @@ contract VaultManager is
         if (vaultAddress == address(0)) revert VaultNotFound();
 
         IAssetVault(vaultAddress).unpause();
-    }
-
-    /**
-     * @notice Set BlocksenseOracle for a vault
-     * @param _projectToken Project token address
-     * @param _blocksenseOracle BlocksenseOracle address
-     * @dev Only callable by owner, forwards call to vault
-     */
-    function setVaultBlocksenseOracle(address _projectToken, address _blocksenseOracle)
-        external
-        onlyOwner
-    {
-        address vaultAddress = vaultsByProjectToken[_projectToken];
-        if (vaultAddress == address(0)) revert VaultNotFound();
-
-        IAssetVault(vaultAddress).setBlocksenseOracle(_blocksenseOracle);
     }
 
     /**

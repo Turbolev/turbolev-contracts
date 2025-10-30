@@ -40,6 +40,9 @@ contract DeployVaultManager is DeployHelper {
             VaultManager(vaultManager).upgradeToAndCall(newImplementation, "");
 
             console.log("[SUCCESS] Upgraded VaultManager");
+
+            // Reconnect contracts after upgrade
+            _reconnectContracts();
         } else {
             console.log("\n[NEW DEPLOYMENT MODE]");
             console.log("No existing proxy found, deploying new...");
@@ -79,5 +82,37 @@ contract DeployVaultManager is DeployHelper {
         console.log("===========================================\n");
 
         vm.stopBroadcast();
+    }
+
+    /**
+     * @notice Reconnect contracts after upgrade
+     * @dev Ensures all dependencies are properly connected even after upgrade
+     */
+    function _reconnectContracts() internal {
+        console.log("\n--- Reconnecting Contracts ---");
+
+        // Only reconnect if dependencies are available
+        if (_isContractDeployed(positionManager)) {
+            VaultManager(vaultManager).setPositionManager(positionManager);
+            console.log("Reconnected PositionManager to VaultManager");
+        } else {
+            console.log("WARNING: PositionManager not set - skipping connection");
+        }
+
+        if (_isContractDeployed(settlementEngine)) {
+            VaultManager(vaultManager).setSettlementEngine(settlementEngine);
+            console.log("Reconnected SettlementEngine to VaultManager");
+        } else {
+            console.log("WARNING: SettlementEngine not set - skipping connection");
+        }
+
+        if (_isContractDeployed(blocksenseOracle)) {
+            VaultManager(vaultManager).setBlocksenseOracle(blocksenseOracle);
+            console.log("Reconnected BlocksenseOracle to VaultManager");
+        } else {
+            console.log("WARNING: BlocksenseOracle not set - skipping connection");
+        }
+
+        console.log("--- Contract Reconnection Complete ---\n");
     }
 }

@@ -267,6 +267,10 @@ contract DeployAll is DeployHelper {
         // SettlementEngine: Set in VaultManager
         VaultManager(vaultManager).setSettlementEngine(settlementEngine);
         console.log("Connected SettlementEngine to VaultManager");
+
+        // BlocksenseOracle: Set in VaultManager
+        VaultManager(vaultManager).setBlocksenseOracle(blocksenseOracle);
+        console.log("Connected BlocksenseOracle to VaultManager");
     }
 
     // ========================================================================
