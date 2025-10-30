@@ -44,7 +44,6 @@ contract InteractAssetVault is DeployHelper {
         console.log("Total Volume:", info.totalVolume);
         console.log("Total Positions Settled:", info.totalPositionsSettled);
         console.log("Total Leverage Exposure:", info.totalLeverageExposure);
-        console.log("Max Leverage Exposure:", info.maxLeverageExposure);
         console.log("Created At:", info.createdAt);
         console.log("Total Fees Collected:", info.totalFeesCollected);
         console.log("Total Staking Fees:", info.totalStakingFees);
@@ -53,7 +52,6 @@ contract InteractAssetVault is DeployHelper {
         console.log("Graduation Threshold:", info.graduationThreshold);
         console.log("Graduated At:", info.graduatedAt);
         console.log("Trading Enabled:", info.tradingEnabled);
-        console.log("Total Excess Profit:", info.totalExcessProfit);
         console.log("Pending Positions:", info.pendingPositions);
     }
 
@@ -67,7 +65,10 @@ contract InteractAssetVault is DeployHelper {
 
         console.log("Min Bet Amount:", params.minBetAmount);
         console.log("Max Bet Amount:", params.maxBetAmount);
-        console.log("Max Position Size Percent BPS:", params.maxPositionSizePercentBps);
+        console.log(
+            "Max Position Size Percent BPS:",
+            params.maxPositionSizePercentBps
+        );
         console.log("Min Liquidity Amount:", params.minLiquidityAmount);
     }
 
@@ -107,7 +108,8 @@ contract InteractAssetVault is DeployHelper {
         console.log("\n=== Calculate Pending Rewards ===");
         console.log("User:", user);
 
-        (uint256 pendingRewards, uint256 processableDays) = vault.calculatePendingRewards(user);
+        (uint256 pendingRewards, uint256 processableDays) = vault
+            .calculatePendingRewards(user);
         console.log("Pending Rewards:", pendingRewards);
         console.log("Processable Days:", processableDays);
     }
@@ -127,13 +129,20 @@ contract InteractAssetVault is DeployHelper {
     /**
      * @notice Calculate withdrawal amount
      */
-    function calculateWithdrawalAmount(address user, uint256 shares) public view {
+    function calculateWithdrawalAmount(
+        address user,
+        uint256 shares
+    ) public view {
         console.log("\n=== Calculate Withdrawal Amount ===");
         console.log("User:", user);
         console.log("Shares:", shares);
 
-        (uint256 grossAmount, uint256 fee, uint256 netAmount, bool isEarlyWithdrawal) =
-            vault.calculateWithdrawalAmount(user, shares);
+        (
+            uint256 grossAmount,
+            uint256 fee,
+            uint256 netAmount,
+            bool isEarlyWithdrawal
+        ) = vault.calculateWithdrawalAmount(user, shares);
 
         console.log("Gross Amount:", grossAmount);
         console.log("Fee:", fee);
@@ -157,8 +166,11 @@ contract InteractAssetVault is DeployHelper {
     function viewFeeConfig() public view {
         console.log("\n=== Fee Configuration ===");
 
-        (uint16 stakingFeeBps, uint16 earlyWithdrawalFeeBps, uint256 minLockPeriod) =
-            vault.getFeeConfig();
+        (
+            uint16 stakingFeeBps,
+            uint16 earlyWithdrawalFeeBps,
+            uint256 minLockPeriod
+        ) = vault.getFeeConfig();
 
         console.log("Staking Fee BPS:", stakingFeeBps);
         console.log("Early Withdrawal Fee BPS:", earlyWithdrawalFeeBps);
@@ -240,7 +252,11 @@ contract InteractAssetVault is DeployHelper {
         console.log("\n=== Update Vault Parameters ===");
 
         vm.startBroadcast(deployer);
-        vault.updateVaultParams(minBetAmount, maxBetAmount, maxPositionSizePercentBps);
+        vault.updateVaultParams(
+            minBetAmount,
+            maxBetAmount,
+            maxPositionSizePercentBps
+        );
         console.log("Vault parameters updated successfully");
         vm.stopBroadcast();
     }
