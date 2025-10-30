@@ -20,7 +20,7 @@ contract InteractBlocksenseOracle is DeployHelper {
         // Load oracle address from env or deployment file
         address oracleAddr = vm.envOr("ORACLE_ADDRESS", blocksenseOracle);
         require(oracleAddr != address(0), "Oracle address not set");
-        oracle = BlocksenseOracle(oracleAddr);
+        oracle = BlocksenseOracle(payable(oracleAddr));
 
         console.log("Oracle Address:", address(oracle));
     }
@@ -53,7 +53,10 @@ contract InteractBlocksenseOracle is DeployHelper {
         console.log("\n=== Get Price Unsafe ===");
         console.log("Adapter:", adapter);
 
-        try oracle.getPriceUnsafe(adapter) returns (int256 price, uint256 updatedAt) {
+        try oracle.getPriceUnsafe(adapter) returns (
+            int256 price,
+            uint256 updatedAt
+        ) {
             console.log("Price:", uint256(price));
             console.log("Updated At:", updatedAt);
         } catch Error(string memory reason) {
@@ -70,7 +73,10 @@ contract InteractBlocksenseOracle is DeployHelper {
         console.log("Max Age:", maxAge);
 
         vm.startBroadcast(deployer);
-        try oracle.getPriceNoOlderThan(adapter, maxAge) returns (int256 price, uint256 updatedAt) {
+        try oracle.getPriceNoOlderThan(adapter, maxAge) returns (
+            int256 price,
+            uint256 updatedAt
+        ) {
             console.log("Price:", uint256(price));
             console.log("Updated At:", updatedAt);
         } catch Error(string memory reason) {
@@ -86,7 +92,10 @@ contract InteractBlocksenseOracle is DeployHelper {
         console.log("\n=== Oracle Configuration ===");
         console.log("Max Price Age:", oracle.maxPriceAge());
         console.log("Max Price Change BPS:", oracle.maxPriceChangeBps());
-        console.log("Min Price Update Interval:", oracle.minPriceUpdateInterval());
+        console.log(
+            "Min Price Update Interval:",
+            oracle.minPriceUpdateInterval()
+        );
         console.log("Owner:");
         console.logAddress(oracle.owner());
         console.log("Paused:", oracle.paused());
@@ -122,7 +131,10 @@ contract InteractBlocksenseOracle is DeployHelper {
         console.log("Min Price Update Interval:", newMinPriceUpdateInterval);
 
         vm.startBroadcast(deployer);
-        oracle.setPriceValidationConfig(newMaxPriceChangeBps, newMinPriceUpdateInterval);
+        oracle.setPriceValidationConfig(
+            newMaxPriceChangeBps,
+            newMinPriceUpdateInterval
+        );
         console.log("Price validation config updated successfully");
         vm.stopBroadcast();
     }

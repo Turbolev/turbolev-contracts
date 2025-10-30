@@ -18,9 +18,15 @@ contract InteractSettlementEngine is DeployHelper {
         super.setUp();
 
         // Load settlement engine address from env or deployment file
-        address settlementAddr = vm.envOr("SETTLEMENT_ENGINE_ADDRESS", settlementEngine);
-        require(settlementAddr != address(0), "Settlement Engine address not set");
-        settlement = SettlementEngine(settlementAddr);
+        address settlementAddr = vm.envOr(
+            "SETTLEMENT_ENGINE_ADDRESS",
+            settlementEngine
+        );
+        require(
+            settlementAddr != address(0),
+            "Settlement Engine address not set"
+        );
+        settlement = SettlementEngine(payable(settlementAddr));
 
         console.log("Settlement Engine Address:", address(settlement));
     }
@@ -63,19 +69,24 @@ contract InteractSettlementEngine is DeployHelper {
         console.log("\n=== Settlement Price ===");
         console.log("Project Token:", projectToken);
 
-        (uint256 closePrice, uint256 publishTime) =
-            settlement.getSettlementPrice(projectToken, 3600); // maxAge = 1 hour
+        (uint256 closePrice, uint256 publishTime) = settlement
+            .getSettlementPrice(projectToken, 3600); // maxAge = 1 hour
         console.log("Close Price:", closePrice);
         console.log("Publish Time:", publishTime);
     }
 
-    function viewSettlementPrice(address base, address quote, uint256 maxAge) public view {
+    function viewSettlementPrice(
+        address base,
+        address quote,
+        uint256 maxAge
+    ) public view {
         console.log("\n=== Settlement Price ===");
         console.log("Base:", base);
         console.log("Quote:", quote);
         console.log("Max Age:", maxAge);
 
-        (uint256 closePrice, uint256 publishTime) = settlement.getSettlementPrice(base, maxAge);
+        (uint256 closePrice, uint256 publishTime) = settlement
+            .getSettlementPrice(base, maxAge);
         console.log("Close Price:", closePrice);
         console.log("Publish Time:", publishTime);
     }
@@ -123,7 +134,12 @@ contract InteractSettlementEngine is DeployHelper {
         console.log("Max Bet Amount:", maxBetAmount);
 
         vm.startBroadcast(deployer);
-        settlement.updateConfig(houseEdgeBps, winMultiplierBps, minBetAmount, maxBetAmount);
+        settlement.updateConfig(
+            houseEdgeBps,
+            winMultiplierBps,
+            minBetAmount,
+            maxBetAmount
+        );
         console.log("Config updated successfully");
         vm.stopBroadcast();
     }
@@ -175,7 +191,7 @@ contract InteractSettlementEngine is DeployHelper {
         console.log("New Oracle:", newOracle);
 
         vm.startBroadcast(deployer);
-        settlement.setBlocksenseOracle(newOracle);
+        settlement.setBlocksenseOracle(payable(newOracle));
         console.log("Blocksense Oracle updated successfully");
         vm.stopBroadcast();
     }

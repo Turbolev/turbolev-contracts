@@ -35,7 +35,10 @@ contract DeploySettlementEngine is DeployHelper {
             console.log("Upgrading to new implementation...");
 
             // Upgrade existing proxy to new implementation
-            SettlementEngine(settlementEngine).upgradeToAndCall(newImplementation, "");
+            SettlementEngine(settlementEngine).upgradeToAndCall(
+                newImplementation,
+                ""
+            );
 
             console.log("[SUCCESS] Upgraded SettlementEngine");
         } else {
@@ -43,19 +46,28 @@ contract DeploySettlementEngine is DeployHelper {
             console.log("No existing proxy found, deploying new...");
 
             // Prepare initialization data
-            bytes memory initData =
-                abi.encodeWithSelector(SettlementEngine.initialize.selector, owner);
+            bytes memory initData = abi.encodeWithSelector(
+                SettlementEngine.initialize.selector,
+                owner
+            );
 
             // Deploy proxy
-            address proxy = address(new ERC1967Proxy(newImplementation, initData));
-            settlementEngine = proxy;
+            address proxy = address(
+                new ERC1967Proxy(newImplementation, initData)
+            );
+            settlementEngine = payable(proxy);
 
             // Apply config (only for new deployments)
             console.log("Applying configuration...");
             SettlementEngine(settlementEngine).updateConfig(
-                HOUSE_EDGE_BPS, WIN_MULTIPLIER_BPS, MIN_BET_AMOUNT, MAX_BET_AMOUNT
+                HOUSE_EDGE_BPS,
+                WIN_MULTIPLIER_BPS,
+                MIN_BET_AMOUNT,
+                MAX_BET_AMOUNT
             );
-            SettlementEngine(settlementEngine).setMaxProfitCapBps(MAX_PROFIT_CAP_BPS);
+            SettlementEngine(settlementEngine).setMaxProfitCapBps(
+                MAX_PROFIT_CAP_BPS
+            );
 
             console.log("[SUCCESS] Deployed new SettlementEngine proxy");
         }

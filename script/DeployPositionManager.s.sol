@@ -36,7 +36,10 @@ contract DeployPositionManager is DeployHelper {
             console.log("Upgrading to new implementation...");
 
             // Upgrade existing proxy to new implementation
-            PositionManager(payable(positionManager)).upgradeToAndCall(newImplementation, "");
+            PositionManager(payable(positionManager)).upgradeToAndCall(
+                newImplementation,
+                ""
+            );
 
             console.log("[SUCCESS] Upgraded PositionManager");
         } else {
@@ -44,20 +47,30 @@ contract DeployPositionManager is DeployHelper {
             console.log("No existing proxy found, deploying new...");
 
             // Prepare initialization data
-            bytes memory initData =
-                abi.encodeWithSelector(PositionManager.initialize.selector, owner, backend);
+            bytes memory initData = abi.encodeWithSelector(
+                PositionManager.initialize.selector,
+                owner,
+                backend
+            );
 
             // Deploy proxy
-            address proxy = address(new ERC1967Proxy(newImplementation, initData));
-            positionManager = proxy;
+            address proxy = address(
+                new ERC1967Proxy(newImplementation, initData)
+            );
+            positionManager = payable(proxy);
 
             // Apply config (only for new deployments)
             console.log("Applying configuration...");
             PositionManager(payable(positionManager)).setMaintenanceMarginRatio(
                 MAINTENANCE_MARGIN_RATIO
             );
-            PositionManager(payable(positionManager)).setLeverageLimits(MIN_LEVERAGE, MAX_LEVERAGE);
-            PositionManager(payable(positionManager)).setMinPositionHoldTime(MIN_POSITION_HOLD_TIME);
+            PositionManager(payable(positionManager)).setLeverageLimits(
+                MIN_LEVERAGE,
+                MAX_LEVERAGE
+            );
+            PositionManager(payable(positionManager)).setMinPositionHoldTime(
+                MIN_POSITION_HOLD_TIME
+            );
 
             console.log("[SUCCESS] Deployed new PositionManager proxy");
         }

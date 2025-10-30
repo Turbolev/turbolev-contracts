@@ -45,15 +45,17 @@ contract MockCLAggregatorAdapter is ICLAggregatorAdapter {
         return 1;
     }
 
-    function getRoundData(uint80)
+    function getRoundData(
+        uint80
+    ) external view returns (uint80, int256, uint256, uint256, uint80) {
+        return (1, _answer, _timestamp, _timestamp, 1);
+    }
+
+    function latestRoundData()
         external
         view
         returns (uint80, int256, uint256, uint256, uint80)
     {
-        return (1, _answer, _timestamp, _timestamp, 1);
-    }
-
-    function latestRoundData() external view returns (uint80, int256, uint256, uint256, uint80) {
         return (1, _answer, _timestamp, _timestamp, 1);
     }
 
@@ -95,17 +97,26 @@ contract BlocksenseOracleTest is Test {
 
         // Deploy oracle with proxy
         BlocksenseOracle oracleImpl = new BlocksenseOracle();
-        bytes memory initData =
-            abi.encodeWithSelector(BlocksenseOracle.initialize.selector, owner, MAX_PRICE_AGE);
+        bytes memory initData = abi.encodeWithSelector(
+            BlocksenseOracle.initialize.selector,
+            owner,
+            MAX_PRICE_AGE
+        );
         ERC1967Proxy proxy = new ERC1967Proxy(address(oracleImpl), initData);
-        blocksenseOracle = BlocksenseOracle(address(proxy));
+        blocksenseOracle = BlocksenseOracle(payable(address(proxy)));
     }
 
     function test_Initialize_Success() public {
         assertEq(blocksenseOracle.owner(), owner, "Owner should be set");
-        assertEq(blocksenseOracle.maxPriceAge(), MAX_PRICE_AGE, "Max price age should be set");
         assertEq(
-            blocksenseOracle.maxPriceChangeBps(), 1000, "Default maxPriceChangeBps should be 1000"
+            blocksenseOracle.maxPriceAge(),
+            MAX_PRICE_AGE,
+            "Max price age should be set"
+        );
+        assertEq(
+            blocksenseOracle.maxPriceChangeBps(),
+            1000,
+            "Default maxPriceChangeBps should be 1000"
         );
         assertEq(
             blocksenseOracle.minPriceUpdateInterval(),
@@ -115,10 +126,20 @@ contract BlocksenseOracleTest is Test {
     }
 
     function test_GetPrice_Success() public {
-        (int256 price, uint256 updatedAt) = blocksenseOracle.getPrice(address(mockAdapter));
+        (int256 price, uint256 updatedAt) = blocksenseOracle.getPrice(
+            address(mockAdapter)
+        );
 
-        assertEq(price, 1_000_000_000_000_000_000, "Price should be scaled to 18 decimals"); // $1.00 in 18 decimals
-        assertEq(updatedAt, block.timestamp, "Updated at should be current timestamp");
+        assertEq(
+            price,
+            1_000_000_000_000_000_000,
+            "Price should be scaled to 18 decimals"
+        ); // $1.00 in 18 decimals
+        assertEq(
+            updatedAt,
+            block.timestamp,
+            "Updated at should be current timestamp"
+        );
     }
 
     function test_GetPrice_InvalidAdapter() public {
@@ -148,26 +169,44 @@ contract BlocksenseOracleTest is Test {
         uint256 staleTimestamp = 50;
         mockAdapter.setTimestamp(staleTimestamp);
 
-        (int256 price, uint256 updatedAt) = blocksenseOracle.getPriceUnsafe(address(mockAdapter));
+        (int256 price, uint256 updatedAt) = blocksenseOracle.getPriceUnsafe(
+            address(mockAdapter)
+        );
 
-        assertEq(price, 1_000_000_000_000_000_000, "Price should be scaled to 18 decimals");
+        assertEq(
+            price,
+            1_000_000_000_000_000_000,
+            "Price should be scaled to 18 decimals"
+        );
         assertEq(updatedAt, staleTimestamp, "Should return stale timestamp");
     }
 
     function test_GetPriceNoOlderThan_Success() public {
         vm.prank(owner);
-        (int256 price, uint256 updatedAt) =
-            blocksenseOracle.getPriceNoOlderThan(address(mockAdapter), 3600);
+        (int256 price, uint256 updatedAt) = blocksenseOracle
+            .getPriceNoOlderThan(address(mockAdapter), 3600);
 
-        assertEq(price, 1_000_000_000_000_000_000, "Price should be scaled to 18 decimals");
-        assertEq(updatedAt, block.timestamp, "Updated at should be current timestamp");
+        assertEq(
+            price,
+            1_000_000_000_000_000_000,
+            "Price should be scaled to 18 decimals"
+        );
+        assertEq(
+            updatedAt,
+            block.timestamp,
+            "Updated at should be current timestamp"
+        );
     }
 
     function test_SetMaxPriceAge() public {
         vm.prank(owner);
         blocksenseOracle.setMaxPriceAge(7200);
 
-        assertEq(blocksenseOracle.maxPriceAge(), 7200, "Max price age should be updated");
+        assertEq(
+            blocksenseOracle.maxPriceAge(),
+            7200,
+            "Max price age should be updated"
+        );
     }
 
     function test_SetPriceValidationConfig() public {
@@ -175,7 +214,9 @@ contract BlocksenseOracleTest is Test {
         blocksenseOracle.setPriceValidationConfig(500, 60);
 
         assertEq(
-            blocksenseOracle.maxPriceChangeBps(), 500, "Max price change BPS should be updated"
+            blocksenseOracle.maxPriceChangeBps(),
+            500,
+            "Max price change BPS should be updated"
         );
         assertEq(
             blocksenseOracle.minPriceUpdateInterval(),
@@ -201,6 +242,10 @@ contract BlocksenseOracleTest is Test {
     }
 
     function test_Version() public {
-        assertEq(blocksenseOracle.version(), "1.0.0-blocksense", "Version should be correct");
+        assertEq(
+            blocksenseOracle.version(),
+            "1.0.0-blocksense",
+            "Version should be correct"
+        );
     }
 }

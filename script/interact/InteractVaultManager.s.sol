@@ -22,7 +22,7 @@ contract InteractVaultManager is DeployHelper {
         // Load vault manager address from env or deployment file
         address vaultMgrAddr = vm.envOr("VAULT_MANAGER_ADDRESS", vaultManager);
         require(vaultMgrAddr != address(0), "Vault Manager address not set");
-        vaultMgr = VaultManager(vaultMgrAddr);
+        vaultMgr = VaultManager(payable(vaultMgrAddr));
 
         console.log("Vault Manager Address:", address(vaultMgr));
     }
@@ -109,17 +109,21 @@ contract InteractVaultManager is DeployHelper {
     /**
      * @notice Check position risk
      */
-    function checkPositionRisk(address projectToken, uint256 positionSize, uint8 leverage)
-        public
-        view
-    {
+    function checkPositionRisk(
+        address projectToken,
+        uint256 positionSize,
+        uint8 leverage
+    ) public view {
         console.log("\n=== Check Position Risk ===");
         console.log("Project Token:", projectToken);
         console.log("Position Size:", positionSize);
         console.log("Leverage:", leverage);
 
-        (bool canOpen, string memory reason) =
-            vaultMgr.checkPositionRisk(projectToken, positionSize, leverage);
+        (bool canOpen, string memory reason) = vaultMgr.checkPositionRisk(
+            projectToken,
+            positionSize,
+            leverage
+        );
 
         console.log("Can Open:", canOpen);
         if (!canOpen) {
@@ -151,8 +155,12 @@ contract InteractVaultManager is DeployHelper {
         console.log("Graduation Threshold:", graduationThreshold);
 
         vm.startBroadcast(deployer);
-        address vaultAddr =
-            vaultMgr.createVault(projectToken, minBetAmount, maxBetAmount, graduationThreshold);
+        address vaultAddr = vaultMgr.createVault(
+            projectToken,
+            minBetAmount,
+            maxBetAmount,
+            graduationThreshold
+        );
         console.log("Vault created at:", vaultAddr);
         vm.stopBroadcast();
     }
@@ -214,7 +222,9 @@ contract InteractVaultManager is DeployHelper {
     /**
      * @notice Helper to get vault from project token
      */
-    function _getVaultAddress(address projectToken) internal view returns (address) {
+    function _getVaultAddress(
+        address projectToken
+    ) internal view returns (address) {
         address vaultAddr = vaultMgr.getVaultByProjectToken(projectToken);
         require(vaultAddr != address(0), "Vault not found for project token");
         return vaultAddr;
@@ -246,7 +256,7 @@ contract InteractVaultManager is DeployHelper {
 
         // Add liquidity
         if (projectToken == address(0)) {
-            vault.addLiquidity{ value: amount }(amount);
+            vault.addLiquidity{value: amount}(amount);
         } else {
             vault.addLiquidity(amount);
         }
@@ -296,7 +306,8 @@ contract InteractVaultManager is DeployHelper {
         AssetVault vault = AssetVault(payable(vaultAddr));
 
         // Check pending rewards first
-        (uint256 pendingRewards, uint256 daysProcessed) = vault.calculatePendingRewards(deployer);
+        (uint256 pendingRewards, uint256 daysProcessed) = vault
+            .calculatePendingRewards(deployer);
         console.log("Pending Rewards:", pendingRewards);
         console.log("Days Processed:", daysProcessed);
 
@@ -341,7 +352,8 @@ contract InteractVaultManager is DeployHelper {
         console.log("Current Share Value:", shareValue);
 
         // Check pending rewards
-        (uint256 pendingRewards, uint256 daysProcessed) = vault.calculatePendingRewards(user);
+        (uint256 pendingRewards, uint256 daysProcessed) = vault
+            .calculatePendingRewards(user);
         console.log("Pending Rewards:", pendingRewards);
         console.log("Processable Days:", daysProcessed);
     }
@@ -406,7 +418,10 @@ contract InteractVaultManager is DeployHelper {
 
         console.log("Min Bet Amount:", params.minBetAmount);
         console.log("Max Bet Amount:", params.maxBetAmount);
-        console.log("Max Position Size Percent BPS:", params.maxPositionSizePercentBps);
+        console.log(
+            "Max Position Size Percent BPS:",
+            params.maxPositionSizePercentBps
+        );
         console.log("Min Liquidity Amount:", params.minLiquidityAmount);
     }
 
@@ -421,8 +436,11 @@ contract InteractVaultManager is DeployHelper {
         address vaultAddr = _getVaultAddress(projectToken);
         AssetVault vault = AssetVault(payable(vaultAddr));
 
-        (uint16 stakingFeeBps, uint16 earlyWithdrawalFeeBps, uint256 minLockPeriod) =
-            vault.getFeeConfig();
+        (
+            uint16 stakingFeeBps,
+            uint16 earlyWithdrawalFeeBps,
+            uint256 minLockPeriod
+        ) = vault.getFeeConfig();
 
         console.log("Staking Fee BPS:", stakingFeeBps);
         console.log("Early Withdrawal Fee BPS:", earlyWithdrawalFeeBps);
@@ -436,10 +454,11 @@ contract InteractVaultManager is DeployHelper {
      * @param user User address
      * @param shares Shares to withdraw
      */
-    function calculateWithdrawalAmount(address projectToken, address user, uint256 shares)
-        public
-        view
-    {
+    function calculateWithdrawalAmount(
+        address projectToken,
+        address user,
+        uint256 shares
+    ) public view {
         console.log("\n=== Calculate Withdrawal Amount ===");
         console.log("Project Token:", projectToken);
         console.log("User:", user);
@@ -448,8 +467,12 @@ contract InteractVaultManager is DeployHelper {
         address vaultAddr = _getVaultAddress(projectToken);
         AssetVault vault = AssetVault(payable(vaultAddr));
 
-        (uint256 grossAmount, uint256 fee, uint256 netAmount, bool isEarlyWithdrawal) =
-            vault.calculateWithdrawalAmount(user, shares);
+        (
+            uint256 grossAmount,
+            uint256 fee,
+            uint256 netAmount,
+            bool isEarlyWithdrawal
+        ) = vault.calculateWithdrawalAmount(user, shares);
 
         console.log("Gross Amount:", grossAmount);
         console.log("Fee:", fee);
@@ -459,7 +482,10 @@ contract InteractVaultManager is DeployHelper {
         if (isEarlyWithdrawal) {
             uint256 remainingLockTime = vault.getRemainingLockTime(user);
             console.log("Remaining Lock Time (seconds):", remainingLockTime);
-            console.log("Remaining Lock Time (days):", remainingLockTime / 1 days);
+            console.log(
+                "Remaining Lock Time (days):",
+                remainingLockTime / 1 days
+            );
         }
     }
 
@@ -468,7 +494,10 @@ contract InteractVaultManager is DeployHelper {
      * @param projectToken Project token address
      * @param user User address
      */
-    function getRemainingLockTime(address projectToken, address user) public view {
+    function getRemainingLockTime(
+        address projectToken,
+        address user
+    ) public view {
         console.log("\n=== Remaining Lock Time ===");
         console.log("Project Token:", projectToken);
         console.log("User:", user);
@@ -564,7 +593,10 @@ contract InteractVaultManager is DeployHelper {
             console.log("Total Liquidity:", snapshot.totalLiquidity);
             console.log("Total Shares:", snapshot.totalShares);
             console.log("Net P&L:", snapshot.netPnL);
-            console.log("Total Positions Settled:", snapshot.totalPositionsSettled);
+            console.log(
+                "Total Positions Settled:",
+                snapshot.totalPositionsSettled
+            );
             console.log("Timestamp:", snapshot.timestamp);
         }
     }
@@ -643,7 +675,11 @@ contract InteractVaultManager is DeployHelper {
         AssetVault vault = AssetVault(payable(vaultAddr));
 
         vm.startBroadcast(deployer);
-        vault.updateVaultParams(minBetAmount, maxBetAmount, maxPositionSizePercentBps);
+        vault.updateVaultParams(
+            minBetAmount,
+            maxBetAmount,
+            maxPositionSizePercentBps
+        );
         console.log("Vault parameters updated successfully");
         vm.stopBroadcast();
     }
@@ -653,7 +689,10 @@ contract InteractVaultManager is DeployHelper {
      * @param projectToken Project token address
      * @param threshold New threshold
      */
-    function setGraduationThreshold(address projectToken, uint256 threshold) public {
+    function setGraduationThreshold(
+        address projectToken,
+        uint256 threshold
+    ) public {
         console.log("\n=== Set Graduation Threshold ===");
         console.log("Project Token:", projectToken);
         console.log("Threshold:", threshold);
@@ -732,7 +771,10 @@ contract InteractVaultManager is DeployHelper {
      * @param projectToken Project token address
      * @param blocksenseOracle Oracle address
      */
-    function setBlocksenseOracle(address projectToken, address blocksenseOracle) public {
+    function setBlocksenseOracle(
+        address projectToken,
+        address blocksenseOracle
+    ) public {
         console.log("\n=== Set Blocksense Oracle ===");
         console.log("Project Token:", projectToken);
         console.log("Oracle:", blocksenseOracle);
