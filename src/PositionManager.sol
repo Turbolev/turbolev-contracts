@@ -145,6 +145,8 @@ contract PositionManager is
     error PriceStale();
     error DirectTransferNotAllowed();
 
+    error NativeTokenNotAllowed();
+
     // ========================================================================
     // CONSTRUCTOR / INITIALIZER
     // ========================================================================
@@ -241,8 +243,8 @@ contract PositionManager is
         // Handle collateral - ONLY project token accepted (v1)
         if (projectToken == address(0)) {
             // Native project token (rare case)
-            amount = msg.value;
-            if (amount == 0) revert InvalidAmount();
+            // TODO: Implement native token handling
+            revert NativeTokenNotAllowed();
         } else {
             // ERC20 project token (most common)
             amount = collateralAmount;
