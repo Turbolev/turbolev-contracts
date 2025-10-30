@@ -45,15 +45,10 @@ contract DeployVaultManager is DeployHelper {
             console.log("No existing proxy found, deploying new...");
 
             // Prepare initialization data
-            bytes memory initData = abi.encodeWithSelector(
-                VaultManager.initialize.selector,
-                owner
-            );
+            bytes memory initData = abi.encodeWithSelector(VaultManager.initialize.selector, owner);
 
             // Deploy proxy
-            address proxy = address(
-                new ERC1967Proxy(newImplementation, initData)
-            );
+            address proxy = address(new ERC1967Proxy(newImplementation, initData));
             vaultManager = proxy;
 
             console.log("[SUCCESS] Deployed new VaultManager proxy");
@@ -65,10 +60,7 @@ contract DeployVaultManager is DeployHelper {
         // Deploy or check VaultManagerHelper
         console.log("\n--- VaultManagerHelper ---");
         if (_isContractDeployed(vaultManagerHelper)) {
-            console.log(
-                "VaultManagerHelper already exists at:",
-                vaultManagerHelper
-            );
+            console.log("VaultManagerHelper already exists at:", vaultManagerHelper);
             console.log("Note: VaultManagerHelper is not upgradeable");
             console.log("Deploy manually if changes are needed");
             helperAddress = vaultManagerHelper;

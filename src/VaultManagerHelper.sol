@@ -93,9 +93,11 @@ contract VaultManagerHelper {
     /**
      * @notice Get vault info for a token
      */
-    function getVaultInfo(
-        address tokenAddress
-    ) external view returns (IAssetVault.VaultInfo memory) {
+    function getVaultInfo(address tokenAddress)
+        external
+        view
+        returns (IAssetVault.VaultInfo memory)
+    {
         address vaultAddress = _getVault(tokenAddress);
         if (vaultAddress == address(0)) revert VaultNotFound();
 
@@ -105,9 +107,11 @@ contract VaultManagerHelper {
     /**
      * @notice Get vault parameters for a token
      */
-    function getVaultParams(
-        address tokenAddress
-    ) external view returns (IAssetVault.VaultParams memory) {
+    function getVaultParams(address tokenAddress)
+        external
+        view
+        returns (IAssetVault.VaultParams memory)
+    {
         address vaultAddress = _getVault(tokenAddress);
         if (vaultAddress == address(0)) revert VaultNotFound();
 
@@ -117,10 +121,11 @@ contract VaultManagerHelper {
     /**
      * @notice Get LP position for a user in a specific vault
      */
-    function getLPPosition(
-        address tokenAddress,
-        address user
-    ) external view returns (IAssetVault.LPPosition memory) {
+    function getLPPosition(address tokenAddress, address user)
+        external
+        view
+        returns (IAssetVault.LPPosition memory)
+    {
         address vaultAddress = _getVault(tokenAddress);
         if (vaultAddress == address(0)) revert VaultNotFound();
 
@@ -134,8 +139,7 @@ contract VaultManagerHelper {
         address[] memory vaults = _getAllVaults();
 
         for (uint256 i = 0; i < vaults.length; i++) {
-            IAssetVault.VaultInfo memory info = IAssetVault(vaults[i])
-                .getVaultInfo();
+            IAssetVault.VaultInfo memory info = IAssetVault(vaults[i]).getVaultInfo();
             total += info.totalLiquidity;
         }
         return total;
@@ -167,9 +171,7 @@ contract VaultManagerHelper {
      * @param token Token address
      * @return balance Token balance
      */
-    function getTokenBalance(
-        address token
-    ) external view returns (uint256 balance) {
+    function getTokenBalance(address token) external view returns (uint256 balance) {
         if (token == address(0)) revert InvalidAddress();
         return IERC20(token).balanceOf(address(this));
     }
@@ -182,14 +184,11 @@ contract VaultManagerHelper {
      * @notice Update PositionManager contract for a specific vault
      * @dev Forwards call through VaultManager to avoid ownership issues
      */
-    function updateVaultPositionManager(
-        address tokenAddress,
-        address _positionManager
-    ) external onlyOwner {
-        IVaultManager(vaultManager).updateVaultPositionManager(
-            tokenAddress,
-            _positionManager
-        );
+    function updateVaultPositionManager(address tokenAddress, address _positionManager)
+        external
+        onlyOwner
+    {
+        IVaultManager(vaultManager).updateVaultPositionManager(tokenAddress, _positionManager);
     }
 
     /**
@@ -214,14 +213,11 @@ contract VaultManagerHelper {
      * @param blocksenseOracle BlocksenseOracle contract address
      * @dev Forwards call through VaultManager to avoid ownership issues
      */
-    function setVaultBlocksenseOracle(
-        address tokenAddress,
-        address blocksenseOracle
-    ) external onlyOwner {
-        IVaultManager(vaultManager).setVaultBlocksenseOracle(
-            tokenAddress,
-            blocksenseOracle
-        );
+    function setVaultBlocksenseOracle(address tokenAddress, address blocksenseOracle)
+        external
+        onlyOwner
+    {
+        IVaultManager(vaultManager).setVaultBlocksenseOracle(tokenAddress, blocksenseOracle);
     }
 
     /**
@@ -230,13 +226,10 @@ contract VaultManagerHelper {
      * @param threshold New threshold in token amount (same decimals as token)
      * @dev Forwards call through VaultManager to avoid ownership issues
      */
-    function setVaultGraduationThreshold(
-        address tokenAddress,
-        uint256 threshold
-    ) external onlyOwner {
-        IVaultManager(vaultManager).setVaultGraduationThreshold(
-            tokenAddress,
-            threshold
-        );
+    function setVaultGraduationThreshold(address tokenAddress, uint256 threshold)
+        external
+        onlyOwner
+    {
+        IVaultManager(vaultManager).setVaultGraduationThreshold(tokenAddress, threshold);
     }
 }

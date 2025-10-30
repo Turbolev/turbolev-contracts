@@ -11,18 +11,14 @@ interface IVaultManager {
      * @param _projectToken Project token address
      * @return vaultAddress Vault contract address
      */
-    function getVault(
-        address _projectToken
-    ) external view returns (address vaultAddress);
+    function getVault(address _projectToken) external view returns (address vaultAddress);
 
     /**
      * @notice Check if vault is supported for project token
      * @param _projectToken Project token address
      * @return supported Whether vault exists
      */
-    function isVaultSupported(
-        address _projectToken
-    ) external view returns (bool supported);
+    function isVaultSupported(address _projectToken) external view returns (bool supported);
 
     /**
      * @notice Check position risk
@@ -32,11 +28,10 @@ interface IVaultManager {
      * @return canOpen Whether position can be opened
      * @return reason Reason if cannot open
      */
-    function checkPositionRisk(
-        address _projectToken,
-        uint256 positionSize,
-        uint8 leverage
-    ) external view returns (bool canOpen, string memory reason);
+    function checkPositionRisk(address _projectToken, uint256 positionSize, uint8 leverage)
+        external
+        view
+        returns (bool canOpen, string memory reason);
 
     /**
      * @notice Deposit collateral from bet (v1: project token only)
@@ -61,12 +56,8 @@ interface IVaultManager {
      * @param amount Payout amount in project tokens
      * @param positionId Position ID for tracking partial payouts
      */
-    function executePayout(
-        address _projectToken,
-        address user,
-        uint256 amount,
-        uint64 positionId
-    ) external;
+    function executePayout(address _projectToken, address user, uint256 amount, uint64 positionId)
+        external;
 
     /**
      * @notice Update vault P&L with leverage
@@ -91,9 +82,10 @@ interface IVaultManager {
      * @param projectToken Project token address
      * @return vaultAddress Vault address
      */
-    function vaultsByProjectToken(
-        address projectToken
-    ) external view returns (address vaultAddress);
+    function vaultsByProjectToken(address projectToken)
+        external
+        view
+        returns (address vaultAddress);
 
     /**
      * @notice Get all vaults
@@ -116,10 +108,7 @@ interface IVaultManager {
      * @param _projectToken Project token address
      * @param _positionManager New PositionManager address
      */
-    function updateVaultPositionManager(
-        address _projectToken,
-        address _positionManager
-    ) external;
+    function updateVaultPositionManager(address _projectToken, address _positionManager) external;
 
     /**
      * @notice Pause a specific vault
@@ -138,18 +127,12 @@ interface IVaultManager {
      * @param _projectToken Project token address
      * @param _blocksenseOracle BlocksenseOracle address
      */
-    function setVaultBlocksenseOracle(
-        address _projectToken,
-        address _blocksenseOracle
-    ) external;
+    function setVaultBlocksenseOracle(address _projectToken, address _blocksenseOracle) external;
 
     /**
      * @notice Set graduation threshold for a vault
      * @param _projectToken Project token address
      * @param _threshold New graduation threshold
      */
-    function setVaultGraduationThreshold(
-        address _projectToken,
-        uint256 _threshold
-    ) external;
+    function setVaultGraduationThreshold(address _projectToken, uint256 _threshold) external;
 }

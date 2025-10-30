@@ -86,25 +86,13 @@ contract SettlementEngine is
     );
 
     event ConfigUpdated(
-        uint16 houseEdgeBps,
-        uint16 winMultiplierBps,
-        uint256 minBetAmount,
-        uint256 maxBetAmount
+        uint16 houseEdgeBps, uint16 winMultiplierBps, uint256 minBetAmount, uint256 maxBetAmount
     );
 
-    event PositionManagerUpdated(
-        address indexed oldAddress,
-        address indexed newAddress
-    );
-    event VaultManagerUpdated(
-        address indexed oldAddress,
-        address indexed newAddress
-    );
+    event PositionManagerUpdated(address indexed oldAddress, address indexed newAddress);
+    event VaultManagerUpdated(address indexed oldAddress, address indexed newAddress);
 
-    event BlocksenseOracleUpdated(
-        address indexed oldAddress,
-        address indexed newAddress
-    );
+    event BlocksenseOracleUpdated(address indexed oldAddress, address indexed newAddress);
 
     event ProfitCapped(
         uint64 indexed positionId,
@@ -190,9 +178,11 @@ contract SettlementEngine is
      * @param amount Bet amount
      * @return potentialPayout Max possible payout
      */
-    function calculatePotentialPayout(
-        uint256 amount
-    ) external view returns (uint256 potentialPayout) {
+    function calculatePotentialPayout(uint256 amount)
+        external
+        view
+        returns (uint256 potentialPayout)
+    {
         uint256 grossPayout = (amount * winMultiplierBps) / BASIS_POINTS;
         uint256 houseEdge = (grossPayout * houseEdgeBps) / BASIS_POINTS;
         potentialPayout = grossPayout - houseEdge;
@@ -232,7 +222,7 @@ contract SettlementEngine is
         )
     {
         // Calculate P&L with leverage
-        (pnl, ) = PositionLib.calculateUnrealizedPnL(position, closePrice);
+        (pnl,) = PositionLib.calculateUnrealizedPnL(position, closePrice);
 
         // Determine win/loss
         won = !isLiquidation && pnl > 0;
@@ -240,12 +230,8 @@ contract SettlementEngine is
         // Calculate liquidation fee if applicable
         uint256 liquidationFee = 0;
         if (isLiquidation) {
-            uint256 liquidationFeeBps = PositionLib.calculateLiquidationFee(
-                position.leverage
-            );
-            liquidationFee =
-                (position.amount * liquidationFeeBps) /
-                BASIS_POINTS;
+            uint256 liquidationFeeBps = PositionLib.calculateLiquidationFee(position.leverage);
+            liquidationFee = (position.amount * liquidationFeeBps) / BASIS_POINTS;
         }
 
         // Calculate final payout/settlement
@@ -256,12 +242,8 @@ contract SettlementEngine is
             // Liquidation: User gets remaining collateral minus liquidation fee (if any)
             // Remaining = collateral - abs(loss) - liquidation fee
             uint256 absLoss = pnl < 0 ? uint256(-pnl) : 0;
-            uint256 remaining = position.amount > absLoss
-                ? position.amount - absLoss
-                : 0;
-            payout = remaining > liquidationFee
-                ? remaining - liquidationFee
-                : 0;
+            uint256 remaining = position.amount > absLoss ? position.amount - absLoss : 0;
+            payout = remaining > liquidationFee ? remaining - liquidationFee : 0;
             fee = liquidationFee; // Now flat 2% (calculated from PositionLib)
         } else if (won) {
             // Won: User gets collateral + profit - house edge
@@ -288,11 +270,7 @@ contract SettlementEngine is
                 excessProfit = profit - maxProfit;
 
                 emit ProfitCapped(
-                    position.positionId,
-                    profit,
-                    cappedProfit,
-                    excessProfit,
-                    block.timestamp
+                    position.positionId, profit, cappedProfit, excessProfit, block.timestamp
                 );
             }
 
@@ -323,20 +301,12 @@ contract SettlementEngine is
         if (isLiquidation) {
             finalState = PositionLib.POSITION_STATE_LIQUIDATED;
         } else {
-            finalState = won
-                ? PositionLib.POSITION_STATE_WON
-                : PositionLib.POSITION_STATE_LOST;
+            finalState = won ? PositionLib.POSITION_STATE_WON : PositionLib.POSITION_STATE_LOST;
         }
 
         // Emit settlement event
         emit SettlementProcessed(
-            position.positionId,
-            position.user,
-            position.amount,
-            payout,
-            fee,
-            won,
-            block.timestamp
+            position.positionId, position.user, position.amount, payout, fee, won, block.timestamp
         );
 
         // Return values directly (no struct)
@@ -351,10 +321,7 @@ contract SettlementEngine is
      * @return publishTime When price was last updated
      * @dev Gets base/quote from vault manager and queries oracle
      */
-    function getSettlementPrice(
-        address projectToken,
-        uint256 maxAge
-    )
+    function getSettlementPrice(address projectToken, uint256 maxAge)
         external
         view
         whenNotPaused
@@ -372,8 +339,7 @@ contract SettlementEngine is
         address adapter = vault.oracleAdapter();
 
         // Get price from oracle
-        (int256 price, uint256 updatedAt) = BlocksenseOracle(blocksenseOracle)
-            .getPrice(adapter);
+        (int256 price, uint256 updatedAt) = BlocksenseOracle(blocksenseOracle).getPrice(adapter);
 
         // Check price age with custom maxAge
         if (block.timestamp - updatedAt > maxAge) revert InvalidOraclePrice();
@@ -391,10 +357,7 @@ contract SettlementEngine is
      * @return publishTime When price was last updated
      * @dev Public wrapper for external calls - internal logic uses direct oracle call
      */
-    function getSettlementPriceFromAdapter(
-        address adapter,
-        uint256 maxAge
-    )
+    function getSettlementPriceFromAdapter(address adapter, uint256 maxAge)
         external
         view
         whenNotPaused
@@ -402,8 +365,7 @@ contract SettlementEngine is
     {
         if (blocksenseOracle == address(0)) revert InvalidAddress();
 
-        (int256 price, uint256 updatedAt) = BlocksenseOracle(blocksenseOracle)
-            .getPrice(adapter);
+        (int256 price, uint256 updatedAt) = BlocksenseOracle(blocksenseOracle).getPrice(adapter);
 
         // Check price age
         if (block.timestamp - updatedAt > maxAge) revert InvalidOraclePrice();
@@ -438,12 +400,7 @@ contract SettlementEngine is
         minBetAmount = _minBetAmount;
         maxBetAmount = _maxBetAmount;
 
-        emit ConfigUpdated(
-            _houseEdgeBps,
-            _winMultiplierBps,
-            _minBetAmount,
-            _maxBetAmount
-        );
+        emit ConfigUpdated(_houseEdgeBps, _winMultiplierBps, _minBetAmount, _maxBetAmount);
     }
 
     /**
@@ -504,9 +461,7 @@ contract SettlementEngine is
     /**
      * @notice Authorize upgrade (UUPS pattern)
      */
-    function _authorizeUpgrade(
-        address newImplementation
-    ) internal override onlyOwner {}
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner { }
 
     // ========================================================================
     // TRADING CAP FUNCTIONS
@@ -518,22 +473,17 @@ contract SettlementEngine is
      * @return vaultCap 2% of vault liquidity in tokens (0 if not available)
      * @dev Used at settlement time to compare with 3× collateral cap
      */
-    function _calculateVaultCap(
-        address projectToken
-    ) internal view returns (uint256) {
+    function _calculateVaultCap(address projectToken) internal view returns (uint256) {
         if (vaultManager == address(0)) {
             return 0;
         }
 
-        address vaultAddress = IVaultManager(vaultManager).getVault(
-            projectToken
-        );
+        address vaultAddress = IVaultManager(vaultManager).getVault(projectToken);
         if (vaultAddress == address(0)) {
             return 0;
         }
 
-        IAssetVault.VaultInfo memory vaultInfo = IAssetVault(vaultAddress)
-            .getVaultInfo();
+        IAssetVault.VaultInfo memory vaultInfo = IAssetVault(vaultAddress).getVaultInfo();
         uint256 vaultLiquidity = vaultInfo.totalLiquidity; // Use total LP liquidity for cap calculation
 
         if (vaultLiquidity == 0) {
@@ -570,13 +520,7 @@ contract SettlementEngine is
             bool _paused
         )
     {
-        return (
-            houseEdgeBps,
-            winMultiplierBps,
-            minBetAmount,
-            maxBetAmount,
-            paused()
-        );
+        return (houseEdgeBps, winMultiplierBps, minBetAmount, maxBetAmount, paused());
     }
 
     /**
