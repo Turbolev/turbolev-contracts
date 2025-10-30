@@ -4,7 +4,7 @@ pragma solidity ^0.8.22;
 import "./interfaces/IAssetVault.sol";
 import "./interfaces/IVaultManager.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 
 /**
  * @title VaultManagerHelper
@@ -29,6 +29,7 @@ contract VaultManagerHelper {
     error InvalidAddress();
     error VaultNotFound();
     error NotAuthorized();
+    error DirectTransferNotAllowed();
 
     // ========================================================================
     // CONSTRUCTOR
@@ -44,11 +45,25 @@ contract VaultManagerHelper {
     }
 
     // ========================================================================
+    // RECEIVE / FALLBACK
+    // ========================================================================
+
+    /// @notice Reject direct native token transfers
+    receive() external payable {
+        revert DirectTransferNotAllowed();
+    }
+
+    /// @notice Reject fallback calls
+    fallback() external payable {
+        revert DirectTransferNotAllowed();
+    }
+
+    // ========================================================================
     // MODIFIERS
     // ========================================================================
 
     modifier onlyOwner() {
-        address owner = Ownable(vaultManager).owner();
+        address owner = OwnableUpgradeable(vaultManager).owner();
         if (msg.sender != owner) revert NotAuthorized();
         _;
     }
@@ -78,11 +93,9 @@ contract VaultManagerHelper {
     /**
      * @notice Get vault info for a token
      */
-    function getVaultInfo(address tokenAddress)
-        external
-        view
-        returns (IAssetVault.VaultInfo memory)
-    {
+    function getVaultInfo(
+        address tokenAddress
+    ) external view returns (IAssetVault.VaultInfo memory) {
         address vaultAddress = _getVault(tokenAddress);
         if (vaultAddress == address(0)) revert VaultNotFound();
 
@@ -92,11 +105,9 @@ contract VaultManagerHelper {
     /**
      * @notice Get vault parameters for a token
      */
-    function getVaultParams(address tokenAddress)
-        external
-        view
-        returns (IAssetVault.VaultParams memory)
-    {
+    function getVaultParams(
+        address tokenAddress
+    ) external view returns (IAssetVault.VaultParams memory) {
         address vaultAddress = _getVault(tokenAddress);
         if (vaultAddress == address(0)) revert VaultNotFound();
 
@@ -106,11 +117,10 @@ contract VaultManagerHelper {
     /**
      * @notice Get LP position for a user in a specific vault
      */
-    function getLPPosition(address tokenAddress, address user)
-        external
-        view
-        returns (IAssetVault.LPPosition memory)
-    {
+    function getLPPosition(
+        address tokenAddress,
+        address user
+    ) external view returns (IAssetVault.LPPosition memory) {
         address vaultAddress = _getVault(tokenAddress);
         if (vaultAddress == address(0)) revert VaultNotFound();
 
@@ -124,7 +134,8 @@ contract VaultManagerHelper {
         address[] memory vaults = _getAllVaults();
 
         for (uint256 i = 0; i < vaults.length; i++) {
-            IAssetVault.VaultInfo memory info = IAssetVault(vaults[i]).getVaultInfo();
+            IAssetVault.VaultInfo memory info = IAssetVault(vaults[i])
+                .getVaultInfo();
             total += info.totalLiquidity;
         }
         return total;
@@ -156,75 +167,76 @@ contract VaultManagerHelper {
      * @param token Token address
      * @return balance Token balance
      */
-    function getTokenBalance(address token) external view returns (uint256 balance) {
+    function getTokenBalance(
+        address token
+    ) external view returns (uint256 balance) {
         if (token == address(0)) revert InvalidAddress();
         return IERC20(token).balanceOf(address(this));
     }
 
     // ========================================================================
-    // ADMIN FORWARDING FUNCTIONS
+    // ADMIN FORWARDING FUNCTIONS (via VaultManager proxy)
     // ========================================================================
 
     /**
      * @notice Update PositionManager contract for a specific vault
+     * @dev Forwards call through VaultManager to avoid ownership issues
      */
-    function updateVaultPositionManager(address tokenAddress, address _positionManager)
-        external
-        onlyOwner
-    {
-        address vaultAddress = _getVault(tokenAddress);
-        if (vaultAddress == address(0)) revert VaultNotFound();
-
-        IAssetVault(vaultAddress).setPositionManager(_positionManager);
+    function updateVaultPositionManager(
+        address tokenAddress,
+        address _positionManager
+    ) external onlyOwner {
+        IVaultManager(vaultManager).updateVaultPositionManager(
+            tokenAddress,
+            _positionManager
+        );
     }
 
     /**
      * @notice Pause a specific vault
+     * @dev Forwards call through VaultManager to avoid ownership issues
      */
     function pauseVault(address tokenAddress) external onlyOwner {
-        address vaultAddress = _getVault(tokenAddress);
-        if (vaultAddress == address(0)) revert VaultNotFound();
-
-        IAssetVault(vaultAddress).pause();
+        IVaultManager(vaultManager).pauseVault(tokenAddress);
     }
 
     /**
      * @notice Unpause a specific vault
+     * @dev Forwards call through VaultManager to avoid ownership issues
      */
     function unpauseVault(address tokenAddress) external onlyOwner {
-        address vaultAddress = _getVault(tokenAddress);
-        if (vaultAddress == address(0)) revert VaultNotFound();
-
-        IAssetVault(vaultAddress).unpause();
+        IVaultManager(vaultManager).unpauseVault(tokenAddress);
     }
 
     /**
      * @notice Set Blocksense Oracle for a vault
      * @param tokenAddress Token address
      * @param blocksenseOracle BlocksenseOracle contract address
+     * @dev Forwards call through VaultManager to avoid ownership issues
      */
-    function setVaultBlocksenseOracle(address tokenAddress, address blocksenseOracle)
-        external
-        onlyOwner
-    {
-        address vaultAddress = _getVault(tokenAddress);
-        if (vaultAddress == address(0)) revert VaultNotFound();
-
-        IAssetVault(vaultAddress).setBlocksenseOracle(blocksenseOracle);
+    function setVaultBlocksenseOracle(
+        address tokenAddress,
+        address blocksenseOracle
+    ) external onlyOwner {
+        IVaultManager(vaultManager).setVaultBlocksenseOracle(
+            tokenAddress,
+            blocksenseOracle
+        );
     }
 
     /**
      * @notice Set graduation threshold for a vault
      * @param tokenAddress Token address
      * @param threshold New threshold in token amount (same decimals as token)
+     * @dev Forwards call through VaultManager to avoid ownership issues
      */
-    function setVaultGraduationThreshold(address tokenAddress, uint256 threshold)
-        external
-        onlyOwner
-    {
-        address vaultAddress = _getVault(tokenAddress);
-        if (vaultAddress == address(0)) revert VaultNotFound();
-
-        IAssetVault(vaultAddress).setGraduationThreshold(threshold);
+    function setVaultGraduationThreshold(
+        address tokenAddress,
+        uint256 threshold
+    ) external onlyOwner {
+        IVaultManager(vaultManager).setVaultGraduationThreshold(
+            tokenAddress,
+            threshold
+        );
     }
 }

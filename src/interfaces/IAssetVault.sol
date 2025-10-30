@@ -6,15 +6,21 @@ pragma solidity ^0.8.22;
  * @notice Interface for AssetVault contract
  */
 interface IAssetVault {
+    enum LiquidityOperationType {
+        USER_DEPOSIT, // User deposits liquidity
+        USER_WITHDRAW, // User withdraws liquidity
+        CLOSE_POSITION, // Liquidity change from position closure
+        BET_DEPOSIT, // Liquidity from bet collateral deposit
+        PAYOUT_EXECUTION // Liquidity change from payout execution
+    }
     struct VaultInfo {
-        uint256 totalLiquidity;
+        uint256 totalLiquidity; // Total LP liquidity only
         uint256 totalShares;
         uint256 lifetimePnL;
         bool isNegativePnL;
         uint256 totalVolume;
         uint256 totalPositionsSettled;
         uint256 totalLeverageExposure;
-        uint256 maxLeverageExposure;
         uint256 createdAt;
         uint256 totalFeesCollected;
         uint256 totalStakingFees;
@@ -23,7 +29,6 @@ interface IAssetVault {
         uint256 graduationThreshold;
         uint256 graduatedAt;
         bool tradingEnabled;
-        uint256 totalExcessProfit;
         uint256 pendingPositions;
     }
 
@@ -70,10 +75,17 @@ interface IAssetVault {
 
     /**
      * @notice Deposit collateral from bet
+     * @param positionId Position ID
      * @param amount Collateral amount in project tokens
      * @param positionSize Position size
+     * @param isMarginAdd True if adding margin to existing position, false if opening new position
      */
-    function depositFromBet(uint256 amount, uint256 positionSize) external payable;
+    function depositFromBet(
+        uint64 positionId,
+        uint256 amount,
+        uint256 positionSize,
+        bool isMarginAdd
+    ) external payable;
 
     /**
      * @notice Execute payout to user
@@ -81,7 +93,11 @@ interface IAssetVault {
      * @param amount Payout amount in project tokens
      * @param positionId Position ID for tracking partial payouts
      */
-    function executePayout(address user, uint256 amount, uint64 positionId) external;
+    function executePayout(
+        address user,
+        uint256 amount,
+        uint64 positionId
+    ) external;
 
     /**
      * @notice Update vault P&L
@@ -90,15 +106,13 @@ interface IAssetVault {
      * @param vaultPnL Vault P&L
      * @param fee Fee collected
      * @param positionSize Position size
-     * @param excessProfit Excess profit from capped trades
      */
     function updateVaultPnL(
         uint64 positionId,
         uint256 collateral,
         int256 vaultPnL,
         uint256 fee,
-        uint256 positionSize,
-        uint256 excessProfit
+        uint256 positionSize
     ) external;
 
     /**
@@ -108,10 +122,10 @@ interface IAssetVault {
      * @return canOpen Whether position can be opened
      * @return reason Reason if cannot open
      */
-    function checkPositionRisk(uint256 positionSize, uint8 leverage)
-        external
-        view
-        returns (bool canOpen, string memory reason);
+    function checkPositionRisk(
+        uint256 positionSize,
+        uint8 leverage
+    ) external view returns (bool canOpen, string memory reason);
 
     /**
      * @notice Get vault info
@@ -127,7 +141,9 @@ interface IAssetVault {
      * @notice Get LP position
      * @param user User address
      */
-    function getLPPosition(address user) external view returns (LPPosition memory);
+    function getLPPosition(
+        address user
+    ) external view returns (LPPosition memory);
 
     /**
      * @notice Set PositionManager contract address
@@ -165,10 +181,18 @@ interface IAssetVault {
      * @return netAmount Net amount user will receive
      * @return isEarlyWithdrawal Whether this would be an early withdrawal
      */
-    function calculateWithdrawalAmount(address user, uint256 shares)
+    function calculateWithdrawalAmount(
+        address user,
+        uint256 shares
+    )
         external
         view
-        returns (uint256 grossAmount, uint256 fee, uint256 netAmount, bool isEarlyWithdrawal);
+        returns (
+            uint256 grossAmount,
+            uint256 fee,
+            uint256 netAmount,
+            bool isEarlyWithdrawal
+        );
 
     /**
      * @notice Get fee configuration
@@ -179,7 +203,11 @@ interface IAssetVault {
     function getFeeConfig()
         external
         view
-        returns (uint16 stakingFeeBps, uint16 earlyWithdrawalFeeBps, uint256 minLockPeriod);
+        returns (
+            uint16 stakingFeeBps,
+            uint16 earlyWithdrawalFeeBps,
+            uint256 minLockPeriod
+        );
 
     /**
      * @notice Get total fees collected
@@ -266,10 +294,9 @@ interface IAssetVault {
      * @return pendingRewards Total pending rewards
      * @return processableDays Number of days that can be processed
      */
-    function calculatePendingRewards(address user)
-        external
-        view
-        returns (uint256 pendingRewards, uint256 processableDays);
+    function calculatePendingRewards(
+        address user
+    ) external view returns (uint256 pendingRewards, uint256 processableDays);
 
     /**
      * @notice Claim pending rewards
@@ -312,20 +339,27 @@ interface IAssetVault {
      * @param day Day number
      * @return snapshot Daily snapshot data
      */
-    function getDailySnapshot(uint256 day) external view returns (DailySnapshot memory snapshot);
+    function getDailySnapshot(
+        uint256 day
+    ) external view returns (DailySnapshot memory snapshot);
 
     /**
      * @notice Get position IDs settled in a specific day
      * @param day Day number
      * @return positionIds Array of position IDs
      */
-    function getDailyPositionIds(uint256 day) external view returns (uint64[] memory positionIds);
+    function getDailyPositionIds(
+        uint256 day
+    ) external view returns (uint64[] memory positionIds);
 
     /**
      * @notice Get current day's position IDs (before snapshot)
      * @return positionIds Array of position IDs settled today
      */
-    function getCurrentDailyPositionIds() external view returns (uint64[] memory positionIds);
+    function getCurrentDailyPositionIds()
+        external
+        view
+        returns (uint64[] memory positionIds);
 
     // ========================================================================
     // PENDING PAYOUT SYSTEM FUNCTIONS
@@ -342,18 +376,25 @@ interface IAssetVault {
      * @param positionId Position ID
      * @return amount Pending payout amount
      */
-    function positionPayouts(uint64 positionId) external view returns (uint256 amount);
+    function positionPayouts(
+        uint64 positionId
+    ) external view returns (uint256 amount);
 
     /**
      * @notice Get user address for a pending payout
      * @param positionId Position ID
      * @return user User address
      */
-    function pendingPayoutUsers(uint64 positionId) external view returns (address user);
+    function pendingPayoutUsers(
+        uint64 positionId
+    ) external view returns (address user);
 
     /**
      * @notice Get the pending payout queue
      * @return queue Array of position IDs in FIFO order
      */
-    function getPendingPayoutQueue() external view returns (uint64[] memory queue);
+    function getPendingPayoutQueue()
+        external
+        view
+        returns (uint64[] memory queue);
 }

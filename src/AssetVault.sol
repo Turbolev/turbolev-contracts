@@ -91,6 +91,9 @@ contract AssetVault is
     /// @notice Queue of pending position IDs (FIFO order)
     uint64[] public pendingPayoutQueue;
 
+    /// @notice Mapping: Position ID => bet collateral amount
+    mapping(uint64 => uint256) public betCollateral;
+
     // ========================================================================
     // FEE CONFIGURATION
     // ========================================================================
@@ -135,14 +138,13 @@ contract AssetVault is
     // ========================================================================
 
     struct VaultInfo {
-        uint256 totalLiquidity; // Total project tokens in vault (ONLY currency)
+        uint256 totalLiquidity; // Total LP liquidity only (for vault operations and cap calculation)
         uint256 totalShares; // Total LP shares
         uint256 lifetimePnL; // Lifetime profit/loss (absolute value)
         bool isNegativePnL; // True if P&L is negative
         uint256 totalVolume; // Total volume traded
         uint256 totalPositionsSettled; // Total positions settled
         uint256 totalLeverageExposure; // Total leverage exposure (position sizes)
-        uint256 maxLeverageExposure; // Max leverage exposure at any time
         uint256 createdAt; // Creation timestamp
         uint256 totalFeesCollected; // Total fees collected (all types)
         uint256 totalStakingFees; // Total staking fees collected
@@ -151,7 +153,6 @@ contract AssetVault is
         uint256 graduationThreshold; // Token amount threshold for graduation (in token decimals)
         uint256 graduatedAt; // Timestamp when graduated (0 if not graduated)
         bool tradingEnabled; // Whether trading is enabled (requires graduation)
-        uint256 totalExcessProfit; // Total excess profit retained from capped trades
         uint256 pendingPositions; // Number of positions waiting for liquidity
     }
 
@@ -198,6 +199,18 @@ contract AssetVault is
     uint8 public constant MAX_PAYOUT_RETRIES = 3;
 
     // ========================================================================
+    // ENUMS
+    // ========================================================================
+
+    enum LiquidityOperationType {
+        USER_DEPOSIT, // User deposits liquidity
+        USER_WITHDRAW, // User withdraws liquidity
+        CLOSE_POSITION, // Liquidity change from position closure
+        BET_DEPOSIT, // Liquidity from bet collateral deposit
+        PAYOUT_EXECUTION // Liquidity change from payout execution
+    }
+
+    // ========================================================================
     // EVENTS
     // ========================================================================
 
@@ -216,6 +229,7 @@ contract AssetVault is
         uint256 amount,
         uint256 shares,
         uint256 totalLiquidity,
+        LiquidityOperationType operationType,
         uint256 timestamp
     );
 
@@ -224,6 +238,7 @@ contract AssetVault is
         uint256 amount,
         uint256 shares,
         uint256 totalLiquidity,
+        LiquidityOperationType operationType,
         uint256 timestamp
     );
 
@@ -261,12 +276,6 @@ contract AssetVault is
         uint256 fee,
         uint256 newLifetimePnL,
         bool isNegative,
-        uint256 timestamp
-    );
-
-    event LeverageExposureUpdated(
-        uint256 newExposure,
-        uint256 maxExposure,
         uint256 timestamp
     );
 
@@ -380,6 +389,7 @@ contract AssetVault is
     error NoRewardsToClaim();
     error NoFailedPayout();
     error PayoutNotFailed();
+    error DirectTransferNotAllowed();
 
     // ========================================================================
     // MODIFIERS
@@ -462,14 +472,18 @@ contract AssetVault is
     }
 
     // ========================================================================
-    // RECEIVE / FALLBACK (for native token)
+    // RECEIVE / FALLBACK
     // ========================================================================
 
+    /// @notice Reject direct native token transfers
     receive() external payable {
-        // Accept native token transfers
+        revert DirectTransferNotAllowed();
     }
 
-    fallback() external payable {}
+    /// @notice Reject fallback calls
+    fallback() external payable {
+        revert DirectTransferNotAllowed();
+    }
 
     // ========================================================================
     // LP FUNCTIONS
@@ -546,6 +560,7 @@ contract AssetVault is
             netAmount,
             shares,
             vaultInfo.totalLiquidity,
+            LiquidityOperationType.USER_DEPOSIT,
             block.timestamp
         );
 
@@ -635,6 +650,7 @@ contract AssetVault is
             netPayout,
             shares,
             vault.totalLiquidity,
+            LiquidityOperationType.USER_WITHDRAW,
             block.timestamp
         );
 
@@ -659,12 +675,16 @@ contract AssetVault is
 
     /**
      * @notice Deposit collateral from bet (VERSION 1: ONLY project token)
+     * @param positionId Position ID
      * @param amount Collateral amount in project tokens
      * @param positionSize Position size (amount * leverage)
+     * @param isMarginAdd True if adding margin to existing position, false if opening new position
      */
     function depositFromBet(
+        uint64 positionId,
         uint256 amount,
-        uint256 positionSize
+        uint256 positionSize,
+        bool isMarginAdd
     ) external payable onlyPositionManager nonReentrant {
         if (amount == 0) revert InvalidAmount();
 
@@ -677,31 +697,29 @@ contract AssetVault is
             if (msg.value != 0) revert InvalidAmount();
         }
 
-        // Update vault state
-        vaultInfo.totalLiquidity += amount;
+        // Store bet collateral for this position (NOT added to vault liquidity yet)
+        if (isMarginAdd) {
+            // Adding margin: increment existing collateral
+            betCollateral[positionId] += amount;
+        } else {
+            // Opening new position: set initial collateral
+            betCollateral[positionId] = amount;
+        }
+
         vaultInfo.totalVolume += amount;
 
         // Update leverage exposure
         vaultInfo.totalLeverageExposure += positionSize;
-        if (vaultInfo.totalLeverageExposure > vaultInfo.maxLeverageExposure) {
-            vaultInfo.maxLeverageExposure = vaultInfo.totalLeverageExposure;
-        }
 
         emit CollateralDeposited(amount, positionSize, block.timestamp);
-
-        emit LeverageExposureUpdated(
-            vaultInfo.totalLeverageExposure,
-            vaultInfo.maxLeverageExposure,
-            block.timestamp
-        );
     }
 
     /**
      * @notice Execute payout to user with partial liquidity support (VERSION 1: ONLY project token)
+     * @dev NEW LOGIC: Payout = collateral (from bet) + rewards (from vault liquidity)
      * @param user User address
-     * @param amount Payout amount in project tokens
+     * @param amount Total payout amount (collateral + rewards)
      * @param positionId Position ID for tracking partial payouts
-     * @dev NEW: Supports partial liquidity - queues payout if insufficient liquidity
      */
     function executePayout(
         address user,
@@ -714,8 +732,16 @@ contract AssetVault is
         if (user == address(0)) revert InvalidAddress();
         if (amount == 0) return; // No payout
 
-        // Check available liquidity (only project token)
-        if (amount > vaultInfo.totalLiquidity) {
+        // Get bet collateral for this position
+        uint256 collateral = betCollateral[positionId];
+
+        // Calculate rewards from vault (amount - collateral)
+        uint256 rewardsFromVault = amount > collateral
+            ? amount - collateral
+            : 0;
+
+        // Check available liquidity for rewards
+        if (rewardsFromVault > vaultInfo.totalLiquidity) {
             // Insufficient liquidity - queue the payout for later
             positionPayouts[positionId] = amount;
             pendingPayoutUsers[positionId] = user;
@@ -736,17 +762,31 @@ contract AssetVault is
         // EFFECTS - UPDATE STATE FIRST
         // ============================================================
 
-        // Update vault state BEFORE external calls
-        vaultInfo.totalLiquidity -= amount;
+        // Deduct rewards from vault liquidity
+        if (rewardsFromVault > 0) {
+            vaultInfo.totalLiquidity -= rewardsFromVault;
 
-        // Emit event BEFORE external call
+            emit LiquidityRemoved(
+                user,
+                rewardsFromVault,
+                0, // No shares burned for payouts
+                vaultInfo.totalLiquidity,
+                LiquidityOperationType.PAYOUT_EXECUTION,
+                block.timestamp
+            );
+        }
+
+        // Clear bet collateral for this position
+        delete betCollateral[positionId];
+
+        // Emit events BEFORE external call
         emit PayoutExecuted(user, amount, block.timestamp);
 
         // ============================================================
         // INTERACTIONS - EXTERNAL CALLS LAST
         // ============================================================
 
-        // Transfer tokens - ONLY project token
+        // Transfer total payout (collateral + rewards) - ONLY project token
         if (projectToken == address(0)) {
             // Native project token
             (bool success, ) = user.call{value: amount}("");
@@ -762,38 +802,57 @@ contract AssetVault is
 
     /**
      * @notice Update vault P&L after position settlement
+     * @dev NEW LOGIC: Handle collateral based on win/loss
+     * - Trader wins: collateral stays with trader (returned via payout)
+     * - Trader loses: loss amount added to vault liquidity
      * @param positionId Position ID (for tracking)
      * @param collateral Collateral amount
      * @param vaultPnL Vault P&L (negative of user P&L)
      * @param fee Fee collected
      * @param positionSize Position size to remove from exposure
-     * @param excessProfit Excess profit from capped trades
      */
     function updateVaultPnL(
         uint64 positionId,
         uint256 collateral,
         int256 vaultPnL,
         uint256 fee,
-        uint256 positionSize,
-        uint256 excessProfit
+        uint256 positionSize
     ) external onlyPositionManager {
-        // Update lifetime P&L
+        // Process collateral based on outcome
         if (vaultPnL >= 0) {
-            // Vault gained
-            uint256 gain = uint256(vaultPnL);
+            // Vault gained (trader lost)
+            // Add the loss amount to vault liquidity
+            uint256 lossAmount = uint256(vaultPnL);
+            vaultInfo.totalLiquidity += lossAmount;
+
+            // Emit LiquidityAdded for the loss amount
+            emit LiquidityAdded(
+                address(this),
+                lossAmount,
+                0, // No shares issued
+                vaultInfo.totalLiquidity,
+                LiquidityOperationType.CLOSE_POSITION,
+                block.timestamp
+            );
+
+            // Update lifetime P&L
             if (vaultInfo.isNegativePnL) {
-                if (gain >= vaultInfo.lifetimePnL) {
-                    vaultInfo.lifetimePnL = gain - vaultInfo.lifetimePnL;
+                if (lossAmount >= vaultInfo.lifetimePnL) {
+                    vaultInfo.lifetimePnL = lossAmount - vaultInfo.lifetimePnL;
                     vaultInfo.isNegativePnL = false;
                 } else {
-                    vaultInfo.lifetimePnL -= gain;
+                    vaultInfo.lifetimePnL -= lossAmount;
                 }
             } else {
-                vaultInfo.lifetimePnL += gain;
+                vaultInfo.lifetimePnL += lossAmount;
             }
         } else {
-            // Vault lost
+            // Vault lost (trader won)
+            // Collateral + rewards will be paid out via executePayout
+            // No liquidity change here
+
             uint256 loss = uint256(-vaultPnL);
+            // Update lifetime P&L
             if (vaultInfo.isNegativePnL) {
                 vaultInfo.lifetimePnL += loss;
             } else {
@@ -806,22 +865,9 @@ contract AssetVault is
             }
         }
 
-        // Track excess profit
-        if (excessProfit > 0) {
-            vaultInfo.totalExcessProfit += excessProfit;
-        }
-
         // Track Daily P&L and Position IDs
         dailyNetPnL += vaultPnL; // Accumulate for current day
-
-        // Add excess profit to daily P&L (stakers benefit from capped trades)
-        if (excessProfit > 0) {
-            dailyNetPnL += int256(excessProfit);
-        }
-
-        // Track position ID for this day
         dailyPositionIds.push(positionId);
-        // ================================================================
 
         // Update leverage exposure
         if (vaultInfo.totalLeverageExposure >= positionSize) {
@@ -833,18 +879,15 @@ contract AssetVault is
         // Update positions settled
         vaultInfo.totalPositionsSettled++;
 
+        // Clear bet collateral for this position
+        delete betCollateral[positionId];
+
         emit VaultPnLUpdated(
             collateral,
             vaultPnL,
             fee,
             vaultInfo.lifetimePnL,
             vaultInfo.isNegativePnL,
-            block.timestamp
-        );
-
-        emit LeverageExposureUpdated(
-            vaultInfo.totalLeverageExposure,
-            vaultInfo.maxLeverageExposure,
             block.timestamp
         );
     }
@@ -1124,11 +1167,32 @@ contract AssetVault is
             uint256 amount = positionPayouts[positionId];
             address user = pendingPayoutUsers[positionId];
 
-            // Check if we have enough liquidity for this payout
-            if (amount <= vaultInfo.totalLiquidity) {
+            // Get bet collateral for this position
+            uint256 collateral = betCollateral[positionId];
+
+            // Calculate rewards from vault
+            uint256 rewardsFromVault = amount > collateral
+                ? amount - collateral
+                : 0;
+
+            // Check if we have enough liquidity for rewards
+            if (rewardsFromVault <= vaultInfo.totalLiquidity) {
                 // Process full payout
                 unchecked {
-                    vaultInfo.totalLiquidity -= amount;
+                    // Deduct rewards from vault liquidity
+                    if (rewardsFromVault > 0) {
+                        vaultInfo.totalLiquidity -= rewardsFromVault;
+
+                        emit LiquidityRemoved(
+                            user,
+                            rewardsFromVault,
+                            0, // No shares burned for payouts
+                            vaultInfo.totalLiquidity,
+                            LiquidityOperationType.PAYOUT_EXECUTION,
+                            block.timestamp
+                        );
+                    }
+
                     vaultInfo.pendingPositions--;
                     ++processed;
                 }
@@ -1136,6 +1200,7 @@ contract AssetVault is
                 // Clear mappings
                 delete positionPayouts[positionId];
                 delete pendingPayoutUsers[positionId];
+                delete betCollateral[positionId];
 
                 // Transfer tokens
                 if (projectToken == address(0)) {
