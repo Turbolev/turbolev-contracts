@@ -181,17 +181,6 @@ contract VaultManagerHelper {
     // ========================================================================
 
     /**
-     * @notice Update PositionManager contract for a specific vault
-     * @dev Forwards call through VaultManager to avoid ownership issues
-     */
-    function updateVaultPositionManager(address tokenAddress, address _positionManager)
-        external
-        onlyOwner
-    {
-        IVaultManager(vaultManager).updateVaultPositionManager(tokenAddress, _positionManager);
-    }
-
-    /**
      * @notice Pause a specific vault
      * @dev Forwards call through VaultManager to avoid ownership issues
      */
@@ -218,18 +207,5 @@ contract VaultManagerHelper {
         onlyOwner
     {
         IVaultManager(vaultManager).setVaultBlocksenseOracle(tokenAddress, blocksenseOracle);
-    }
-
-    /**
-     * @notice Set graduation threshold for a vault
-     * @param tokenAddress Token address
-     * @param threshold New threshold in token amount (same decimals as token)
-     * @dev Forwards call through VaultManager to avoid ownership issues
-     */
-    function setVaultGraduationThreshold(address tokenAddress, uint256 threshold)
-        external
-        onlyOwner
-    {
-        IVaultManager(vaultManager).setVaultGraduationThreshold(tokenAddress, threshold);
     }
 }

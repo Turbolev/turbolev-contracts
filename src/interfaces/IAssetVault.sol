@@ -113,6 +113,12 @@ interface IAssetVault {
         uint256 positionSize
     ) external;
 
+    function updateVaultParams(
+        uint256 _minBetAmount,
+        uint256 _maxBetAmount,
+        uint16 _maxPositionSizePercentBps
+    ) external;
+
     /**
      * @notice Check position risk
      * @param positionSize Position size

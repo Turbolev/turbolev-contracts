@@ -104,12 +104,6 @@ contract VaultManagerHelperTest is BaseTest {
     // ADMIN FUNCTIONS - REVERT CASES
     // ========================================================================
 
-    function test_UpdateVaultPositionManager_RevertsWhenNotOwner() public {
-        vm.prank(user1);
-        vm.expectRevert(abi.encodeWithSelector(VaultManagerHelper.NotAuthorized.selector));
-        helper.updateVaultPositionManager(address(projectToken), user1);
-    }
-
     function test_PauseVault_RevertsWhenNotOwner() public {
         vm.prank(user1);
         vm.expectRevert(abi.encodeWithSelector(VaultManagerHelper.NotAuthorized.selector));

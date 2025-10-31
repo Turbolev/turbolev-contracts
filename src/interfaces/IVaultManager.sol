@@ -104,13 +104,6 @@ interface IVaultManager {
     function unpause() external;
 
     /**
-     * @notice Update PositionManager for a specific vault
-     * @param _projectToken Project token address
-     * @param _positionManager New PositionManager address
-     */
-    function updateVaultPositionManager(address _projectToken, address _positionManager) external;
-
-    /**
      * @notice Pause a specific vault
      * @param _projectToken Project token address
      */
@@ -128,11 +121,4 @@ interface IVaultManager {
      * @param _blocksenseOracle BlocksenseOracle address
      */
     function setVaultBlocksenseOracle(address _projectToken, address _blocksenseOracle) external;
-
-    /**
-     * @notice Set graduation threshold for a vault
-     * @param _projectToken Project token address
-     * @param _threshold New graduation threshold
-     */
-    function setVaultGraduationThreshold(address _projectToken, uint256 _threshold) external;
 }

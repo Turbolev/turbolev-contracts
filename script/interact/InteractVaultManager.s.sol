@@ -272,6 +272,17 @@ contract InteractVaultManager is DeployHelper {
         vm.stopBroadcast();
     }
 
+    function setVaultOracleAdapter(address projectToken, address oracleAdapter) public {
+        console.log("\n=== Set Vault Oracle Adapter ===");
+        console.log("Project Token:", projectToken);
+        console.log("Oracle Adapter:", oracleAdapter);
+
+        vm.startBroadcast(deployer);
+        vaultMgr.setVaultOracleAdapter(projectToken, oracleAdapter);
+        console.log("Oracle Adapter updated successfully");
+        vm.stopBroadcast();
+    }
+
     // ========================================================================
     // VAULT VIEW FUNCTIONS
     // ========================================================================

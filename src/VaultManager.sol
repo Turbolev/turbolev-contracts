@@ -395,23 +395,6 @@ contract VaultManager is
     // ========================================================================
     // VAULT ADMIN PROXY FUNCTIONS
     // ========================================================================
-
-    /**
-     * @notice Update PositionManager for a specific vault
-     * @param _projectToken Project token address
-     * @param _positionManager New PositionManager address
-     * @dev Only callable by owner, forwards call to vault
-     */
-    function updateVaultPositionManager(address _projectToken, address _positionManager)
-        external
-        onlyOwner
-    {
-        address vaultAddress = vaultsByProjectToken[_projectToken];
-        if (vaultAddress == address(0)) revert VaultNotFound();
-
-        IAssetVault(vaultAddress).setPositionManager(_positionManager);
-    }
-
     /**
      * @notice Pause a specific vault
      * @param _projectToken Project token address
@@ -437,19 +420,40 @@ contract VaultManager is
     }
 
     /**
-     * @notice Set graduation threshold for a vault
+     * @notice Update vault parameters
      * @param _projectToken Project token address
-     * @param _threshold New graduation threshold
+     * @param _minBetAmount Min bet amount
+     * @param _maxBetAmount Max bet amount
+     * @param _maxPositionSizePercentBps Max position size percent in basis points
+     */
+    function updateVaultParams(
+        address _projectToken,
+        uint256 _minBetAmount,
+        uint256 _maxBetAmount,
+        uint16 _maxPositionSizePercentBps
+    ) external onlyOwner {
+        address vaultAddress = vaultsByProjectToken[_projectToken];
+        if (vaultAddress == address(0)) revert VaultNotFound();
+
+        IAssetVault(vaultAddress).updateVaultParams(
+            _minBetAmount, _maxBetAmount, uint16(_maxPositionSizePercentBps)
+        );
+    }
+
+    /**
+     * @notice Set oracle adapter for a vault
+     * @param _projectToken Project token address
+     * @param _oracleAdapter Oracle adapter address
      * @dev Only callable by owner, forwards call to vault
      */
-    function setVaultGraduationThreshold(address _projectToken, uint256 _threshold)
+    function setVaultOracleAdapter(address _projectToken, address _oracleAdapter)
         external
         onlyOwner
     {
         address vaultAddress = vaultsByProjectToken[_projectToken];
         if (vaultAddress == address(0)) revert VaultNotFound();
 
-        IAssetVault(vaultAddress).setGraduationThreshold(_threshold);
+        IAssetVault(vaultAddress).setOracleAdapter(_oracleAdapter);
     }
 
     /**
