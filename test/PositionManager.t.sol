@@ -106,19 +106,19 @@ contract PositionManagerTest is BaseTest {
 
     function test_AddBackend_Success() public {
         address newBackend = makeAddr("newBackend");
-        positionManager.addBackend(newBackend);
-        assertTrue(positionManager.isBackend(newBackend), "Should be backend");
+        positionManager.addAdmin(newBackend);
+        assertTrue(positionManager.isAdmin(newBackend), "Should be admin");
     }
 
     function test_RemoveBackend_Success() public {
         address backend = makeAddr("backendToRemove");
-        positionManager.addBackend(backend);
-        positionManager.removeBackend(backend);
-        assertFalse(positionManager.isBackend(backend), "Should not be backend");
+        positionManager.addAdmin(backend);
+        positionManager.removeAdmin(backend);
+        assertFalse(positionManager.isAdmin(backend), "Should not be backend");
     }
 
     function test_GetBackendCount_Success() public {
-        uint256 count = positionManager.getBackendCount();
-        assertGt(count, 0, "Should have at least 1 backend");
+        uint256 count = positionManager.getAdminCount();
+        assertGt(count, 0, "Should have at least 1 admin");
     }
 }

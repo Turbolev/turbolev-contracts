@@ -22,7 +22,7 @@ contract DeployPositionManager is DeployHelper {
         console.log("Deploying/Upgrading PositionManager");
         console.log("Chain ID:", block.chainid);
         console.log("Owner:", owner);
-        console.log("Backend:", backend);
+        console.log("Admin:", admin);
         console.log("===========================================\n");
 
         // Deploy new implementation
@@ -48,7 +48,7 @@ contract DeployPositionManager is DeployHelper {
 
             // Prepare initialization data
             bytes memory initData =
-                abi.encodeWithSelector(PositionManager.initialize.selector, owner, backend);
+                abi.encodeWithSelector(PositionManager.initialize.selector, owner, admin);
 
             // Deploy proxy
             address proxy = address(new ERC1967Proxy(newImplementation, initData));

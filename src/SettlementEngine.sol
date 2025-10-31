@@ -358,7 +358,7 @@ contract SettlementEngine is
     }
 
     /**
-     * @notice Get settlement price from adapter (for backend settlement)
+     * @notice Get settlement price from adapter (for admin settlement)
      * @param adapter CLAggregatorAdapter address for price feed
      * @param maxAge Maximum acceptable price age
      * @return closePrice Settlement price

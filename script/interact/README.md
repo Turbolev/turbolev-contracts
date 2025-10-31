@@ -156,9 +156,9 @@ forge script script/interact/InteractPositionManager.s.sol:InteractPositionManag
   --rpc-url $RPC_URL \
   --broadcast
 
-# Add backend address
+# Add admin address
 forge script script/interact/InteractPositionManager.s.sol:InteractPositionManager \
-  --sig "addBackend(address)" 0xBACKEND \
+  --sig "addAdmin(address)" 0xADMIN \
   --rpc-url $RPC_URL \
   --broadcast
 ```
@@ -346,9 +346,9 @@ forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
   --rpc-url $RPC_URL \
   --broadcast
 
-# Add backend bot
+# Add admin bot
 forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
-  --sig "addBackend(address,address)" 0xPROJECT_TOKEN 0xBACKEND \
+  --sig "addAdmin(address,address)" 0xPROJECT_TOKEN 0xADMIN \
   --rpc-url $RPC_URL \
   --broadcast
 
@@ -412,7 +412,7 @@ forge script script/interact/InteractAssetVault.s.sol:InteractAssetVault \
   --rpc-url $RPC_URL \
   --broadcast
 
-# Finalize daily reward (backend bot)
+# Finalize daily reward (admin bot)
 forge script script/interact/InteractAssetVault.s.sol:InteractAssetVault \
   --sig "finalizeDailyReward()" \
   --rpc-url $RPC_URL \

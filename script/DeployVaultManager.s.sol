@@ -48,10 +48,15 @@ contract DeployVaultManager is DeployHelper {
             console.log("No existing proxy found, deploying new...");
 
             // Prepare initialization data
-            bytes memory initData = abi.encodeWithSelector(VaultManager.initialize.selector, owner);
+            bytes memory initData = abi.encodeWithSelector(
+                VaultManager.initialize.selector,
+                owner
+            );
 
             // Deploy proxy
-            address proxy = address(new ERC1967Proxy(newImplementation, initData));
+            address proxy = address(
+                new ERC1967Proxy(newImplementation, initData)
+            );
             vaultManager = payable(proxy);
 
             console.log("[SUCCESS] Deployed new VaultManager proxy");
@@ -63,16 +68,25 @@ contract DeployVaultManager is DeployHelper {
         // Deploy or check VaultManagerHelper
         console.log("\n--- VaultManagerHelper ---");
         if (_isContractDeployed(vaultManagerHelper)) {
-            console.log("VaultManagerHelper already exists at:", vaultManagerHelper);
+            console.log(
+                "VaultManagerHelper already exists at:",
+                vaultManagerHelper
+            );
             console.log("Note: VaultManagerHelper is not upgradeable");
             console.log("Deploy manually if changes are needed");
             helperAddress = vaultManagerHelper;
         } else {
             console.log("Deploying new VaultManagerHelper...");
-            helperAddress = address(new VaultManagerHelper(vaultManager));
+            helperAddress = address(
+                new VaultManagerHelper(payable(vaultManager))
+            );
             _logDeployment("VaultManagerHelper", helperAddress);
             console.log("[SUCCESS] Deployed VaultManagerHelper");
         }
+
+        // Connect VaultManagerHelper to VaultManager
+        VaultManager(vaultManager).setVaultManagerHelper(helperAddress);
+        console.log("Connected VaultManagerHelper to VaultManager");
 
         console.log("\n===========================================");
         console.log("Operation Completed Successfully!");
@@ -96,21 +110,27 @@ contract DeployVaultManager is DeployHelper {
             VaultManager(vaultManager).setPositionManager(positionManager);
             console.log("Reconnected PositionManager to VaultManager");
         } else {
-            console.log("WARNING: PositionManager not set - skipping connection");
+            console.log(
+                "WARNING: PositionManager not set - skipping connection"
+            );
         }
 
         if (_isContractDeployed(settlementEngine)) {
             VaultManager(vaultManager).setSettlementEngine(settlementEngine);
             console.log("Reconnected SettlementEngine to VaultManager");
         } else {
-            console.log("WARNING: SettlementEngine not set - skipping connection");
+            console.log(
+                "WARNING: SettlementEngine not set - skipping connection"
+            );
         }
 
         if (_isContractDeployed(blocksenseOracle)) {
             VaultManager(vaultManager).setBlocksenseOracle(blocksenseOracle);
             console.log("Reconnected BlocksenseOracle to VaultManager");
         } else {
-            console.log("WARNING: BlocksenseOracle not set - skipping connection");
+            console.log(
+                "WARNING: BlocksenseOracle not set - skipping connection"
+            );
         }
 
         console.log("--- Contract Reconnection Complete ---\n");

@@ -208,8 +208,8 @@ contract SettlementEngineTest is BaseTest {
         // Warp to make sure current time is much later
         vm.warp(block.timestamp + 7200); // 2 hours later
 
-        // Oracle throws InvalidOraclePrice for stale price
-        vm.expectRevert(abi.encodeWithSelector(SettlementEngine.InvalidOraclePrice.selector));
+        // Oracle throws PriceStale for stale price
+        vm.expectRevert(abi.encodeWithSelector(BlocksenseOracle.PriceStale.selector));
         settlementEngine.getSettlementPrice(address(projectToken), 3600);
     }
 }

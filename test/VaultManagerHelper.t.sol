@@ -92,14 +92,6 @@ contract VaultManagerHelperTest is BaseTest {
         assertGt(totalLiq, 0, "Total liquidity should be > 0");
     }
 
-    function test_GetTotalValueUSD_Success() public {
-        // Set price first
-        _updatePrice(address(projectToken), address(usdc), 100e18);
-
-        uint256 totalUSD = helper.getTotalValueUSD();
-        assertGt(totalUSD, 0, "Total USD value should be > 0");
-    }
-
     // ========================================================================
     // ADMIN FUNCTIONS - REVERT CASES
     // ========================================================================

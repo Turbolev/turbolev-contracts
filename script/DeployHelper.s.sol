@@ -15,11 +15,9 @@ contract DeployHelper is Script {
     // ========================================================================
 
     address public owner;
-    address public backend;
+    address public admin;
     address public deployer;
-
-    // Addresses for Blocksense (need to configure per network)
-    address public blocksenseRegistry;
+    address public backend;
 
     // ========================================================================
     // DEPLOYED CONTRACTS
@@ -29,7 +27,7 @@ contract DeployHelper is Script {
     address payable public settlementEngine;
     address payable public positionManager;
     address payable public vaultManager;
-    address public vaultManagerHelper;
+    address payable public vaultManagerHelper;
 
     // ========================================================================
     // CONFIGURATION CONSTANTS
@@ -78,11 +76,7 @@ contract DeployHelper is Script {
 
         // Setup accounts from environment variables or use defaults
         owner = vm.envOr("OWNER_ADDRESS", deployer);
-        backend = vm.envOr("BACKEND_ADDRESS", address(0x1111111111111111111111111111111111111111));
-
-        // Setup Blocksense registry address - check env first, then use chainId-based defaults
-        blocksenseRegistry =
-            vm.envOr("BLOCKSENSE_REGISTRY_ADDRESS", _getBlocksenseRegistry(block.chainid));
+        admin = vm.envOr("ADMIN_ADDRESS", address(0x1111111111111111111111111111111111111111));
 
         // Try to load already deployed contract addresses from environment
         _loadDeployedAddressesFromEnv();
@@ -90,9 +84,9 @@ contract DeployHelper is Script {
         console.log("=== Deployment Configuration ===");
         console.log("Chain ID:", block.chainid);
         console.log("Owner:", owner);
-        console.log("Backend:", backend);
+        console.log("Admin:", admin);
         console.log("Deployer:", deployer);
-        console.log("Blocksense Registry:", blocksenseRegistry);
+        console.log("Backend:", backend);
         console.log("BlocksenseOracle:", blocksenseOracle);
         console.log("SettlementEngine:", settlementEngine);
         console.log("PositionManager:", positionManager);
@@ -104,40 +98,17 @@ contract DeployHelper is Script {
     // ========================================================================
 
     /**
-     * @notice Get Blocksense registry address based on chainId
-     * @param chainId Chain ID
-     * @return registryAddress Registry address
-     */
-    function _getBlocksenseRegistry(uint256 chainId)
-        internal
-        pure
-        returns (address registryAddress)
-    {
-        if (chainId == CHAINID_MAINNET) {
-            // Mainnet Blocksense registry address
-            // TODO: Update with official registry address
-            return address(0);
-        } else if (chainId == CHAINID_TESTNET) {
-            // Testnet Blocksense registry address
-            // TODO: Update with testnet registry address
-            return address(0);
-        } else {
-            // Local/dev network - will deploy mock registry
-            return address(0);
-        }
-    }
-
-    /**
      * @notice Load already deployed contract addresses from environment variables
      * @dev If addresses are set in env, they will be used instead of deploying
      */
     function _loadDeployedAddressesFromEnv() internal {
         // Try to load from environment (returns zero if not found)
+        backend = vm.envOr("BACKEND_ADDRESS", address(0));
         blocksenseOracle = payable(vm.envOr("BLOCKSENSE_ORACLE_ADDRESS", address(0)));
         settlementEngine = payable(vm.envOr("SETTLEMENT_ENGINE_ADDRESS", address(0)));
         positionManager = payable(vm.envOr("POSITION_MANAGER_ADDRESS", address(0)));
         vaultManager = payable(vm.envOr("VAULT_MANAGER_ADDRESS", address(0)));
-        vaultManagerHelper = vm.envOr("VAULT_MANAGER_HELPER_ADDRESS", address(0));
+        vaultManagerHelper = payable(vm.envOr("VAULT_MANAGER_HELPER_ADDRESS", address(0)));
     }
 
     /**
@@ -154,7 +125,7 @@ contract DeployHelper is Script {
      */
     function _validateAddresses() internal view {
         require(owner != address(0), "Owner address is zero");
-        require(backend != address(0), "Backend address is zero");
+        require(admin != address(0), "Admin address is zero");
     }
 
     /**
@@ -203,10 +174,8 @@ contract DeployHelper is Script {
         string memory json = "{\n";
         json = string.concat(json, '  "network": ', vm.toString(block.chainid), ",\n");
         json = string.concat(json, '  "owner": "', vm.toString(owner), '",\n');
+        json = string.concat(json, '  "admin": "', vm.toString(admin), '",\n');
         json = string.concat(json, '  "backend": "', vm.toString(backend), '",\n');
-        json = string.concat(
-            json, '  "blocksenseRegistry": "', vm.toString(blocksenseRegistry), '",\n'
-        );
         json = string.concat(json, '  "blocksenseOracle": "', vm.toString(blocksenseOracle), '",\n');
         json = string.concat(json, '  "settlementEngine": "', vm.toString(settlementEngine), '",\n');
         json = string.concat(json, '  "positionManager": "', vm.toString(positionManager), '",\n');
@@ -228,8 +197,8 @@ contract DeployHelper is Script {
         string memory json = vm.readFile(file);
 
         owner = vm.parseJsonAddress(json, ".owner");
+        admin = vm.parseJsonAddress(json, ".admin");
         backend = vm.parseJsonAddress(json, ".backend");
-        blocksenseRegistry = vm.parseJsonAddress(json, ".blocksenseRegistry");
         blocksenseOracle = payable(vm.parseJsonAddress(json, ".blocksenseOracle"));
         settlementEngine = payable(vm.parseJsonAddress(json, ".settlementEngine"));
         positionManager = payable(vm.parseJsonAddress(json, ".positionManager"));

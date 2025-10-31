@@ -6,7 +6,7 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "./libraries/BackendAccessControl.sol";
+import "./libraries/AdminAccessControl.sol";
 import "./interfaces/IBlocksenseOracle.sol";
 
 /**
@@ -29,25 +29,28 @@ import "./interfaces/IBlocksenseOracle.sol";
  *
  * Note: Project token must be on Monad network for direct trading
  */
-contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl {
+contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
     using SafeERC20 for IERC20;
 
     // ========================================================================
     // STATE VARIABLES
     // ========================================================================
 
-    /// @notice VaultManager contract address (factory)
+    /// @notice VaultManager contract address (factory/owner)
     address public vaultManager;
+
+    /// @notice VaultManagerHelper contract address
+    address public vaultManagerHelper;
 
     /// @notice PositionManager contract address
     address public positionManager;
 
+    /// @notice BlocksenseOracle contract address
+    address public blocksenseOracle;
+
     /// @notice Project token address (the asset being bet on - must be on Monad)
     /// @dev This is the ONLY token vault accepts for staking and trading
     address public projectToken;
-
-    /// @notice BlocksenseOracle contract address
-    address public blocksenseOracle;
 
     /// @notice CLAggregatorAdapter address for this vault's price feed
     address public oracleAdapter;
@@ -368,6 +371,14 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
         _;
     }
 
+    modifier onlyVaultManagerOrHelper() {
+        if (msg.sender != vaultManager && msg.sender != vaultManagerHelper && msg.sender != owner())
+        {
+            revert NotAuthorized();
+        }
+        _;
+    }
+
     modifier whenVaultNotPaused() {
         if (paused()) revert VaultPaused();
         _;
@@ -391,6 +402,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
     constructor(
         address _projectToken,
         address _vaultManager,
+        address _vaultManagerHelper,
         address _positionManager,
         address _blocksenseOracle,
         address _oracleAdapter,
@@ -399,7 +411,10 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
         uint256 _graduationThreshold
     ) Ownable(msg.sender) {
         if (_projectToken == address(0)) revert InvalidAddress();
-        if (_vaultManager == address(0) || _positionManager == address(0)) {
+        if (
+            _vaultManager == address(0) || _vaultManagerHelper == address(0)
+                || _positionManager == address(0)
+        ) {
             revert InvalidAddress();
         }
 
@@ -409,6 +424,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
 
         projectToken = _projectToken;
         vaultManager = _vaultManager;
+        vaultManagerHelper = _vaultManagerHelper;
         positionManager = _positionManager;
         blocksenseOracle = _blocksenseOracle;
         oracleAdapter = _oracleAdapter;
@@ -888,10 +904,10 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
 
     /**
      * @notice Finalize daily rewards and take snapshot
-     * @dev Called by backend bot at end of each day (UTC midnight)
+     * @dev Called by admin bot at end of each day (UTC midnight)
      *      Only callable once per day
      */
-    function finalizeDailyReward() external onlyBackend {
+    function finalizeDailyReward() external onlyAdmin {
         uint256 today = block.timestamp / 1 days;
 
         // Check if already processed today
@@ -1211,7 +1227,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
 
     /**
      * @notice Manually trigger processing of pending payouts
-     * @dev Can be called by backend when liquidity is added
+     * @dev Can be called by admin when liquidity is added
      * @dev Public function so anyone can trigger it when there's liquidity
      */
     function processPendingPayouts() external nonReentrant {
@@ -1308,31 +1324,6 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
     // ========================================================================
     // GRADUATION FUNCTIONS
     // ========================================================================
-
-    /**
-     * @notice Get vault value in USD
-     * @dev Uses Blocksense oracle to convert token amounts to USD value
-     * @return valueUSD Vault value in USD (18 decimals)
-     */
-    function getVaultValueUSD() public view returns (uint256 valueUSD) {
-        uint256 totalLiquidity = vaultInfo.totalLiquidity;
-        if (totalLiquidity == 0) return 0;
-        address oracle = blocksenseOracle;
-        address adapter = oracleAdapter;
-
-        if (oracle != address(0) && adapter != address(0)) {
-            try IBlocksenseOracle(oracle).getPrice(adapter) returns (int256 price, uint256) {
-                if (price > 0) {
-                    return (totalLiquidity * uint256(price)) / 1e18;
-                }
-            } catch {
-                // Oracle call failed, return 0
-                return 0;
-            }
-        }
-
-        return 0;
-    }
 
     /**
      * @notice Check and update graduation status
@@ -1524,7 +1515,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
      * @notice Update staking fee
      * @param _stakingFeeBps New staking fee in basis points
      */
-    function setStakingFeeBps(uint16 _stakingFeeBps) external onlyOwner {
+    function setStakingFeeBps(uint16 _stakingFeeBps) external onlyVaultManagerOrHelper {
         if (_stakingFeeBps > 1000) revert InvalidParameters(); // Max 10%
         uint16 oldBps = stakingFeeBps;
         stakingFeeBps = _stakingFeeBps;
@@ -1535,7 +1526,10 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
      * @notice Update early withdrawal fee
      * @param _earlyWithdrawalFeeBps New early withdrawal fee in basis points
      */
-    function setEarlyWithdrawalFeeBps(uint16 _earlyWithdrawalFeeBps) external onlyOwner {
+    function setEarlyWithdrawalFeeBps(uint16 _earlyWithdrawalFeeBps)
+        external
+        onlyVaultManagerOrHelper
+    {
         if (_earlyWithdrawalFeeBps > 5000) revert InvalidParameters(); // Max 50%
         uint16 oldBps = earlyWithdrawalFeeBps;
         earlyWithdrawalFeeBps = _earlyWithdrawalFeeBps;
@@ -1550,7 +1544,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
      * @notice Set graduation threshold (only before graduation)
      * @param _threshold New threshold in token amount (same decimals as token)
      */
-    function setGraduationThreshold(uint256 _threshold) external onlyOwner {
+    function setGraduationThreshold(uint256 _threshold) external onlyVaultManagerOrHelper {
         if (vaultInfo.isGraduated) revert AlreadyGraduated();
         if (_threshold == 0) revert InvalidAmount();
 
@@ -1563,32 +1557,32 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
      * @notice Emergency: Enable/disable trading (admin override)
      * @param _enabled Whether trading should be enabled
      */
-    function setTradingEnabled(bool _enabled) external onlyOwner {
+    function setTradingEnabled(bool _enabled) external onlyVaultManagerOrHelper {
         vaultInfo.tradingEnabled = _enabled;
         emit TradingEnabledUpdated(_enabled);
     }
 
     /**
-     * @notice Add a backend bot address
-     * @param _backend Backend bot address to add
+     * @notice Add an admin bot address
+     * @param _admin Admin bot address to add
      */
-    function addBackend(address _backend) external onlyOwner {
-        _addBackend(_backend);
+    function addAdmin(address _admin) external onlyVaultManagerOrHelper {
+        _addAdmin(_admin);
     }
 
     /**
-     * @notice Remove a backend bot address
-     * @param _backend Backend bot address to remove
+     * @notice Remove an admin bot address
+     * @param _admin Admin bot address to remove
      */
-    function removeBackend(address _backend) external onlyOwner {
-        _removeBackend(_backend);
+    function removeAdmin(address _admin) external onlyVaultManagerOrHelper {
+        _removeAdmin(_admin);
     }
 
     /**
      * @notice Set Blocksense Oracle address
      * @param _blocksenseOracle Blocksense Oracle contract address
      */
-    function setBlocksenseOracle(address _blocksenseOracle) external onlyOwner {
+    function setBlocksenseOracle(address _blocksenseOracle) external onlyVaultManagerOrHelper {
         if (_blocksenseOracle == address(0)) revert InvalidAddress();
         address oldOracle = blocksenseOracle;
         blocksenseOracle = _blocksenseOracle;
@@ -1599,7 +1593,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, BackendAccessControl 
      * @notice Set Oracle Adapter address
      * @param _oracleAdapter CLAggregatorAdapter contract address
      */
-    function setOracleAdapter(address _oracleAdapter) external onlyOwner {
+    function setOracleAdapter(address _oracleAdapter) external onlyVaultManagerOrHelper {
         if (_oracleAdapter == address(0)) revert InvalidAddress();
         address oldAdapter = oracleAdapter;
         oracleAdapter = _oracleAdapter;

@@ -9,7 +9,7 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./libraries/PositionLib.sol";
-import "./libraries/BackendAccessControlUpgradeable.sol";
+import "./libraries/AdminAccessControlUpgradeable.sol";
 import "./interfaces/IVaultManager.sol";
 import "./interfaces/ISettlementEngine.sol";
 
@@ -21,7 +21,7 @@ import "./interfaces/ISettlementEngine.sol";
  * - Open positions with LONG/SHORT direction using multiple collateral tokens
  * - Close positions with settlement
  * - State management to avoid race conditions
- * - Backend price validation (oracle integration ready)
+ * - Admin price validation (oracle integration ready)
  * - Liquidation checking
  * - UUPS Upgradeable pattern
  */
@@ -31,7 +31,7 @@ contract PositionManager is
     ReentrancyGuardUpgradeable,
     PausableUpgradeable,
     UUPSUpgradeable,
-    BackendAccessControlUpgradeable
+    AdminAccessControlUpgradeable
 {
     using PositionLib for PositionLib.Position;
 
@@ -167,10 +167,10 @@ contract PositionManager is
     /**
      * @notice Initialize contract (replaces constructor)
      * @param initialOwner Owner address
-     * @param _backend Backend address (initial backend to add)
+     * @param _admin Admin address (initial admin to add)
      */
-    function initialize(address initialOwner, address _backend) public initializer {
-        if (initialOwner == address(0) || _backend == address(0)) {
+    function initialize(address initialOwner, address _admin) public initializer {
+        if (initialOwner == address(0) || _admin == address(0)) {
             revert InvalidAddress();
         }
 
@@ -178,9 +178,9 @@ contract PositionManager is
         __ReentrancyGuard_init();
         __Pausable_init();
         __UUPSUpgradeable_init();
-        __BackendAccessControl_init();
+        __AdminAccessControl_init();
 
-        _addBackend(_backend);
+        _addAdmin(_admin);
         nextPositionId = 1;
 
         // Set default leverage limits and maintenance margin
@@ -542,14 +542,14 @@ contract PositionManager is
     }
 
     /**
-     * @notice Backend force close position (for liquidation or expiry, v1: Blocksense Oracle)
+     * @notice Admin force close position (for liquidation or expiry, v1: Blocksense Oracle)
      * @param positionId Position ID
      * @param isLiquidation True if this is a liquidation
      */
-    function backendClosePosition(uint64 positionId, bool isLiquidation)
+    function adminClosePosition(uint64 positionId, bool isLiquidation)
         external
         nonReentrant
-        onlyBackend
+        onlyAdmin
     {
         PositionLib.Position storage pos = positions[positionId];
         if (pos.user == address(0)) revert PositionNotFound();
@@ -563,8 +563,8 @@ contract PositionManager is
 
         // Get close price from Blocksense Oracle via SettlementEngine
         if (settlementEngine == address(0)) revert InvalidAddress();
-        // Use default maxAge for backend operations
-        uint256 maxAge = 60; // 60 seconds default for backend operations
+        // Use default maxAge for admin operations
+        uint256 maxAge = 60; // 60 seconds default for admin operations
         (uint256 closePrice, uint256 pricePublishTime) =
             ISettlementEngine(settlementEngine).getSettlementPrice(pos.projectToken, maxAge);
         if (closePrice == 0) revert InvalidPrice();
@@ -670,19 +670,19 @@ contract PositionManager is
     }
 
     /**
-     * @notice Add a backend address
-     * @param _backend Backend address to add
+     * @notice Add an admin address
+     * @param _admin Admin address to add
      */
-    function addBackend(address _backend) external onlyOwner validAddress(_backend) {
-        _addBackend(_backend);
+    function addAdmin(address _admin) external onlyOwner validAddress(_admin) {
+        _addAdmin(_admin);
     }
 
     /**
-     * @notice Remove a backend address
-     * @param _backend Backend address to remove
+     * @notice Remove an admin address
+     * @param _admin Admin address to remove
      */
-    function removeBackend(address _backend) external onlyOwner validAddress(_backend) {
-        _removeBackend(_backend);
+    function removeAdmin(address _admin) external onlyOwner validAddress(_admin) {
+        _removeAdmin(_admin);
     }
 
     /**
