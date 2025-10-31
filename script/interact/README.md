@@ -11,6 +11,7 @@ Collection of scripts to interact with deployed Boolean Contracts.
    SETTLEMENT_ENGINE_ADDRESS=0x...
    POSITION_MANAGER_ADDRESS=0x...
    VAULT_MANAGER_ADDRESS=0x...
+   VAULT_MANAGER_HELPER_ADDRESS=0x...  # For InteractVaultManagerHelper
    VAULT_ADDRESS=0x...  # For InteractAssetVault
    ```
 
@@ -38,6 +39,15 @@ forge script script/interact/<ScriptName>.s.sol:<ContractName> \
 ```
 
 ## Scripts Overview
+
+1. **InteractBlocksenseOracle.s.sol** - Oracle management and price queries
+2. **InteractSettlementEngine.s.sol** - Settlement configuration and payout calculations
+3. **InteractPositionManager.s.sol** - Position management (open/close/add margin)
+4. **InteractVaultManager.s.sol** - VaultManager and individual vault operations (LP + Admin)
+5. **InteractVaultManagerHelper.s.sol** - VaultManagerHelper view functions and admin proxies
+6. **InteractAssetVault.s.sol** - Direct interaction with specific AssetVault
+
+---
 
 ### 1. InteractBlocksenseOracle.s.sol
 
@@ -359,7 +369,162 @@ forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
   --broadcast
 ```
 
-### 5. InteractAssetVault.s.sol
+### 5. InteractVaultManagerHelper.s.sol
+
+Interact with VaultManagerHelper contract for view and admin proxy functions.
+
+**Important:** Set `VAULT_MANAGER_HELPER_ADDRESS` in `.env` before using this script.
+
+#### View Functions:
+```bash
+# Get vault address for a project token
+forge script script/interact/InteractVaultManagerHelper.s.sol:InteractVaultManagerHelper \
+  --sig "getVault(address)" 0xPROJECT_TOKEN \
+  --rpc-url $RPC_URL
+
+# Get all vaults
+forge script script/interact/InteractVaultManagerHelper.s.sol:InteractVaultManagerHelper \
+  --sig "getAllVaults()" \
+  --rpc-url $RPC_URL
+
+# Get vault info
+forge script script/interact/InteractVaultManagerHelper.s.sol:InteractVaultManagerHelper \
+  --sig "getVaultInfo(address)" 0xTOKEN_ADDRESS \
+  --rpc-url $RPC_URL
+
+# Get vault parameters
+forge script script/interact/InteractVaultManagerHelper.s.sol:InteractVaultManagerHelper \
+  --sig "getVaultParams(address)" 0xTOKEN_ADDRESS \
+  --rpc-url $RPC_URL
+
+# Check if vault is supported
+forge script script/interact/InteractVaultManagerHelper.s.sol:InteractVaultManagerHelper \
+  --sig "isVaultSupported(address)" 0xPROJECT_TOKEN \
+  --rpc-url $RPC_URL
+
+# Get LP position for user
+forge script script/interact/InteractVaultManagerHelper.s.sol:InteractVaultManagerHelper \
+  --sig "getLPPosition(address,address)" 0xTOKEN_ADDRESS 0xUSER \
+  --rpc-url $RPC_URL
+
+# Get total liquidity across all vaults
+forge script script/interact/InteractVaultManagerHelper.s.sol:InteractVaultManagerHelper \
+  --sig "getTotalLiquidity()" \
+  --rpc-url $RPC_URL
+
+# Get total USD value across all vaults
+forge script script/interact/InteractVaultManagerHelper.s.sol:InteractVaultManagerHelper \
+  --sig "getTotalValueUSD()" \
+  --rpc-url $RPC_URL
+
+# Get comprehensive vaults summary
+forge script script/interact/InteractVaultManagerHelper.s.sol:InteractVaultManagerHelper \
+  --sig "getVaultsSummary()" \
+  --rpc-url $RPC_URL
+
+# Get native balance
+forge script script/interact/InteractVaultManagerHelper.s.sol:InteractVaultManagerHelper \
+  --sig "getNativeBalance()" \
+  --rpc-url $RPC_URL
+
+# Get token balance
+forge script script/interact/InteractVaultManagerHelper.s.sol:InteractVaultManagerHelper \
+  --sig "getTokenBalance(address)" 0xTOKEN \
+  --rpc-url $RPC_URL
+```
+
+#### Admin Proxy Functions:
+```bash
+# Pause a vault
+forge script script/interact/InteractVaultManagerHelper.s.sol:InteractVaultManagerHelper \
+  --sig "pauseVault(address)" 0xTOKEN_ADDRESS \
+  --rpc-url $RPC_URL \
+  --broadcast
+
+# Unpause a vault
+forge script script/interact/InteractVaultManagerHelper.s.sol:InteractVaultManagerHelper \
+  --sig "unpauseVault(address)" 0xTOKEN_ADDRESS \
+  --rpc-url $RPC_URL \
+  --broadcast
+
+# Add vault admin
+forge script script/interact/InteractVaultManagerHelper.s.sol:InteractVaultManagerHelper \
+  --sig "addVaultAdmin(address,address)" 0xTOKEN_ADDRESS 0xADMIN \
+  --rpc-url $RPC_URL \
+  --broadcast
+
+# Remove vault admin
+forge script script/interact/InteractVaultManagerHelper.s.sol:InteractVaultManagerHelper \
+  --sig "removeVaultAdmin(address,address)" 0xTOKEN_ADDRESS 0xADMIN \
+  --rpc-url $RPC_URL \
+  --broadcast
+
+# Update vault parameters
+forge script script/interact/InteractVaultManagerHelper.s.sol:InteractVaultManagerHelper \
+  --sig "updateVaultParams(address,uint256,uint256,uint16)" \
+  0xTOKEN_ADDRESS 1000000000000000 1000000000000000000000 8000 \
+  --rpc-url $RPC_URL \
+  --broadcast
+
+# Set staking fee BPS
+forge script script/interact/InteractVaultManagerHelper.s.sol:InteractVaultManagerHelper \
+  --sig "setVaultStakingFeeBps(address,uint16)" 0xTOKEN_ADDRESS 200 \
+  --rpc-url $RPC_URL \
+  --broadcast
+
+# Set early withdrawal fee BPS
+forge script script/interact/InteractVaultManagerHelper.s.sol:InteractVaultManagerHelper \
+  --sig "setVaultEarlyWithdrawalFeeBps(address,uint16)" 0xTOKEN_ADDRESS 1000 \
+  --rpc-url $RPC_URL \
+  --broadcast
+
+# Set graduation threshold
+forge script script/interact/InteractVaultManagerHelper.s.sol:InteractVaultManagerHelper \
+  --sig "setVaultGraduationThreshold(address,uint256)" 0xTOKEN_ADDRESS 10000000000000000000000 \
+  --rpc-url $RPC_URL \
+  --broadcast
+
+# Set trading enabled
+forge script script/interact/InteractVaultManagerHelper.s.sol:InteractVaultManagerHelper \
+  --sig "setVaultTradingEnabled(address,bool)" 0xTOKEN_ADDRESS true \
+  --rpc-url $RPC_URL \
+  --broadcast
+
+# Set oracle adapter
+forge script script/interact/InteractVaultManagerHelper.s.sol:InteractVaultManagerHelper \
+  --sig "setVaultOracleAdapter(address,address)" 0xTOKEN_ADDRESS 0xORACLE_ADAPTER \
+  --rpc-url $RPC_URL \
+  --broadcast
+
+# Set Blocksense Oracle
+forge script script/interact/InteractVaultManagerHelper.s.sol:InteractVaultManagerHelper \
+  --sig "setVaultBlocksenseOracle(address,address)" 0xTOKEN_ADDRESS 0xBLOCKSENSE_ORACLE \
+  --rpc-url $RPC_URL \
+  --broadcast
+```
+
+#### Batch Operations:
+```bash
+# Pause multiple vaults at once
+forge script script/interact/InteractVaultManagerHelper.s.sol:InteractVaultManagerHelper \
+  --sig "pauseVaultsBatch(address[])" "[0xTOKEN1,0xTOKEN2,0xTOKEN3]" \
+  --rpc-url $RPC_URL \
+  --broadcast
+
+# Unpause multiple vaults at once
+forge script script/interact/InteractVaultManagerHelper.s.sol:InteractVaultManagerHelper \
+  --sig "unpauseVaultsBatch(address[])" "[0xTOKEN1,0xTOKEN2,0xTOKEN3]" \
+  --rpc-url $RPC_URL \
+  --broadcast
+
+# Set staking fee for multiple vaults
+forge script script/interact/InteractVaultManagerHelper.s.sol:InteractVaultManagerHelper \
+  --sig "setStakingFeeBatch(address[],uint16)" "[0xTOKEN1,0xTOKEN2]" 200 \
+  --rpc-url $RPC_URL \
+  --broadcast
+```
+
+### 6. InteractAssetVault.s.sol
 
 Interact with a specific AssetVault contract.
 
@@ -432,9 +597,11 @@ forge script script/interact/InteractAssetVault.s.sol:InteractAssetVault \
 
 - `Oracle address not set` - Set `ORACLE_ADDRESS` in `.env`
 - `Vault address not set` - Set `VAULT_ADDRESS` in `.env`
+- `Vault Manager Helper address not set` - Set `VAULT_MANAGER_HELPER_ADDRESS` in `.env`
 - `Insufficient allowance` - Approve tokens first using ERC20 approve
 - `Position not found` - Check position ID is correct
 - `Vault not found` - Create vault first or check project token address
+- `NotAuthorized` - Make sure you're using the owner/admin account
 
 ## Examples
 
@@ -528,5 +695,56 @@ forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
 # Remove liquidity
 forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
   --sig "removeLiquidity(address,uint256)" $PROJECT_TOKEN 1000000000000000000 \
+  --rpc-url $RPC_URL --broadcast
+```
+
+### VaultManagerHelper Usage Example
+
+The VaultManagerHelper provides convenient view functions and admin proxy features:
+
+**View all vaults summary:**
+```bash
+forge script script/interact/InteractVaultManagerHelper.s.sol:InteractVaultManagerHelper \
+  --sig "getVaultsSummary()" \
+  --rpc-url $RPC_URL
+```
+
+**Get total liquidity and USD value:**
+```bash
+# Total liquidity across all vaults
+forge script script/interact/InteractVaultManagerHelper.s.sol:InteractVaultManagerHelper \
+  --sig "getTotalLiquidity()" \
+  --rpc-url $RPC_URL
+
+# Total USD value across all vaults
+forge script script/interact/InteractVaultManagerHelper.s.sol:InteractVaultManagerHelper \
+  --sig "getTotalValueUSD()" \
+  --rpc-url $RPC_URL
+```
+
+**Admin operations:**
+```bash
+# Pause a specific vault
+forge script script/interact/InteractVaultManagerHelper.s.sol:InteractVaultManagerHelper \
+  --sig "pauseVault(address)" $PROJECT_TOKEN \
+  --rpc-url $RPC_URL --broadcast
+
+# Update vault parameters
+forge script script/interact/InteractVaultManagerHelper.s.sol:InteractVaultManagerHelper \
+  --sig "updateVaultParams(address,uint256,uint256,uint16)" \
+  $PROJECT_TOKEN 1000000000000000 1000000000000000000000 8000 \
+  --rpc-url $RPC_URL --broadcast
+```
+
+**Batch operations (admin only):**
+```bash
+# Pause multiple vaults at once
+forge script script/interact/InteractVaultManagerHelper.s.sol:InteractVaultManagerHelper \
+  --sig "pauseVaultsBatch(address[])" "[$TOKEN1,$TOKEN2,$TOKEN3]" \
+  --rpc-url $RPC_URL --broadcast
+
+# Set staking fee for multiple vaults
+forge script script/interact/InteractVaultManagerHelper.s.sol:InteractVaultManagerHelper \
+  --sig "setStakingFeeBatch(address[],uint16)" "[$TOKEN1,$TOKEN2]" 200 \
   --rpc-url $RPC_URL --broadcast
 ```
