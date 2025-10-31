@@ -218,20 +218,23 @@ contract InteractVaultManager is DeployHelper {
     /**
      * @notice Remove liquidity from a vault (unstake tokens)
      * @param projectToken Project token address
-     * @param shares Amount of shares to burn
+     * @dev Removes all shares from the user
      */
-    function removeLiquidity(address projectToken, uint256 shares) public {
+    function removeLiquidity(address projectToken) public {
         console.log("\n=== Remove Liquidity from Vault ===");
         console.log("Project Token:", projectToken);
-        console.log("Shares:", shares);
 
         address vaultAddr = _getVaultAddress(projectToken);
         console.log("Vault Address:", vaultAddr);
 
         AssetVault vault = AssetVault(payable(vaultAddr));
 
+        // Show shares before removal
+        uint256 shares = vault.getLPPosition(deployer).shares;
+        console.log("Shares to remove:", shares);
+
         vm.startBroadcast(deployer);
-        vault.removeLiquidity(shares);
+        vault.removeLiquidity();
         console.log("Liquidity removed successfully");
         vm.stopBroadcast();
 

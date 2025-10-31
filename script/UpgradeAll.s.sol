@@ -75,22 +75,10 @@ contract UpgradeAll is DeployHelper {
     // ========================================================================
 
     function _validateProxyAddresses() internal view {
-        require(
-            blocksenseOracle != address(0),
-            "BlocksenseOracle proxy address not set"
-        );
-        require(
-            settlementEngine != address(0),
-            "SettlementEngine proxy address not set"
-        );
-        require(
-            positionManager != address(0),
-            "PositionManager proxy address not set"
-        );
-        require(
-            vaultManager != address(0),
-            "VaultManager proxy address not set"
-        );
+        require(blocksenseOracle != address(0), "BlocksenseOracle proxy address not set");
+        require(settlementEngine != address(0), "SettlementEngine proxy address not set");
+        require(positionManager != address(0), "PositionManager proxy address not set");
+        require(vaultManager != address(0), "VaultManager proxy address not set");
 
         console.log("=== Existing Proxy Addresses ===");
         console.log("BlocksenseOracle:", blocksenseOracle);
@@ -113,16 +101,10 @@ contract UpgradeAll is DeployHelper {
         console.log("New implementation deployed:", newBlocksenseOracleImpl);
 
         // Upgrade proxy to new implementation
-        BlocksenseOracle(blocksenseOracle).upgradeToAndCall(
-            newBlocksenseOracleImpl,
-            ""
-        );
+        BlocksenseOracle(blocksenseOracle).upgradeToAndCall(newBlocksenseOracleImpl, "");
 
         console.log("[UPGRADED] BlocksenseOracle");
-        _logDeployment(
-            "BlocksenseOracle New Implementation",
-            newBlocksenseOracleImpl
-        );
+        _logDeployment("BlocksenseOracle New Implementation", newBlocksenseOracleImpl);
     }
 
     function _upgradeSettlementEngine() internal {
@@ -133,16 +115,10 @@ contract UpgradeAll is DeployHelper {
         console.log("New implementation deployed:", newSettlementEngineImpl);
 
         // Upgrade proxy to new implementation
-        SettlementEngine(settlementEngine).upgradeToAndCall(
-            newSettlementEngineImpl,
-            ""
-        );
+        SettlementEngine(settlementEngine).upgradeToAndCall(newSettlementEngineImpl, "");
 
         console.log("[UPGRADED] SettlementEngine");
-        _logDeployment(
-            "SettlementEngine New Implementation",
-            newSettlementEngineImpl
-        );
+        _logDeployment("SettlementEngine New Implementation", newSettlementEngineImpl);
     }
 
     function _upgradePositionManager() internal {
@@ -153,16 +129,10 @@ contract UpgradeAll is DeployHelper {
         console.log("New implementation deployed:", newPositionManagerImpl);
 
         // Upgrade proxy to new implementation
-        PositionManager(payable(positionManager)).upgradeToAndCall(
-            newPositionManagerImpl,
-            ""
-        );
+        PositionManager(payable(positionManager)).upgradeToAndCall(newPositionManagerImpl, "");
 
         console.log("[UPGRADED] PositionManager");
-        _logDeployment(
-            "PositionManager New Implementation",
-            newPositionManagerImpl
-        );
+        _logDeployment("PositionManager New Implementation", newPositionManagerImpl);
     }
 
     function _upgradeVaultManager() internal {
@@ -183,26 +153,19 @@ contract UpgradeAll is DeployHelper {
         console.log("\nStep 5: VaultManagerHelper...");
 
         if (vaultManagerHelper != address(0)) {
-            console.log(
-                "VaultManagerHelper already exists at:",
-                vaultManagerHelper
-            );
+            console.log("VaultManagerHelper already exists at:", vaultManagerHelper);
             console.log(
                 "Note: VaultManagerHelper is not upgradeable - manual redeployment required if changes needed"
             );
 
             // Ensure VaultManager is connected to VaultManagerHelper
-            VaultManager(vaultManager).setVaultManagerHelper(
-                vaultManagerHelper
-            );
+            VaultManager(vaultManager).setVaultManagerHelper(vaultManagerHelper);
             console.log("Reconnected VaultManagerHelper to VaultManager");
             return;
         }
 
         console.log("Deploying new VaultManagerHelper...");
-        vaultManagerHelper = payable(
-            address(new VaultManagerHelper(payable(vaultManager)))
-        );
+        vaultManagerHelper = payable(address(new VaultManagerHelper(payable(vaultManager))));
 
         // Connect VaultManagerHelper to VaultManager
         VaultManager(vaultManager).setVaultManagerHelper(vaultManagerHelper);
@@ -219,34 +182,16 @@ contract UpgradeAll is DeployHelper {
         console.log("\nStep 6: Verifying upgrade...");
 
         // Verify proxies still exist
-        require(
-            blocksenseOracle != address(0),
-            "BlocksenseOracle proxy missing"
-        );
-        require(
-            settlementEngine != address(0),
-            "SettlementEngine proxy missing"
-        );
+        require(blocksenseOracle != address(0), "BlocksenseOracle proxy missing");
+        require(settlementEngine != address(0), "SettlementEngine proxy missing");
         require(positionManager != address(0), "PositionManager proxy missing");
         require(vaultManager != address(0), "VaultManager proxy missing");
 
         // Verify ownership (should remain unchanged after upgrade)
-        require(
-            Ownable(blocksenseOracle).owner() == owner,
-            "Wrong BlocksenseOracle owner"
-        );
-        require(
-            Ownable(settlementEngine).owner() == owner,
-            "Wrong SettlementEngine owner"
-        );
-        require(
-            Ownable(positionManager).owner() == owner,
-            "Wrong PositionManager owner"
-        );
-        require(
-            Ownable(vaultManager).owner() == owner,
-            "Wrong VaultManager owner"
-        );
+        require(Ownable(blocksenseOracle).owner() == owner, "Wrong BlocksenseOracle owner");
+        require(Ownable(settlementEngine).owner() == owner, "Wrong SettlementEngine owner");
+        require(Ownable(positionManager).owner() == owner, "Wrong PositionManager owner");
+        require(Ownable(vaultManager).owner() == owner, "Wrong VaultManager owner");
 
         console.log("[OK] All verifications passed");
     }

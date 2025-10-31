@@ -71,9 +71,9 @@ interface IAssetVault {
 
     /**
      * @notice Remove liquidity from vault
-     * @param shares Amount of shares to burn
+     * @dev Automatically removes all shares from the user
      */
-    function removeLiquidity(uint256 shares) external;
+    function removeLiquidity() external;
 
     /**
      * @notice Deposit collateral from bet

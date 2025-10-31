@@ -178,13 +178,17 @@ contract InteractAssetVault is DeployHelper {
 
     /**
      * @notice Remove liquidity from vault
+     * @dev Removes all shares from the user
      */
-    function removeLiquidity(uint256 shares) public {
+    function removeLiquidity() public {
         console.log("\n=== Remove Liquidity ===");
-        console.log("Shares:", shares);
+
+        // Show shares before removal
+        uint256 shares = vault.getLPPosition(deployer).shares;
+        console.log("Shares to remove:", shares);
 
         vm.startBroadcast(deployer);
-        vault.removeLiquidity(shares);
+        vault.removeLiquidity();
         console.log("Liquidity removed successfully");
         vm.stopBroadcast();
     }

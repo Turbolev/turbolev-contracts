@@ -541,16 +541,16 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
 
     /**
      * @notice Remove liquidity from vault
-     * @param shares Amount of shares to burn
+     * @dev Automatically removes all shares from the user
      */
-    function removeLiquidity(uint256 shares) external nonReentrant whenVaultNotPaused {
+    function removeLiquidity() external nonReentrant whenVaultNotPaused {
         // ============================================================
         // CHECKS
         // ============================================================
-        if (shares == 0) revert InvalidAmount();
-
         LPPosition storage lpPos = lpPositions[msg.sender];
-        if (lpPos.shares < shares) revert InsufficientShares();
+        uint256 shares = lpPos.shares;
+
+        if (shares == 0) revert InvalidAmount();
 
         VaultInfo storage vault = vaultInfo;
 
