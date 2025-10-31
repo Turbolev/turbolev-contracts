@@ -21,14 +21,9 @@ contract InteractVaultManagerHelper is DeployHelper {
         super.setUp();
 
         // Load vault manager helper address from env or deployment file
-        address vaultManagerHelperAddr = vm.envOr(
-            "VAULT_MANAGER_HELPER_ADDRESS",
-            vaultManagerHelper
-        );
-        require(
-            vaultManagerHelperAddr != address(0),
-            "Vault Manager Helper address not set"
-        );
+        address vaultManagerHelperAddr =
+            vm.envOr("VAULT_MANAGER_HELPER_ADDRESS", vaultManagerHelper);
+        require(vaultManagerHelperAddr != address(0), "Vault Manager Helper address not set");
         vaultMgrHelper = VaultManagerHelper(payable(vaultManagerHelperAddr));
 
         console.log("Vault Manager Helper Address:", address(vaultMgrHelper));
@@ -88,9 +83,7 @@ contract InteractVaultManagerHelper is DeployHelper {
         console.log("\n=== Get Vault Info ===");
         console.log("Token Address:", tokenAddress);
 
-        try vaultMgrHelper.getVaultInfo(tokenAddress) returns (
-            IAssetVault.VaultInfo memory info
-        ) {
+        try vaultMgrHelper.getVaultInfo(tokenAddress) returns (IAssetVault.VaultInfo memory info) {
             console.log("\n--- Liquidity ---");
             console.log("Total Liquidity:", info.totalLiquidity);
             console.log("Total Shares:", info.totalShares);
@@ -134,10 +127,7 @@ contract InteractVaultManagerHelper is DeployHelper {
         ) {
             console.log("Min Bet Amount:", params.minBetAmount);
             console.log("Max Bet Amount:", params.maxBetAmount);
-            console.log(
-                "Max Position Size Percent BPS:",
-                params.maxPositionSizePercentBps
-            );
+            console.log("Max Position Size Percent BPS:", params.maxPositionSizePercentBps);
             console.log("Min Liquidity Amount:", params.minLiquidityAmount);
         } catch Error(string memory reason) {
             console.log("Error:", reason);
@@ -344,17 +334,11 @@ contract InteractVaultManagerHelper is DeployHelper {
         console.log("Token Address:", tokenAddress);
         console.log("Min Bet Amount:", minBetAmount);
         console.log("Max Bet Amount:", maxBetAmount);
-        console.log(
-            "Max Position Size Percent BPS:",
-            maxPositionSizePercentBps
-        );
+        console.log("Max Position Size Percent BPS:", maxPositionSizePercentBps);
 
         vm.startBroadcast(deployer);
         vaultMgrHelper.updateVaultParams(
-            tokenAddress,
-            minBetAmount,
-            maxBetAmount,
-            maxPositionSizePercentBps
+            tokenAddress, minBetAmount, maxBetAmount, maxPositionSizePercentBps
         );
         console.log("Vault parameters updated successfully");
         vm.stopBroadcast();
@@ -365,10 +349,7 @@ contract InteractVaultManagerHelper is DeployHelper {
      * @param tokenAddress Token address
      * @param stakingFeeBps Staking fee BPS
      */
-    function setVaultStakingFeeBps(
-        address tokenAddress,
-        uint16 stakingFeeBps
-    ) public {
+    function setVaultStakingFeeBps(address tokenAddress, uint16 stakingFeeBps) public {
         console.log("\n=== Set Vault Staking Fee BPS ===");
         console.log("Token Address:", tokenAddress);
         console.log("Staking Fee BPS:", stakingFeeBps);
@@ -384,19 +365,15 @@ contract InteractVaultManagerHelper is DeployHelper {
      * @param tokenAddress Token address
      * @param earlyWithdrawalFeeBps Early withdrawal fee BPS
      */
-    function setVaultEarlyWithdrawalFeeBps(
-        address tokenAddress,
-        uint16 earlyWithdrawalFeeBps
-    ) public {
+    function setVaultEarlyWithdrawalFeeBps(address tokenAddress, uint16 earlyWithdrawalFeeBps)
+        public
+    {
         console.log("\n=== Set Vault Early Withdrawal Fee BPS ===");
         console.log("Token Address:", tokenAddress);
         console.log("Early Withdrawal Fee BPS:", earlyWithdrawalFeeBps);
 
         vm.startBroadcast(deployer);
-        vaultMgrHelper.setVaultEarlyWithdrawalFeeBps(
-            tokenAddress,
-            earlyWithdrawalFeeBps
-        );
+        vaultMgrHelper.setVaultEarlyWithdrawalFeeBps(tokenAddress, earlyWithdrawalFeeBps);
         console.log("Early withdrawal fee BPS updated successfully");
         vm.stopBroadcast();
     }
@@ -406,19 +383,15 @@ contract InteractVaultManagerHelper is DeployHelper {
      * @param tokenAddress Token address
      * @param graduationThreshold Graduation threshold
      */
-    function setVaultGraduationThreshold(
-        address tokenAddress,
-        uint256 graduationThreshold
-    ) public {
+    function setVaultGraduationThreshold(address tokenAddress, uint256 graduationThreshold)
+        public
+    {
         console.log("\n=== Set Vault Graduation Threshold ===");
         console.log("Token Address:", tokenAddress);
         console.log("Graduation Threshold:", graduationThreshold);
 
         vm.startBroadcast(deployer);
-        vaultMgrHelper.setVaultGraduationThreshold(
-            tokenAddress,
-            graduationThreshold
-        );
+        vaultMgrHelper.setVaultGraduationThreshold(tokenAddress, graduationThreshold);
         console.log("Graduation threshold updated successfully");
         vm.stopBroadcast();
     }
@@ -428,10 +401,7 @@ contract InteractVaultManagerHelper is DeployHelper {
      * @param tokenAddress Token address
      * @param tradingEnabled Trading enabled
      */
-    function setVaultTradingEnabled(
-        address tokenAddress,
-        bool tradingEnabled
-    ) public {
+    function setVaultTradingEnabled(address tokenAddress, bool tradingEnabled) public {
         console.log("\n=== Set Vault Trading Enabled ===");
         console.log("Token Address:", tokenAddress);
         console.log("Trading Enabled:", tradingEnabled);
@@ -447,10 +417,7 @@ contract InteractVaultManagerHelper is DeployHelper {
      * @param tokenAddress Token address
      * @param oracleAdapter Oracle adapter address
      */
-    function setVaultOracleAdapter(
-        address tokenAddress,
-        address oracleAdapter
-    ) public {
+    function setVaultOracleAdapter(address tokenAddress, address oracleAdapter) public {
         console.log("\n=== Set Vault Oracle Adapter ===");
         console.log("Token Address:", tokenAddress);
         console.log("Oracle Adapter:", oracleAdapter);
@@ -466,10 +433,7 @@ contract InteractVaultManagerHelper is DeployHelper {
      * @param tokenAddress Token address
      * @param blocksenseOracle BlocksenseOracle contract address
      */
-    function setVaultBlocksenseOracle(
-        address tokenAddress,
-        address blocksenseOracle
-    ) public {
+    function setVaultBlocksenseOracle(address tokenAddress, address blocksenseOracle) public {
         console.log("\n=== Set Vault Blocksense Oracle ===");
         console.log("Token Address:", tokenAddress);
         console.log("Blocksense Oracle:", blocksenseOracle);
@@ -523,10 +487,7 @@ contract InteractVaultManagerHelper is DeployHelper {
      * @param tokenAddresses Array of token addresses
      * @param stakingFeeBps Staking fee BPS to set for all vaults
      */
-    function setStakingFeeBatch(
-        address[] memory tokenAddresses,
-        uint16 stakingFeeBps
-    ) public {
+    function setStakingFeeBatch(address[] memory tokenAddresses, uint16 stakingFeeBps) public {
         console.log("\n=== Set Staking Fee Batch ===");
         console.log("Number of vaults:", tokenAddresses.length);
         console.log("Staking Fee BPS:", stakingFeeBps);
@@ -534,10 +495,7 @@ contract InteractVaultManagerHelper is DeployHelper {
         vm.startBroadcast(deployer);
         for (uint256 i = 0; i < tokenAddresses.length; i++) {
             console.log("Setting fee for vault", i, ":", tokenAddresses[i]);
-            vaultMgrHelper.setVaultStakingFeeBps(
-                tokenAddresses[i],
-                stakingFeeBps
-            );
+            vaultMgrHelper.setVaultStakingFeeBps(tokenAddresses[i], stakingFeeBps);
         }
         console.log("Staking fees updated for all vaults");
         vm.stopBroadcast();
