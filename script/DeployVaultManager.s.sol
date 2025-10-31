@@ -69,10 +69,14 @@ contract DeployVaultManager is DeployHelper {
             helperAddress = vaultManagerHelper;
         } else {
             console.log("Deploying new VaultManagerHelper...");
-            helperAddress = address(new VaultManagerHelper(vaultManager));
+            helperAddress = address(new VaultManagerHelper(payable(vaultManager)));
             _logDeployment("VaultManagerHelper", helperAddress);
             console.log("[SUCCESS] Deployed VaultManagerHelper");
         }
+
+        // Connect VaultManagerHelper to VaultManager
+        VaultManager(vaultManager).setVaultManagerHelper(helperAddress);
+        console.log("Connected VaultManagerHelper to VaultManager");
 
         console.log("\n===========================================");
         console.log("Operation Completed Successfully!");

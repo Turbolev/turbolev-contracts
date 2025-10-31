@@ -98,10 +98,7 @@ contract DeployAll is DeployHelper {
 
             // Prepare initialization data
             bytes memory initData = abi.encodeWithSelector(
-                BlocksenseOracle.initialize.selector,
-                owner,
-                blocksenseRegistry,
-                ORACLE_MAX_PRICE_AGE
+                BlocksenseOracle.initialize.selector, owner, ORACLE_MAX_PRICE_AGE
             );
 
             // Deploy proxy
@@ -174,7 +171,7 @@ contract DeployAll is DeployHelper {
 
             // Prepare initialization data
             bytes memory initData =
-                abi.encodeWithSelector(PositionManager.initialize.selector, owner, backend);
+                abi.encodeWithSelector(PositionManager.initialize.selector, owner, admin);
 
             // Deploy proxy
             positionManagerProxy = address(new ERC1967Proxy(positionManagerImpl, initData));
@@ -236,7 +233,7 @@ contract DeployAll is DeployHelper {
         console.log("\nStep 5: Deploying VaultManagerHelper...");
 
         // Deploy VaultManagerHelper (non-upgradeable)
-        vaultManagerHelper = address(new VaultManagerHelper(vaultManager));
+        vaultManagerHelper = payable(address(new VaultManagerHelper(payable(vaultManager))));
 
         _logDeployment("VaultManagerHelper", vaultManagerHelper);
     }
@@ -271,6 +268,10 @@ contract DeployAll is DeployHelper {
         // BlocksenseOracle: Set in VaultManager
         VaultManager(vaultManager).setBlocksenseOracle(blocksenseOracle);
         console.log("Connected BlocksenseOracle to VaultManager");
+
+        // VaultManagerHelper: Set in VaultManager
+        VaultManager(vaultManager).setVaultManagerHelper(vaultManagerHelper);
+        console.log("Connected VaultManagerHelper to VaultManager");
     }
 
     // ========================================================================
@@ -335,10 +336,10 @@ contract DeployAll is DeployHelper {
         console.log("- PositionManager Impl:", positionManagerImpl);
         console.log("- VaultManager Impl:", vaultManagerImpl);
         console.log("\nInfrastructure:");
-        console.log("- Blocksense Registry:", blocksenseRegistry);
+        console.log("- Backend:", backend);
         console.log("\nOwners:");
         console.log("- Contract Owner:", owner);
-        console.log("- Backend Address:", backend);
+        console.log("- Admin Address:", admin);
         console.log("==========================\n");
     }
 }

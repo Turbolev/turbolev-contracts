@@ -12,7 +12,6 @@ contract VaultManagerTest is BaseTest {
         address vaultAddr = vaultManager.getVault(address(projectToken));
 
         assertEq(vaultAddr, address(assetVault), "Vault should match");
-        assertTrue(vaultManager.isValidVault(vaultAddr), "Vault should be valid");
     }
 
     function test_SetPositionManager_Success() public {

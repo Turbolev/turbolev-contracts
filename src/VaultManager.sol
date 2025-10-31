@@ -43,6 +43,9 @@ contract VaultManager is
     /// @notice BlocksenseOracle contract address
     address public blocksenseOracle;
 
+    /// @notice VaultManagerHelper contract address
+    address public vaultManagerHelper;
+
     /// @notice Mapping: projectToken => vault address
     /// @dev One vault per project token
     mapping(address => address) public vaultsByProjectToken;
@@ -170,9 +173,10 @@ contract VaultManager is
         uint256 _maxBetAmount,
         uint256 _graduationThreshold
     ) external onlyOwner returns (address vaultAddress) {
-        if (_projectToken == address(0)) revert InvalidAddress();
-        if (_oracleAdapter == address(0)) revert InvalidAddress();
-
+        if (
+            _projectToken == address(0) || _oracleAdapter == address(0)
+                || vaultManagerHelper == address(0)
+        ) revert InvalidAddress();
         if (vaultsByProjectToken[_projectToken] != address(0)) {
             revert DuplicateProjectToken();
         }
@@ -182,6 +186,7 @@ contract VaultManager is
         AssetVault vault = new AssetVault(
             _projectToken,
             address(this),
+            vaultManagerHelper,
             positionManager,
             blocksenseOracle,
             _oracleAdapter,
@@ -204,44 +209,29 @@ contract VaultManager is
     }
 
     // ========================================================================
-    // VAULT MANAGEMENT
+    // VIEW FUNCTIONS
     // ========================================================================
 
     /**
      * @notice Get vault address for a project token
      * @param _projectToken Project token address
-     * @return vaultAddress Vault address
+     * @return vaultAddress Vault address (address(0) if not found)
      */
     function getVault(address _projectToken) external view returns (address vaultAddress) {
-        vaultAddress = vaultsByProjectToken[_projectToken];
-        if (vaultAddress == address(0)) revert VaultNotFound();
-        return vaultAddress;
+        return vaultsByProjectToken[_projectToken];
     }
 
     /**
-     * @notice Get project token for a vault
-     * @param _vaultAddress Vault address
-     * @return projectToken Project token address
-     */
-    function getVaultProjectToken(address _vaultAddress)
-        external
-        view
-        returns (address projectToken)
-    {
-        return vaultProjectToken[_vaultAddress];
-    }
-
-    /**
-     * @notice Check if vault is supported for a project token
+     * @notice Check if a vault is supported for a project token
      * @param _projectToken Project token address
-     * @return supported Whether vault is supported
+     * @return supported True if vault exists
      */
     function isVaultSupported(address _projectToken) external view returns (bool supported) {
         return vaultsByProjectToken[_projectToken] != address(0);
     }
 
     /**
-     * @notice Get all vaults
+     * @notice Get all vault addresses
      * @return Array of vault addresses
      */
     function getAllVaults() external view returns (address[] memory) {
@@ -379,6 +369,14 @@ contract VaultManager is
     }
 
     /**
+     * @notice Set VaultManagerHelper contract address
+     */
+    function setVaultManagerHelper(address _vaultManagerHelper) external onlyOwner {
+        if (_vaultManagerHelper == address(0)) revert InvalidAddress();
+        vaultManagerHelper = _vaultManagerHelper;
+    }
+
+    /**
      * @notice Pause factory (prevents new vault creation)
      */
     function pause() external onlyOwner {
@@ -390,70 +388,6 @@ contract VaultManager is
      */
     function unpause() external onlyOwner {
         _unpause();
-    }
-
-    // ========================================================================
-    // VAULT ADMIN PROXY FUNCTIONS
-    // ========================================================================
-    /**
-     * @notice Pause a specific vault
-     * @param _projectToken Project token address
-     * @dev Only callable by owner, forwards call to vault
-     */
-    function pauseVault(address _projectToken) external onlyOwner {
-        address vaultAddress = vaultsByProjectToken[_projectToken];
-        if (vaultAddress == address(0)) revert VaultNotFound();
-
-        IAssetVault(vaultAddress).pause();
-    }
-
-    /**
-     * @notice Unpause a specific vault
-     * @param _projectToken Project token address
-     * @dev Only callable by owner, forwards call to vault
-     */
-    function unpauseVault(address _projectToken) external onlyOwner {
-        address vaultAddress = vaultsByProjectToken[_projectToken];
-        if (vaultAddress == address(0)) revert VaultNotFound();
-
-        IAssetVault(vaultAddress).unpause();
-    }
-
-    /**
-     * @notice Update vault parameters
-     * @param _projectToken Project token address
-     * @param _minBetAmount Min bet amount
-     * @param _maxBetAmount Max bet amount
-     * @param _maxPositionSizePercentBps Max position size percent in basis points
-     */
-    function updateVaultParams(
-        address _projectToken,
-        uint256 _minBetAmount,
-        uint256 _maxBetAmount,
-        uint16 _maxPositionSizePercentBps
-    ) external onlyOwner {
-        address vaultAddress = vaultsByProjectToken[_projectToken];
-        if (vaultAddress == address(0)) revert VaultNotFound();
-
-        IAssetVault(vaultAddress).updateVaultParams(
-            _minBetAmount, _maxBetAmount, uint16(_maxPositionSizePercentBps)
-        );
-    }
-
-    /**
-     * @notice Set oracle adapter for a vault
-     * @param _projectToken Project token address
-     * @param _oracleAdapter Oracle adapter address
-     * @dev Only callable by owner, forwards call to vault
-     */
-    function setVaultOracleAdapter(address _projectToken, address _oracleAdapter)
-        external
-        onlyOwner
-    {
-        address vaultAddress = vaultsByProjectToken[_projectToken];
-        if (vaultAddress == address(0)) revert VaultNotFound();
-
-        IAssetVault(vaultAddress).setOracleAdapter(_oracleAdapter);
     }
 
     /**

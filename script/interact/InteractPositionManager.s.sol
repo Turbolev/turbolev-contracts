@@ -214,28 +214,28 @@ contract InteractPositionManager is DeployHelper {
     }
 
     /**
-     * @notice Add backend address
+     * @notice Add admin address
      */
-    function addBackend(address newBackend) public {
-        console.log("\n=== Add Backend ===");
-        console.log("New Backend:", newBackend);
+    function addAdmin(address newAdmin) public {
+        console.log("\n=== Add Admin ===");
+        console.log("New Admin:", newAdmin);
 
         vm.startBroadcast(deployer);
-        positionMgr.addBackend(newBackend);
-        console.log("Backend added successfully");
+        positionMgr.addAdmin(newAdmin);
+        console.log("Admin added successfully");
         vm.stopBroadcast();
     }
 
     /**
-     * @notice Remove backend address
+     * @notice Remove admin address
      */
-    function removeBackend(address backendToRemove) public {
-        console.log("\n=== Remove Backend ===");
-        console.log("Backend to Remove:", backendToRemove);
+    function removeAdmin(address adminToRemove) public {
+        console.log("\n=== Remove Admin ===");
+        console.log("Admin to Remove:", adminToRemove);
 
         vm.startBroadcast(deployer);
-        positionMgr.removeBackend(backendToRemove);
-        console.log("Backend removed successfully");
+        positionMgr.removeAdmin(adminToRemove);
+        console.log("Admin removed successfully");
         vm.stopBroadcast();
     }
 
@@ -304,16 +304,16 @@ contract InteractPositionManager is DeployHelper {
     }
 
     /**
-     * @notice Backend force close position
+     * @notice Admin force close position
      */
-    function backendClosePosition(uint64 positionId, bool isLiquidation) public {
-        console.log("\n=== Backend Close Position ===");
+    function adminClosePosition(uint64 positionId, bool isLiquidation) public {
+        console.log("\n=== Admin Close Position ===");
         console.log("Position ID:", positionId);
         console.log("Is Liquidation:", isLiquidation);
 
         vm.startBroadcast(deployer);
-        positionMgr.backendClosePosition(positionId, isLiquidation);
-        console.log("Position closed by backend successfully");
+        positionMgr.adminClosePosition(positionId, isLiquidation);
+        console.log("Position closed by admin successfully");
         vm.stopBroadcast();
     }
 }

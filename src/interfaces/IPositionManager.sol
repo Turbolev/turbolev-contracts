@@ -41,44 +41,44 @@ interface IPositionManager {
         payable;
 
     /**
-     * @notice Backend force close position
+     * @notice Admin force close position
      * @param positionId Position ID
      * @param closePrice Close price
      * @param isLiquidation Whether this is liquidation
      */
-    function backendClosePosition(uint64 positionId, uint256 closePrice, bool isLiquidation)
+    function adminClosePosition(uint64 positionId, uint256 closePrice, bool isLiquidation)
         external;
 
     /**
-     * @notice Add a backend address
-     * @param backend Backend address to add
+     * @notice Add an admin address
+     * @param admin Admin address to add
      */
-    function addBackend(address backend) external;
+    function addAdmin(address admin) external;
 
     /**
-     * @notice Remove a backend address
-     * @param backend Backend address to remove
+     * @notice Remove an admin address
+     * @param admin Admin address to remove
      */
-    function removeBackend(address backend) external;
+    function removeAdmin(address admin) external;
 
     /**
-     * @notice Check if an address is a backend
+     * @notice Check if an address is an admin
      * @param account Address to check
-     * @return bool True if address is a backend
+     * @return bool True if address is an admin
      */
-    function isBackend(address account) external view returns (bool);
+    function isAdmin(address account) external view returns (bool);
 
     /**
-     * @notice Get all backend addresses
-     * @return address[] Array of backend addresses
+     * @notice Get all admin addresses
+     * @return address[] Array of admin addresses
      */
-    function getBackends() external view returns (address[] memory);
+    function getAdmins() external view returns (address[] memory);
 
     /**
-     * @notice Get number of backends
-     * @return uint256 Number of backend addresses
+     * @notice Get number of admins
+     * @return uint256 Number of admin addresses
      */
-    function getBackendCount() external view returns (uint256);
+    function getAdminCount() external view returns (uint256);
 
     /**
      * @notice Get remaining hold time for a position

@@ -80,14 +80,15 @@ contract AssetVaultTest is BaseTest {
         projectToken.approve(address(assetVault), amount);
         assetVault.addLiquidity(amount);
 
-        // Get shares
+        // Get shares before removal
         uint256 shares = assetVault.getLPPosition(user1).shares;
+        assertGt(shares, 0, "Should have shares before removal");
 
-        // Remove half
-        assetVault.removeLiquidity(shares / 2);
+        // Remove all liquidity
+        assetVault.removeLiquidity();
 
         uint256 sharesAfter = assetVault.getLPPosition(user1).shares;
-        assertEq(sharesAfter, shares / 2, "Shares should be halved");
+        assertEq(sharesAfter, 0, "All shares should be removed");
         vm.stopPrank();
     }
 

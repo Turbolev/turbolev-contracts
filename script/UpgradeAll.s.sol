@@ -157,11 +157,19 @@ contract UpgradeAll is DeployHelper {
             console.log(
                 "Note: VaultManagerHelper is not upgradeable - manual redeployment required if changes needed"
             );
+
+            // Ensure VaultManager is connected to VaultManagerHelper
+            VaultManager(vaultManager).setVaultManagerHelper(vaultManagerHelper);
+            console.log("Reconnected VaultManagerHelper to VaultManager");
             return;
         }
 
         console.log("Deploying new VaultManagerHelper...");
-        vaultManagerHelper = address(new VaultManagerHelper(vaultManager));
+        vaultManagerHelper = payable(address(new VaultManagerHelper(payable(vaultManager))));
+
+        // Connect VaultManagerHelper to VaultManager
+        VaultManager(vaultManager).setVaultManagerHelper(vaultManagerHelper);
+        console.log("Connected VaultManagerHelper to VaultManager");
 
         _logDeployment("VaultManagerHelper", vaultManagerHelper);
     }

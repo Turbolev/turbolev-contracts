@@ -205,11 +205,12 @@ contract BaseTest is Test {
 
     // Test accounts
     address public owner;
-    address public backend;
+    address public admin;
     address public user1;
     address public user2;
     address public liquidityProvider;
     address public priceUpdater;
+    address public backend;
 
     // Constants
     uint256 public constant INITIAL_BALANCE = 1_000_000 ether;
@@ -229,12 +230,12 @@ contract BaseTest is Test {
     function setUp() public virtual {
         // Setup accounts
         owner = address(this);
-        backend = makeAddr("backend");
+        admin = makeAddr("admin");
         user1 = makeAddr("user1");
         user2 = makeAddr("user2");
         liquidityProvider = makeAddr("liquidityProvider");
         priceUpdater = makeAddr("priceUpdater");
-
+        backend = makeAddr("backend");
         // Deploy mock tokens
         projectToken = new MockERC20("Project Token", "PROJ");
         usdc = new MockERC20("USD Coin", "USDC");
@@ -252,7 +253,7 @@ contract BaseTest is Test {
         vm.deal(user1, INITIAL_BALANCE);
         vm.deal(user2, INITIAL_BALANCE);
         vm.deal(liquidityProvider, INITIAL_BALANCE);
-        vm.deal(backend, 1 ether);
+        vm.deal(admin, 1 ether);
         vm.deal(priceUpdater, 1 ether);
 
         // Deploy core contracts
@@ -274,7 +275,6 @@ contract BaseTest is Test {
         bytes memory oracleInitData = abi.encodeWithSelector(
             BlocksenseOracle.initialize.selector,
             owner,
-            address(mockRegistry),
             3600 // max price age
         );
         ERC1967Proxy oracleProxy = new ERC1967Proxy(address(oracleImpl), oracleInitData);
@@ -290,7 +290,7 @@ contract BaseTest is Test {
         // Deploy PositionManager (upgradeable via ERC1967Proxy)
         PositionManager positionImpl = new PositionManager();
         bytes memory positionInitData =
-            abi.encodeWithSelector(PositionManager.initialize.selector, owner, backend);
+            abi.encodeWithSelector(PositionManager.initialize.selector, owner, admin);
         ERC1967Proxy positionProxy = new ERC1967Proxy(address(positionImpl), positionInitData);
         positionManager = PositionManager(payable(address(positionProxy)));
 
@@ -308,6 +308,7 @@ contract BaseTest is Test {
         positionManager.setSettlementEngine(address(settlementEngine));
 
         vaultManager.setPositionManager(address(positionManager));
+        vaultManager.setVaultManagerHelper(address(vaultManagerHelper));
 
         settlementEngine.setPositionManager(address(positionManager));
         settlementEngine.setVaultManager(address(vaultManager));

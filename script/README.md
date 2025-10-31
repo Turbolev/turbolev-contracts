@@ -53,7 +53,7 @@ RPC_URL=http://localhost:8545           # Your RPC endpoint
 
 # Account Configuration
 OWNER_ADDRESS=0x...                     # Contract owner address
-BACKEND_ADDRESS=0x...                   # Backend/oracle role address
+ADMIN_ADDRESS=0x...                      # Admin/oracle role address
 DEPLOYER_PRIVATE_KEY=0x...             # Private key for deployment
 
 # Blocksense Registry (REQUIRED for mainnet/testnet)

@@ -71,9 +71,9 @@ interface IAssetVault {
 
     /**
      * @notice Remove liquidity from vault
-     * @param shares Amount of shares to burn
+     * @dev Automatically removes all shares from the user
      */
-    function removeLiquidity(uint256 shares) external;
+    function removeLiquidity() external;
 
     /**
      * @notice Deposit collateral from bet
@@ -268,13 +268,19 @@ interface IAssetVault {
      */
     function oracleAdapter() external view returns (address);
 
+    /**
+     * @notice Get blocksense oracle address
+     * @return oracle BlocksenseOracle address
+     */
+    function blocksenseOracle() external view returns (address);
+
     // ========================================================================
     // STAKER REWARD FUNCTIONS
     // ========================================================================
 
     /**
      * @notice Finalize daily rewards and take snapshot
-     * @dev Called by backend bot at end of each day
+     * @dev Called by admin bot at end of each day
      */
     function finalizeDailyReward() external;
 
@@ -295,35 +301,35 @@ interface IAssetVault {
     function claimRewards() external;
 
     /**
-     * @notice Add a backend bot address
-     * @param backend Backend bot address to add
+     * @notice Add an admin bot address
+     * @param admin Admin bot address to add
      */
-    function addBackend(address backend) external;
+    function addAdmin(address admin) external;
 
     /**
-     * @notice Remove a backend bot address
-     * @param backend Backend bot address to remove
+     * @notice Remove an admin bot address
+     * @param admin Admin bot address to remove
      */
-    function removeBackend(address backend) external;
+    function removeAdmin(address admin) external;
 
     /**
-     * @notice Check if an address is a backend
+     * @notice Check if an address is an admin
      * @param account Address to check
-     * @return bool True if address is a backend
+     * @return bool True if address is an admin
      */
-    function isBackend(address account) external view returns (bool);
+    function isAdmin(address account) external view returns (bool);
 
     /**
-     * @notice Get all backend addresses
-     * @return address[] Array of backend addresses
+     * @notice Get all admin addresses
+     * @return address[] Array of admin addresses
      */
-    function getBackends() external view returns (address[] memory);
+    function getAdmins() external view returns (address[] memory);
 
     /**
-     * @notice Get number of backends
-     * @return uint256 Number of backend addresses
+     * @notice Get number of admins
+     * @return uint256 Number of admin addresses
      */
-    function getBackendCount() external view returns (uint256);
+    function getAdminCount() external view returns (uint256);
 
     /**
      * @notice Get daily snapshot details
@@ -351,7 +357,7 @@ interface IAssetVault {
 
     /**
      * @notice Manually trigger processing of pending payouts
-     * @dev Can be called by backend when liquidity is added
+     * @dev Can be called by admin when liquidity is added
      */
     function processPendingPayouts() external;
 

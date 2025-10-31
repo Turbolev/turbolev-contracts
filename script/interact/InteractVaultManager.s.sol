@@ -5,6 +5,7 @@ import "forge-std/Script.sol";
 import "forge-std/console.sol";
 import "../DeployHelper.s.sol";
 import "../../src/VaultManager.sol";
+import "../../src/VaultManagerHelper.sol";
 import "../../src/AssetVault.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
@@ -15,6 +16,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  */
 contract InteractVaultManager is DeployHelper {
     VaultManager public vaultMgr;
+    VaultManagerHelper public vaultMgrHelper;
 
     function setUp() public override {
         super.setUp();
@@ -22,6 +24,11 @@ contract InteractVaultManager is DeployHelper {
         // Load vault manager address from env or deployment file
         address vaultMgrAddr = vm.envOr("VAULT_MANAGER_ADDRESS", vaultManager);
         require(vaultMgrAddr != address(0), "Vault Manager address not set");
+
+        address vaultManagerHelperAddr =
+            vm.envOr("VAULT_MANAGER_HELPER_ADDRESS", vaultManagerHelper);
+        require(vaultManagerHelperAddr != address(0), "Vault Manager Helper address not set");
+        vaultMgrHelper = VaultManagerHelper(payable(vaultManagerHelperAddr));
         vaultMgr = VaultManager(payable(vaultMgrAddr));
 
         console.log("Vault Manager Address:", address(vaultMgr));
@@ -49,22 +56,11 @@ contract InteractVaultManager is DeployHelper {
         console.log("\n=== Get Vault ===");
         console.log("Project Token:", projectToken);
 
-        try vaultMgr.getVault(projectToken) returns (address vaultAddr) {
+        try vaultMgrHelper.getVault(projectToken) returns (address vaultAddr) {
             console.log("Vault Address:", vaultAddr);
         } catch Error(string memory reason) {
             console.log("Error:", reason);
         }
-    }
-
-    /**
-     * @notice Get vault project token
-     */
-    function getVaultProjectToken(address vaultAddress) public view {
-        console.log("\n=== Get Vault Project Token ===");
-        console.log("Vault Address:", vaultAddress);
-
-        address projectToken = vaultMgr.getVaultProjectToken(vaultAddress);
-        console.log("Project Token:", projectToken);
     }
 
     /**
@@ -176,7 +172,7 @@ contract InteractVaultManager is DeployHelper {
      * @notice Helper to get vault from project token
      */
     function _getVaultAddress(address projectToken) internal view returns (address) {
-        address vaultAddr = vaultMgr.getVault(projectToken);
+        address vaultAddr = vaultMgrHelper.getVault(projectToken);
         require(vaultAddr != address(0), "Vault not found for project token");
         return vaultAddr;
     }
@@ -222,20 +218,23 @@ contract InteractVaultManager is DeployHelper {
     /**
      * @notice Remove liquidity from a vault (unstake tokens)
      * @param projectToken Project token address
-     * @param shares Amount of shares to burn
+     * @dev Removes all shares from the user
      */
-    function removeLiquidity(address projectToken, uint256 shares) public {
+    function removeLiquidity(address projectToken) public {
         console.log("\n=== Remove Liquidity from Vault ===");
         console.log("Project Token:", projectToken);
-        console.log("Shares:", shares);
 
         address vaultAddr = _getVaultAddress(projectToken);
         console.log("Vault Address:", vaultAddr);
 
         AssetVault vault = AssetVault(payable(vaultAddr));
 
+        // Show shares before removal
+        uint256 shares = vault.getLPPosition(deployer).shares;
+        console.log("Shares to remove:", shares);
+
         vm.startBroadcast(deployer);
-        vault.removeLiquidity(shares);
+        vault.removeLiquidity();
         console.log("Liquidity removed successfully");
         vm.stopBroadcast();
 
@@ -269,17 +268,6 @@ contract InteractVaultManager is DeployHelper {
         vm.startBroadcast(deployer);
         vault.claimRewards();
         console.log("Rewards claimed successfully");
-        vm.stopBroadcast();
-    }
-
-    function setVaultOracleAdapter(address projectToken, address oracleAdapter) public {
-        console.log("\n=== Set Vault Oracle Adapter ===");
-        console.log("Project Token:", projectToken);
-        console.log("Oracle Adapter:", oracleAdapter);
-
-        vm.startBroadcast(deployer);
-        vaultMgr.setVaultOracleAdapter(projectToken, oracleAdapter);
-        console.log("Oracle Adapter updated successfully");
         vm.stopBroadcast();
     }
 
@@ -357,10 +345,6 @@ contract InteractVaultManager is DeployHelper {
         console.log("Trading Enabled:", info.tradingEnabled);
         console.log("Created At:", info.createdAt);
         console.log("Graduated At:", info.graduatedAt);
-
-        // Get vault value in USD
-        uint256 valueUSD = vault.getVaultValueUSD();
-        console.log("\nVault Value (USD):", valueUSD);
     }
 
     /**
@@ -481,7 +465,7 @@ contract InteractVaultManager is DeployHelper {
      */
     function getAllVaults() public view {
         console.log("\n=== All Vaults ===");
-        address[] memory vaults = vaultMgr.getAllVaults();
+        address[] memory vaults = vaultMgrHelper.getAllVaults();
         console.log("Total Vaults:", vaults.length);
         for (uint256 i = 0; i < vaults.length; i++) {
             console.log("Vault", i, ":", vaults[i]);
@@ -565,11 +549,8 @@ contract InteractVaultManager is DeployHelper {
         console.log("\n=== Pause Vault ===");
         console.log("Project Token:", projectToken);
 
-        address vaultAddr = _getVaultAddress(projectToken);
-        AssetVault vault = AssetVault(payable(vaultAddr));
-
         vm.startBroadcast(deployer);
-        vault.pause();
+        vaultMgrHelper.pauseVault(projectToken);
         console.log("Vault paused successfully");
         vm.stopBroadcast();
     }
@@ -582,30 +563,106 @@ contract InteractVaultManager is DeployHelper {
         console.log("\n=== Unpause Vault ===");
         console.log("Project Token:", projectToken);
 
-        address vaultAddr = _getVaultAddress(projectToken);
-        AssetVault vault = AssetVault(payable(vaultAddr));
-
         vm.startBroadcast(deployer);
-        vault.unpause();
+        vaultMgrHelper.unpauseVault(projectToken);
         console.log("Vault unpaused successfully");
         vm.stopBroadcast();
     }
 
     /**
-     * @notice Set trading enabled for a vault
+     * @notice Set vault oracle adapter
+     * @param projectToken Project token address
+     * @param oracleAdapter Oracle adapter address
+     */
+    function setVaultOracleAdapter(address projectToken, address oracleAdapter) public {
+        console.log("\n=== Set Vault Oracle Adapter ===");
+        console.log("Project Token:", projectToken);
+        console.log("Oracle Adapter:", oracleAdapter);
+
+        vm.startBroadcast(deployer);
+        vaultMgrHelper.setVaultOracleAdapter(projectToken, oracleAdapter);
+        console.log("Oracle Adapter updated successfully");
+        vm.stopBroadcast();
+    }
+
+    /**
+     * @notice Set vault blocksense oracle
+     * @param projectToken Project token address
+     * @param blocksenseOracle Blocksense oracle address
+     */
+    function setVaultBlocksenseOracle(address projectToken, address blocksenseOracle) public {
+        console.log("\n=== Set Vault Blocksense Oracle ===");
+        console.log("Project Token:", projectToken);
+        console.log("Blocksense Oracle:", blocksenseOracle);
+
+        vm.startBroadcast(deployer);
+        vaultMgrHelper.setVaultBlocksenseOracle(projectToken, blocksenseOracle);
+        console.log("Blocksense Oracle updated successfully");
+        vm.stopBroadcast();
+    }
+
+    /**
+     * @notice Set vault staking fee BPS
+     * @param projectToken Project token address
+     * @param stakingFeeBps Staking fee BPS
+     */
+    function setVaultStakingFeeBps(address projectToken, uint16 stakingFeeBps) public {
+        console.log("\n=== Set Vault Staking Fee BPS ===");
+        console.log("Project Token:", projectToken);
+        console.log("Staking Fee BPS:", stakingFeeBps);
+
+        vm.startBroadcast(deployer);
+        vaultMgrHelper.setVaultStakingFeeBps(projectToken, stakingFeeBps);
+        console.log("Staking Fee BPS updated successfully");
+        vm.stopBroadcast();
+    }
+
+    /**
+     * @notice Set vault early withdrawal fee BPS
+     * @param projectToken Project token address
+     * @param earlyWithdrawalFeeBps Early withdrawal fee BPS
+     */
+    function setVaultEarlyWithdrawalFeeBps(address projectToken, uint16 earlyWithdrawalFeeBps)
+        public
+    {
+        console.log("\n=== Set Vault Early Withdrawal Fee BPS ===");
+        console.log("Project Token:", projectToken);
+        console.log("Early Withdrawal Fee BPS:", earlyWithdrawalFeeBps);
+
+        vm.startBroadcast(deployer);
+        vaultMgrHelper.setVaultEarlyWithdrawalFeeBps(projectToken, earlyWithdrawalFeeBps);
+        console.log("Early Withdrawal Fee BPS updated successfully");
+        vm.stopBroadcast();
+    }
+
+    /**
+     * @notice Set vault graduation threshold
+     * @param projectToken Project token address
+     * @param threshold Graduation threshold
+     */
+    function setVaultGraduationThreshold(address projectToken, uint256 threshold) public {
+        console.log("\n=== Set Vault Graduation Threshold ===");
+        console.log("Project Token:", projectToken);
+        console.log("Threshold:", threshold);
+
+        vm.startBroadcast(deployer);
+        vaultMgrHelper.setVaultGraduationThreshold(projectToken, threshold);
+        console.log("Graduation threshold updated successfully");
+        vm.stopBroadcast();
+    }
+
+    /**
+     * @notice Set vault trading enabled
      * @param projectToken Project token address
      * @param enabled Whether trading should be enabled
      */
-    function setTradingEnabled(address projectToken, bool enabled) public {
-        console.log("\n=== Set Trading Enabled ===");
+    function setVaultTradingEnabled(address projectToken, bool enabled) public {
+        console.log("\n=== Set Vault Trading Enabled ===");
         console.log("Project Token:", projectToken);
         console.log("Enabled:", enabled);
 
-        address vaultAddr = _getVaultAddress(projectToken);
-        AssetVault vault = AssetVault(payable(vaultAddr));
-
         vm.startBroadcast(deployer);
-        vault.setTradingEnabled(enabled);
+        vaultMgrHelper.setVaultTradingEnabled(projectToken, enabled);
         console.log("Trading status updated successfully");
         vm.stopBroadcast();
     }
@@ -613,6 +670,9 @@ contract InteractVaultManager is DeployHelper {
     /**
      * @notice Update vault parameters
      * @param projectToken Project token address
+     * @param minBetAmount Min bet amount
+     * @param maxBetAmount Max bet amount
+     * @param maxPositionSizePercentBps Max position size percent in basis points
      */
     function updateVaultParams(
         address projectToken,
@@ -623,31 +683,11 @@ contract InteractVaultManager is DeployHelper {
         console.log("\n=== Update Vault Parameters ===");
         console.log("Project Token:", projectToken);
 
-        address vaultAddr = _getVaultAddress(projectToken);
-        AssetVault vault = AssetVault(payable(vaultAddr));
-
         vm.startBroadcast(deployer);
-        vault.updateVaultParams(minBetAmount, maxBetAmount, maxPositionSizePercentBps);
+        vaultMgrHelper.updateVaultParams(
+            projectToken, minBetAmount, maxBetAmount, maxPositionSizePercentBps
+        );
         console.log("Vault parameters updated successfully");
-        vm.stopBroadcast();
-    }
-
-    /**
-     * @notice Set graduation threshold
-     * @param projectToken Project token address
-     * @param threshold New threshold
-     */
-    function setGraduationThreshold(address projectToken, uint256 threshold) public {
-        console.log("\n=== Set Graduation Threshold ===");
-        console.log("Project Token:", projectToken);
-        console.log("Threshold:", threshold);
-
-        address vaultAddr = _getVaultAddress(projectToken);
-        AssetVault vault = AssetVault(payable(vaultAddr));
-
-        vm.startBroadcast(deployer);
-        vault.setGraduationThreshold(threshold);
-        console.log("Graduation threshold updated successfully");
         vm.stopBroadcast();
     }
 
@@ -674,59 +714,34 @@ contract InteractVaultManager is DeployHelper {
     }
 
     /**
-     * @notice Add backend bot address
+     * @notice Add vault admin address
      * @param projectToken Project token address
-     * @param backend Backend address to add
+     * @param admin Admin address to add
      */
-    function addBackend(address projectToken, address backend) public {
-        console.log("\n=== Add Backend ===");
+    function addVaultAdmin(address projectToken, address admin) public {
+        console.log("\n=== Add Vault Admin ===");
         console.log("Project Token:", projectToken);
-        console.log("Backend:", backend);
-
-        address vaultAddr = _getVaultAddress(projectToken);
-        AssetVault vault = AssetVault(payable(vaultAddr));
+        console.log("Admin:", admin);
 
         vm.startBroadcast(deployer);
-        vault.addBackend(backend);
-        console.log("Backend added successfully");
+        vaultMgrHelper.addVaultAdmin(projectToken, admin);
+        console.log("Admin added successfully");
         vm.stopBroadcast();
     }
 
     /**
-     * @notice Remove backend bot address
+     * @notice Remove vault admin address
      * @param projectToken Project token address
-     * @param backend Backend address to remove
+     * @param admin Admin address to remove
      */
-    function removeBackend(address projectToken, address backend) public {
-        console.log("\n=== Remove Backend ===");
+    function removeVaultAdmin(address projectToken, address admin) public {
+        console.log("\n=== Remove Vault Admin ===");
         console.log("Project Token:", projectToken);
-        console.log("Backend:", backend);
-
-        address vaultAddr = _getVaultAddress(projectToken);
-        AssetVault vault = AssetVault(payable(vaultAddr));
+        console.log("Admin:", admin);
 
         vm.startBroadcast(deployer);
-        vault.removeBackend(backend);
-        console.log("Backend removed successfully");
-        vm.stopBroadcast();
-    }
-
-    /**
-     * @notice Set Blocksense Oracle for a vault
-     * @param projectToken Project token address
-     * @param blocksenseOracle Oracle address
-     */
-    function setBlocksenseOracle(address projectToken, address blocksenseOracle) public {
-        console.log("\n=== Set Blocksense Oracle ===");
-        console.log("Project Token:", projectToken);
-        console.log("Oracle:", blocksenseOracle);
-
-        address vaultAddr = _getVaultAddress(projectToken);
-        AssetVault vault = AssetVault(payable(vaultAddr));
-
-        vm.startBroadcast(deployer);
-        vault.setBlocksenseOracle(blocksenseOracle);
-        console.log("Blocksense Oracle updated successfully");
+        vaultMgrHelper.removeVaultAdmin(projectToken, admin);
+        console.log("Admin removed successfully");
         vm.stopBroadcast();
     }
 }

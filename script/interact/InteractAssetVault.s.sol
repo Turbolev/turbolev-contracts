@@ -140,16 +140,6 @@ contract InteractAssetVault is DeployHelper {
     }
 
     /**
-     * @notice Get vault value in USD
-     */
-    function getVaultValueUSD() public view {
-        console.log("\n=== Vault Value USD ===");
-
-        uint256 valueUSD = vault.getVaultValueUSD();
-        console.log("Value USD:", valueUSD);
-    }
-
-    /**
      * @notice View fee configuration
      */
     function viewFeeConfig() public view {
@@ -188,13 +178,17 @@ contract InteractAssetVault is DeployHelper {
 
     /**
      * @notice Remove liquidity from vault
+     * @dev Removes all shares from the user
      */
-    function removeLiquidity(uint256 shares) public {
+    function removeLiquidity() public {
         console.log("\n=== Remove Liquidity ===");
-        console.log("Shares:", shares);
+
+        // Show shares before removal
+        uint256 shares = vault.getLPPosition(deployer).shares;
+        console.log("Shares to remove:", shares);
 
         vm.startBroadcast(deployer);
-        vault.removeLiquidity(shares);
+        vault.removeLiquidity();
         console.log("Liquidity removed successfully");
         vm.stopBroadcast();
     }
@@ -309,28 +303,28 @@ contract InteractAssetVault is DeployHelper {
     }
 
     /**
-     * @notice Add backend address
+     * @notice Add admin address
      */
-    function addBackend(address newBackend) public {
-        console.log("\n=== Add Backend ===");
-        console.log("New Backend:", newBackend);
+    function addAdmin(address newAdmin) public {
+        console.log("\n=== Add Admin ===");
+        console.log("New Admin:", newAdmin);
 
         vm.startBroadcast(deployer);
-        vault.addBackend(newBackend);
-        console.log("Backend added successfully");
+        vault.addAdmin(newAdmin);
+        console.log("Admin added successfully");
         vm.stopBroadcast();
     }
 
     /**
-     * @notice Remove backend address
+     * @notice Remove admin address
      */
-    function removeBackend(address backendToRemove) public {
-        console.log("\n=== Remove Backend ===");
-        console.log("Backend to Remove:", backendToRemove);
+    function removeAdmin(address adminToRemove) public {
+        console.log("\n=== Remove Admin ===");
+        console.log("Admin to Remove:", adminToRemove);
 
         vm.startBroadcast(deployer);
-        vault.removeBackend(backendToRemove);
-        console.log("Backend removed successfully");
+        vault.removeAdmin(adminToRemove);
+        console.log("Admin removed successfully");
         vm.stopBroadcast();
     }
 
