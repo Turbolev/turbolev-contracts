@@ -93,6 +93,7 @@ contract PositionManager is
     event PositionClosed(
         uint64 indexed positionId,
         address indexed user,
+        address indexed projectToken,
         bool won,
         uint256 payout,
         uint256 closePrice,
@@ -631,7 +632,15 @@ contract PositionManager is
         pos.lastModifiedTimestamp = block.timestamp;
 
         emit PositionClosed(
-            positionId, pos.user, won, payout, closePrice, pnl, block.timestamp, pricePublishTime
+            positionId,
+            pos.user,
+            pos.projectToken,
+            won,
+            payout,
+            closePrice,
+            pnl,
+            block.timestamp,
+            pricePublishTime
         );
     }
 
