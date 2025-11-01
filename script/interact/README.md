@@ -46,6 +46,7 @@ forge script script/interact/<ScriptName>.s.sol:<ContractName> \
 4. **InteractVaultManager.s.sol** - VaultManager and individual vault operations (LP + Admin)
 5. **InteractVaultManagerHelper.s.sol** - VaultManagerHelper view functions and admin proxies
 6. **InteractAssetVault.s.sol** - Direct interaction with specific AssetVault
+7. **InteractPendingClose.s.sol** - Pending close position management (Admin cron tasks)
 
 ---
 
@@ -582,6 +583,182 @@ forge script script/interact/InteractAssetVault.s.sol:InteractAssetVault \
   --sig "finalizeDailyReward()" \
   --rpc-url $RPC_URL \
   --broadcast
+```
+
+### 7. InteractPendingClose.s.sol
+
+Interact with pending close positions management for admin/backend cron tasks.
+
+**Important:** This script is designed for backend automation to handle positions that couldn't be closed immediately due to stale oracle prices.
+
+#### View Functions:
+```bash
+# View all pending positions with details (no broadcast needed)
+forge script script/interact/InteractPendingClose.s.sol:InteractPendingClose \
+  --sig "getPendingPositionDetails()" \
+  --rpc-url $RPC_URL
+```
+
+#### Admin Functions:
+```bash
+# Process pending closes (default: max 10 positions)
+forge script script/interact/InteractPendingClose.s.sol:InteractPendingClose \
+  --sig "run()" \
+  --rpc-url $RPC_URL \
+  --broadcast
+
+# Process specific batch size
+forge script script/interact/InteractPendingClose.s.sol:InteractPendingClose \
+  --sig "processPendingClosesBatch(uint256)" 20 \
+  --rpc-url $RPC_URL \
+  --broadcast
+
+# Process single pending close
+forge script script/interact/InteractPendingClose.s.sol:InteractPendingClose \
+  --sig "processSinglePendingClose(uint64)" 123 \
+  --rpc-url $RPC_URL \
+  --broadcast
+
+# Cancel pending close (revert to OPEN state)
+forge script script/interact/InteractPendingClose.s.sol:InteractPendingClose \
+  --sig "cancelPendingClose(uint64)" 123 \
+  --rpc-url $RPC_URL \
+  --broadcast
+```
+
+**Backend Cron Task Setup:**
+
+This script should be run periodically (e.g., every 2-5 minutes) by backend automation:
+
+```bash
+#!/bin/bash
+# cron-pending-close.sh
+# Run every 2 minutes: */2 * * * * /path/to/cron-pending-close.sh
+
+BATCH_SIZE=20
+RPC_URL="https://your-rpc-url"
+PRIVATE_KEY="your-admin-private-key"
+
+forge script script/interact/InteractPendingClose.s.sol:InteractPendingClose \
+  --sig "processPendingClosesBatch(uint256)" $BATCH_SIZE \
+  --rpc-url $RPC_URL \
+  --broadcast \
+  --private-key $PRIVATE_KEY \
+  >> /var/log/pending-close-cron.log 2>&1
+```
+
+See [PENDING_CLOSE_FEATURE.md](../../docs/PENDING_CLOSE_FEATURE.md) for detailed documentation on the pending close system.
+
+### Advanced Pending Close Management
+
+InteractPositionManager script cung cấp các advanced functions để quản lý và monitor pending close positions hiệu quả hơn:
+
+**1. Health Check:**
+```bash
+# Kiểm tra toàn diện sức khỏe hệ thống
+forge script script/interact/InteractPositionManager.s.sol:InteractPositionManager \
+  --sig "healthCheckPendingClose()" \
+  --rpc-url $RPC_URL
+```
+
+**2. Statistics & Analytics:**
+```bash
+# Xem thống kê chi tiết (LONG/SHORT, collateral, age, v.v.)
+forge script script/interact/InteractPositionManager.s.sol:InteractPositionManager \
+  --sig "getPendingCloseStats()" \
+  --rpc-url $RPC_URL
+
+# Group by user
+forge script script/interact/InteractPositionManager.s.sol:InteractPositionManager \
+  --sig "getPendingByUser()" \
+  --rpc-url $RPC_URL
+```
+
+**3. Filter & Query:**
+```bash
+# Lọc positions cũ hơn 1 giờ (3600 seconds)
+forge script script/interact/InteractPositionManager.s.sol:InteractPositionManager \
+  --sig "getPendingOlderThan(uint256)" 3600 \
+  --rpc-url $RPC_URL
+
+# Lọc positions cũ hơn 24 giờ
+forge script script/interact/InteractPositionManager.s.sol:InteractPositionManager \
+  --sig "getPendingOlderThan(uint256)" 86400 \
+  --rpc-url $RPC_URL
+```
+
+**4. Advanced Processing:**
+```bash
+# Process với detailed logging
+forge script script/interact/InteractPositionManager.s.sol:InteractPositionManager \
+  --sig "processPendingClosePositionsVerbose(uint256)" 10 \
+  --rpc-url $RPC_URL --broadcast
+
+# Auto-retry processing (batchSize=10, maxIterations=5)
+forge script script/interact/InteractPositionManager.s.sol:InteractPositionManager \
+  --sig "processAllPendingWithRetry(uint256,uint256)" 10 5 \
+  --rpc-url $RPC_URL --broadcast
+```
+
+**5. Batch Operations:**
+```bash
+# Batch cancel multiple positions
+forge script script/interact/InteractPositionManager.s.sol:InteractPositionManager \
+  --sig "batchCancelPendingClose(uint64[])" "[123,124,125]" \
+  --rpc-url $RPC_URL --broadcast
+```
+
+**6. Export & Monitoring:**
+```bash
+# Export JSON cho monitoring systems
+forge script script/interact/InteractPositionManager.s.sol:InteractPositionManager \
+  --sig "exportPendingPositionsJSON()" \
+  --rpc-url $RPC_URL
+
+# Save to file
+forge script script/interact/InteractPositionManager.s.sol:InteractPositionManager \
+  --sig "exportPendingPositionsJSON()" \
+  --rpc-url $RPC_URL > pending_$(date +%Y%m%d_%H%M%S).json
+```
+
+**Enhanced Cron Setup với Health Monitoring:**
+
+```bash
+#!/bin/bash
+# advanced-cron-pending-close.sh
+# Crontab: */5 * * * * /path/to/advanced-cron-pending-close.sh
+
+SCRIPT_DIR="/path/to/boolean-contracts-evm"
+RPC_URL="https://your-rpc-url"
+LOG_DIR="/var/log/pending-close"
+
+cd $SCRIPT_DIR
+
+# 1. Health check
+echo "[$(date)] Running health check..." >> $LOG_DIR/health.log
+forge script script/interact/InteractPositionManager.s.sol:InteractPositionManager \
+  --sig "healthCheckPendingClose()" \
+  --rpc-url $RPC_URL >> $LOG_DIR/health.log 2>&1
+
+# 2. Process với retry
+echo "[$(date)] Processing pending positions..." >> $LOG_DIR/process.log
+forge script script/interact/InteractPositionManager.s.sol:InteractPositionManager \
+  --sig "processAllPendingWithRetry(uint256,uint256)" 10 3 \
+  --rpc-url $RPC_URL --broadcast >> $LOG_DIR/process.log 2>&1
+
+# 3. Export stats (mỗi 30 phút)
+MINUTE=$(date +%M)
+if [ $((10#$MINUTE % 30)) -eq 0 ]; then
+  forge script script/interact/InteractPositionManager.s.sol:InteractPositionManager \
+    --sig "exportPendingPositionsJSON()" \
+    --rpc-url $RPC_URL > $LOG_DIR/stats_$(date +%Y%m%d_%H%M).json
+fi
+
+# 4. Alert nếu unhealthy
+if grep -q "UNHEALTHY" $LOG_DIR/health.log; then
+  # Send alert (Slack, Discord, Email, etc.)
+  echo "ALERT: Pending Close System is UNHEALTHY!" | mail -s "System Alert" admin@example.com
+fi
 ```
 
 ## Tips

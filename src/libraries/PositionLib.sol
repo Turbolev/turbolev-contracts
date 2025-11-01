@@ -35,6 +35,7 @@ library PositionLib {
     uint8 public constant POSITION_STATE_WON = 5;
     uint8 public constant POSITION_STATE_LOST = 6;
     uint8 public constant POSITION_STATE_LIQUIDATED = 7;
+    uint8 public constant POSITION_STATE_PENDING_CLOSE = 8;
 
     // ========================================================================
     // BET DIRECTION CONSTANTS
