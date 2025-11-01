@@ -71,7 +71,9 @@ contract VaultManager is
     // EVENTS
     // ========================================================================
 
-    event VaultCreated(address indexed projectToken, address vaultAddress, uint256 timestamp);
+    event VaultCreated(
+        address indexed projectToken, address indexed vaultAddress, uint256 timestamp
+    );
 
     event PositionManagerUpdated(address indexed oldAddress, address indexed newAddress);
 

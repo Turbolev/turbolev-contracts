@@ -316,4 +316,622 @@ contract InteractPositionManager is DeployHelper {
         console.log("Position closed by admin successfully");
         vm.stopBroadcast();
     }
+
+    // ========================================================================
+    // PENDING CLOSE FUNCTIONS
+    // ========================================================================
+
+    /**
+     * @notice Get pending close count
+     */
+    function getPendingCloseCount() public view {
+        console.log("\n=== Pending Close Count ===");
+        uint256 count = positionMgr.getPendingCloseCount();
+        console.log("Pending close positions:", count);
+    }
+
+    /**
+     * @notice Get all pending close position IDs
+     */
+    function getPendingClosePositionIds() public view {
+        console.log("\n=== Pending Close Position IDs ===");
+        uint64[] memory positionIds = positionMgr.getPendingClosePositionIds();
+
+        console.log("Total pending positions:", positionIds.length);
+        if (positionIds.length > 0) {
+            console.log("\nPending position IDs:");
+            for (uint256 i = 0; i < positionIds.length; i++) {
+                console.log("  -", positionIds[i]);
+            }
+        }
+    }
+
+    /**
+     * @notice Get pending close request details
+     */
+    function getPendingCloseRequest(uint64 positionId) public view {
+        console.log("\n=== Pending Close Request Details ===");
+        console.log("Position ID:", positionId);
+
+        bool hasPending = positionMgr.hasPendingCloseRequest(positionId);
+        console.log("Has pending close request:", hasPending);
+
+        if (hasPending) {
+            PositionManager.PendingCloseRequest memory request =
+                positionMgr.getPendingCloseRequest(positionId);
+
+            console.log("\nRequest Details:");
+            console.log("  Position ID:", request.positionId);
+            console.log("  Request Time:", request.requestTime);
+            console.log("  Deadline:", request.deadline);
+            console.log("  Max Acceptable Price:", request.maxAcceptablePrice);
+            console.log("  Age (seconds):", block.timestamp - request.requestTime);
+        }
+    }
+
+    /**
+     * @notice Get batch of pending close positions
+     */
+    function getPendingClosePositionsBatch(uint256 offset, uint256 limit) public view {
+        console.log("\n=== Pending Close Positions Batch ===");
+        console.log("Offset:", offset);
+        console.log("Limit:", limit);
+
+        (
+            uint64[] memory positionIds,
+            PositionManager.PendingCloseRequest[] memory requests,
+            PositionLib.Position[] memory positions
+        ) = positionMgr.getPendingClosePositionsBatch(offset, limit);
+
+        console.log("\nFetched", positionIds.length, "positions");
+
+        for (uint256 i = 0; i < positionIds.length; i++) {
+            console.log("\n--- Position", positionIds[i], "---");
+            console.log("  User:", positions[i].user);
+            console.log("  Project Token:", positions[i].projectToken);
+            console.log("  Amount:", positions[i].amount);
+            console.log("  Leverage:", positions[i].leverage);
+            console.log("  Direction:", positions[i].direction == 1 ? "LONG" : "SHORT");
+            console.log("  Open Price:", positions[i].openPrice);
+            console.log("  Liquidation Price:", positions[i].liquidationPrice);
+            console.log("  Request Time:", requests[i].requestTime);
+            console.log("  Deadline:", requests[i].deadline);
+            console.log("  Max Acceptable Price:", requests[i].maxAcceptablePrice);
+            console.log("  Age (seconds):", block.timestamp - requests[i].requestTime);
+        }
+    }
+
+    /**
+     * @notice Process pending close positions (admin only)
+     */
+    function processPendingClosePositions(uint256 maxPositions) public {
+        console.log("\n=== Process Pending Close Positions ===");
+        console.log("Max Positions:", maxPositions);
+
+        uint256 countBefore = positionMgr.getPendingCloseCount();
+        console.log("Pending count before:", countBefore);
+
+        if (countBefore == 0) {
+            console.log("No pending positions to process");
+            return;
+        }
+
+        vm.startBroadcast(deployer);
+        positionMgr.processPendingClosePositions(maxPositions);
+        vm.stopBroadcast();
+
+        uint256 countAfter = positionMgr.getPendingCloseCount();
+        uint256 processed = countBefore > countAfter ? countBefore - countAfter : 0;
+
+        console.log("Processed:", processed);
+        console.log("Remaining:", countAfter);
+    }
+
+    /**
+     * @notice Cancel pending close for a position (admin only)
+     */
+    function cancelPendingClose(uint64 positionId) public {
+        console.log("\n=== Cancel Pending Close ===");
+        console.log("Position ID:", positionId);
+
+        vm.startBroadcast(deployer);
+        positionMgr.cancelPendingClose(positionId);
+        console.log("Pending close cancelled - position reverted to OPEN");
+        vm.stopBroadcast();
+    }
+
+    /**
+     * @notice View all pending positions with detailed info
+     */
+    function viewAllPendingPositions() public view {
+        console.log("\n===========================================");
+        console.log("PENDING CLOSE POSITIONS SUMMARY");
+        console.log("===========================================");
+
+        uint256 totalPending = positionMgr.getPendingCloseCount();
+        console.log("Total pending positions:", totalPending);
+
+        if (totalPending == 0) {
+            console.log("No pending positions");
+            return;
+        }
+
+        // Get up to 20 positions
+        uint256 limit = totalPending > 20 ? 20 : totalPending;
+
+        (
+            uint64[] memory positionIds,
+            PositionManager.PendingCloseRequest[] memory requests,
+            PositionLib.Position[] memory positions
+        ) = positionMgr.getPendingClosePositionsBatch(0, limit);
+
+        console.log("");
+        for (uint256 i = 0; i < positionIds.length; i++) {
+            console.log("Position", positionIds[i]);
+            console.log("  User:", positions[i].user);
+            console.log("  Token:", positions[i].projectToken);
+            console.log("  Collateral:", positions[i].amount);
+            console.log("  Leverage:", positions[i].leverage, "x");
+            console.log("  Direction:", positions[i].direction == 1 ? "LONG" : "SHORT");
+            console.log("  Open Price:", positions[i].openPrice);
+            console.log("  Position Size:", positions[i].positionSize);
+            console.log("  Pending since:", requests[i].requestTime);
+            console.log("  Age:", block.timestamp - requests[i].requestTime, "seconds");
+
+            if (requests[i].maxAcceptablePrice > 0) {
+                console.log("  Max Acceptable Price:", requests[i].maxAcceptablePrice);
+            }
+
+            if (block.timestamp > requests[i].deadline) {
+                console.log("  WARNING: Deadline passed!");
+            }
+            console.log("---");
+        }
+
+        if (totalPending > 20) {
+            console.log("... and", totalPending - 20, "more positions");
+        }
+    }
+
+    /**
+     * @notice Check if specific position is pending close
+     */
+    function checkPendingClose(uint64 positionId) public view {
+        console.log("\n=== Check Pending Close Status ===");
+        console.log("Position ID:", positionId);
+
+        bool isPending = positionMgr.hasPendingCloseRequest(positionId);
+        PositionLib.Position memory pos = positionMgr.getPosition(positionId);
+
+        console.log("State:", _getStateName(pos.state));
+        console.log("Has pending close request:", isPending);
+
+        if (isPending) {
+            PositionManager.PendingCloseRequest memory request =
+                positionMgr.getPendingCloseRequest(positionId);
+
+            uint256 age = block.timestamp - request.requestTime;
+            console.log("\nPending Details:");
+            console.log("  Request time:", request.requestTime);
+            console.log("  Age:", age, "seconds");
+            console.log("  Deadline:", request.deadline);
+
+            if (block.timestamp > request.deadline) {
+                console.log("  Status: DEADLINE PASSED");
+            } else {
+                console.log("  Status: Active");
+            }
+        }
+    }
+
+    /**
+     * @notice Get state name from state code
+     */
+    function _getStateName(uint8 state) internal pure returns (string memory) {
+        if (state == 1) return "OPEN";
+        if (state == 2) return "CLOSING";
+        if (state == 3) return "CLOSED";
+        if (state == 4) return "CANCELLED";
+        if (state == 5) return "WON";
+        if (state == 6) return "LOST";
+        if (state == 7) return "LIQUIDATED";
+        if (state == 8) return "PENDING_CLOSE";
+        return "UNKNOWN";
+    }
+
+    // ========================================================================
+    // ADVANCED PENDING CLOSE FUNCTIONS
+    // ========================================================================
+
+    /**
+     * @notice Get pending close statistics
+     */
+    function getPendingCloseStats() public view {
+        console.log("\n=== Pending Close Statistics ===");
+
+        uint256 totalPending = positionMgr.getPendingCloseCount();
+        console.log("Total Pending:", totalPending);
+
+        if (totalPending == 0) {
+            console.log("No pending positions");
+            return;
+        }
+
+        // Get all pending positions
+        (
+            uint64[] memory positionIds,
+            PositionManager.PendingCloseRequest[] memory requests,
+            PositionLib.Position[] memory positions
+        ) = positionMgr.getPendingClosePositionsBatch(0, totalPending > 50 ? 50 : totalPending);
+
+        // Calculate statistics
+        uint256 longCount = 0;
+        uint256 shortCount = 0;
+        uint256 totalCollateral = 0;
+        uint256 totalPositionSize = 0;
+        uint256 oldestAge = 0;
+        uint256 newestAge = type(uint256).max;
+        uint256 expiredCount = 0;
+
+        for (uint256 i = 0; i < positionIds.length; i++) {
+            if (positions[i].direction == 1) {
+                longCount++;
+            } else {
+                shortCount++;
+            }
+
+            totalCollateral += positions[i].amount;
+            totalPositionSize += positions[i].positionSize;
+
+            uint256 age = block.timestamp - requests[i].requestTime;
+            if (age > oldestAge) oldestAge = age;
+            if (age < newestAge) newestAge = age;
+
+            if (block.timestamp > requests[i].deadline) {
+                expiredCount++;
+            }
+        }
+
+        console.log("\nBreakdown:");
+        console.log("  LONG positions:", longCount);
+        console.log("  SHORT positions:", shortCount);
+        console.log("  Total collateral:", totalCollateral);
+        console.log("  Total position size:", totalPositionSize);
+        console.log("  Oldest age:", oldestAge, "seconds");
+        console.log("  Newest age:", newestAge == type(uint256).max ? 0 : newestAge, "seconds");
+        console.log("  Expired deadlines:", expiredCount);
+
+        if (expiredCount > 0) {
+            console.log("\nWARNING:", expiredCount, "positions have expired deadlines!");
+        }
+    }
+
+    /**
+     * @notice Get pending positions older than specified age
+     * @param maxAgeSeconds Maximum age in seconds
+     */
+    function getPendingOlderThan(uint256 maxAgeSeconds) public view {
+        console.log("\n=== Pending Positions Older Than", maxAgeSeconds, "seconds ===");
+
+        uint256 totalPending = positionMgr.getPendingCloseCount();
+        if (totalPending == 0) {
+            console.log("No pending positions");
+            return;
+        }
+
+        (
+            uint64[] memory positionIds,
+            PositionManager.PendingCloseRequest[] memory requests,
+            PositionLib.Position[] memory positions
+        ) = positionMgr.getPendingClosePositionsBatch(0, totalPending > 50 ? 50 : totalPending);
+
+        uint256 oldCount = 0;
+        console.log("");
+        for (uint256 i = 0; i < positionIds.length; i++) {
+            uint256 age = block.timestamp - requests[i].requestTime;
+            if (age > maxAgeSeconds) {
+                console.log("Position ID:", positionIds[i]);
+                console.log("  Age (seconds):", age);
+                console.log("  User:", positions[i].user);
+                console.log("  Direction:", positions[i].direction == 1 ? "LONG" : "SHORT");
+                console.log("  Amount:", positions[i].amount);
+                oldCount++;
+            }
+        }
+
+        console.log("\nTotal old positions:", oldCount);
+    }
+
+    /**
+     * @notice Process pending closes with detailed logging
+     * @param maxPositions Maximum positions to process
+     */
+    function processPendingClosePositionsVerbose(uint256 maxPositions) public {
+        console.log("\n=== Verbose Process Pending Close ===");
+        console.log("Max Positions:", maxPositions);
+        console.log("Timestamp:", block.timestamp);
+
+        uint256 countBefore = positionMgr.getPendingCloseCount();
+        console.log("Pending before:", countBefore);
+
+        if (countBefore == 0) {
+            console.log("No pending positions to process");
+            return;
+        }
+
+        // Get positions before processing
+        (uint64[] memory positionIds, PositionManager.PendingCloseRequest[] memory requests,) =
+            positionMgr.getPendingClosePositionsBatch(0, maxPositions);
+
+        console.log("\nProcessing positions:");
+        for (uint256 i = 0; i < positionIds.length; i++) {
+            uint256 age = block.timestamp - requests[i].requestTime;
+            console.log("  Position ID:", positionIds[i]);
+            console.log("    Age (seconds):", age);
+        }
+
+        vm.startBroadcast(deployer);
+        positionMgr.processPendingClosePositions(maxPositions);
+        vm.stopBroadcast();
+
+        uint256 countAfter = positionMgr.getPendingCloseCount();
+        uint256 processed = countBefore > countAfter ? countBefore - countAfter : 0;
+
+        console.log("\n[OK] Processing complete");
+        console.log("Successfully processed:", processed);
+        console.log("Failed/Still pending:", countAfter);
+        console.log("Success rate:", (processed * 100) / countBefore, "%");
+    }
+
+    /**
+     * @notice Batch cancel multiple pending closes
+     * @param positionIds Array of position IDs to cancel
+     */
+    function batchCancelPendingClose(uint64[] memory positionIds) public {
+        console.log("\n=== Batch Cancel Pending Close ===");
+        console.log("Positions to cancel:", positionIds.length);
+
+        vm.startBroadcast(deployer);
+
+        uint256 successCount = 0;
+        uint256 failCount = 0;
+
+        for (uint256 i = 0; i < positionIds.length; i++) {
+            try positionMgr.cancelPendingClose(positionIds[i]) {
+                console.log("[OK] Cancelled position", positionIds[i]);
+                successCount++;
+            } catch {
+                console.log("[FAIL] Failed to cancel position", positionIds[i]);
+                failCount++;
+            }
+        }
+
+        vm.stopBroadcast();
+
+        console.log("\nResults:");
+        console.log("  Success:", successCount);
+        console.log("  Failed:", failCount);
+    }
+
+    /**
+     * @notice Get pending positions grouped by user
+     */
+    function getPendingByUser() public view {
+        console.log("\n=== Pending Positions Grouped By User ===");
+
+        uint256 totalPending = positionMgr.getPendingCloseCount();
+        if (totalPending == 0) {
+            console.log("No pending positions");
+            return;
+        }
+
+        (uint64[] memory positionIds,, PositionLib.Position[] memory positions) =
+            positionMgr.getPendingClosePositionsBatch(0, totalPending > 50 ? 50 : totalPending);
+
+        // Simple grouping (up to 20 unique users)
+        address[] memory users = new address[](positionIds.length);
+        uint256[] memory counts = new uint256[](positionIds.length);
+        uint256 uniqueUsers = 0;
+
+        for (uint256 i = 0; i < positionIds.length; i++) {
+            address user = positions[i].user;
+            bool found = false;
+
+            for (uint256 j = 0; j < uniqueUsers; j++) {
+                if (users[j] == user) {
+                    counts[j]++;
+                    found = true;
+                    break;
+                }
+            }
+
+            if (!found && uniqueUsers < positionIds.length) {
+                users[uniqueUsers] = user;
+                counts[uniqueUsers] = 1;
+                uniqueUsers++;
+            }
+        }
+
+        console.log("\nUnique users with pending positions:", uniqueUsers);
+        console.log("");
+        for (uint256 i = 0; i < uniqueUsers; i++) {
+            console.log("User:", users[i]);
+            console.log("  Pending positions:", counts[i]);
+        }
+    }
+
+    /**
+     * @notice Health check for pending close system
+     */
+    function healthCheckPendingClose() public view {
+        console.log("\n===========================================");
+        console.log("PENDING CLOSE SYSTEM HEALTH CHECK");
+        console.log("===========================================");
+        console.log("Timestamp:", block.timestamp);
+        console.log("");
+
+        // Check 1: Pending count
+        uint256 totalPending = positionMgr.getPendingCloseCount();
+        console.log("1. Pending Count:", totalPending);
+        if (totalPending > 100) {
+            console.log("   WARNING: High pending count (>100)");
+        } else if (totalPending > 50) {
+            console.log("   CAUTION: Elevated pending count (>50)");
+        } else {
+            console.log("   OK");
+        }
+
+        if (totalPending == 0) {
+            console.log("\nSystem healthy - No pending positions");
+            return;
+        }
+
+        // Check 2: Old positions
+        (uint64[] memory positionIds, PositionManager.PendingCloseRequest[] memory requests,) =
+            positionMgr.getPendingClosePositionsBatch(0, totalPending > 50 ? 50 : totalPending);
+
+        uint256 veryOldCount = 0; // > 1 hour
+        uint256 expiredCount = 0;
+        uint256 oldestAge = 0;
+
+        for (uint256 i = 0; i < positionIds.length; i++) {
+            uint256 age = block.timestamp - requests[i].requestTime;
+            if (age > oldestAge) oldestAge = age;
+            if (age > 3600) veryOldCount++; // > 1 hour
+            if (block.timestamp > requests[i].deadline) expiredCount++;
+        }
+
+        console.log("\n2. Age Analysis:");
+        console.log("   Oldest position age (seconds):", oldestAge);
+        console.log("   Oldest position age (minutes):", oldestAge / 60);
+        console.log("   Very old positions (>1h):", veryOldCount);
+        if (veryOldCount > 10) {
+            console.log("   WARNING: Many old positions");
+        } else if (veryOldCount > 0) {
+            console.log("   CAUTION: Some old positions");
+        } else {
+            console.log("   OK");
+        }
+
+        console.log("\n3. Expired Deadlines:", expiredCount);
+        if (expiredCount > 20) {
+            console.log("   WARNING: Many expired deadlines");
+        } else if (expiredCount > 0) {
+            console.log("   CAUTION: Some expired deadlines");
+        } else {
+            console.log("   OK");
+        }
+
+        // Check 4: System status
+        console.log("\n4. Contract Status:");
+        console.log("   Paused:", positionMgr.paused());
+        console.log("   Settlement Engine:", positionMgr.settlementEngine());
+        console.log("   Vault Manager:", positionMgr.vaultManager());
+
+        // Overall health
+        console.log("\n===========================================");
+        if (totalPending > 100 || veryOldCount > 10 || expiredCount > 20) {
+            console.log("Overall Health: UNHEALTHY - Action Required");
+        } else if (totalPending > 50 || veryOldCount > 0 || expiredCount > 0) {
+            console.log("Overall Health: WARNING - Monitor Closely");
+        } else {
+            console.log("Overall Health: HEALTHY");
+        }
+        console.log("===========================================");
+    }
+
+    /**
+     * @notice Export pending positions to console (for logging/monitoring)
+     */
+    function exportPendingPositionsJSON() public view {
+        console.log("\n=== Export Pending Positions (JSON Format) ===");
+
+        uint256 totalPending = positionMgr.getPendingCloseCount();
+        if (totalPending == 0) {
+            console.log('{"pendingPositions": [], "count": 0}');
+            return;
+        }
+
+        (
+            uint64[] memory positionIds,
+            PositionManager.PendingCloseRequest[] memory requests,
+            PositionLib.Position[] memory positions
+        ) = positionMgr.getPendingClosePositionsBatch(0, totalPending > 20 ? 20 : totalPending);
+
+        console.log("{");
+        console.log('  "timestamp":', block.timestamp, ",");
+        console.log('  "count":', positionIds.length, ",");
+        console.log('  "positions": [');
+
+        for (uint256 i = 0; i < positionIds.length; i++) {
+            console.log("    {");
+            console.log('      "positionId":', positionIds[i], ",");
+            console.log('      "user": "', vm.toString(positions[i].user), '",');
+            console.log('      "projectToken": "', vm.toString(positions[i].projectToken), '",');
+            console.log('      "amount":', positions[i].amount, ",");
+            console.log('      "leverage":', positions[i].leverage, ",");
+            console.log(
+                '      "direction": "', positions[i].direction == 1 ? "LONG" : "SHORT", '",'
+            );
+            console.log('      "openPrice":', positions[i].openPrice, ",");
+            console.log('      "requestTime":', requests[i].requestTime, ",");
+            console.log('      "age":', block.timestamp - requests[i].requestTime, ",");
+            console.log('      "deadline":', requests[i].deadline);
+            console.log(i < positionIds.length - 1 ? "    }," : "    }");
+        }
+
+        console.log("  ]");
+        console.log("}");
+    }
+
+    /**
+     * @notice Process pending closes and retry until queue is empty or max iterations
+     * @param batchSize Batch size per iteration
+     * @param maxIterations Maximum iterations
+     */
+    function processAllPendingWithRetry(uint256 batchSize, uint256 maxIterations) public {
+        console.log("\n=== Process All Pending With Retry ===");
+        console.log("Batch size:", batchSize);
+        console.log("Max iterations:", maxIterations);
+
+        vm.startBroadcast(deployer);
+
+        uint256 iteration = 0;
+        uint256 totalProcessed = 0;
+
+        while (iteration < maxIterations) {
+            uint256 countBefore = positionMgr.getPendingCloseCount();
+
+            if (countBefore == 0) {
+                console.log("\n[OK] Queue empty after iterations:", iteration);
+                break;
+            }
+
+            console.log("\nIteration:", iteration + 1);
+            console.log("  Pending:", countBefore);
+
+            positionMgr.processPendingClosePositions(batchSize);
+
+            uint256 countAfter = positionMgr.getPendingCloseCount();
+            uint256 processed = countBefore > countAfter ? countBefore - countAfter : 0;
+            totalProcessed += processed;
+
+            console.log("  Processed:", processed);
+            console.log("  Remaining:", countAfter);
+
+            if (processed == 0) {
+                console.log("  No progress - stopping (prices may still be stale)");
+                break;
+            }
+
+            iteration++;
+        }
+
+        vm.stopBroadcast();
+
+        console.log("\n=== Summary ===");
+        console.log("Total iterations:", iteration);
+        console.log("Total processed:", totalProcessed);
+        console.log("Final pending count:", positionMgr.getPendingCloseCount());
+    }
 }

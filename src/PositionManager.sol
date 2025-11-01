@@ -64,13 +64,42 @@ contract PositionManager is
     /// @notice Minimum time a position must be held before closing (configurable)
     uint256 public minPositionHoldTime;
 
+    /// @notice Pending close reason enum
+    enum PendingCloseReason {
+        NONE, // 0 - Default/not set
+        PRICE_STALE, // 1 - Oracle price is stale
+        PRICE_NOT_ACCEPTABLE, // 2 - Price doesn't meet maxAcceptablePrice
+        INVALID_PRICE, // 3 - Price is invalid (zero or negative)
+        SETTLEMENT_ENGINE_NOT_SET, // 4 - Settlement engine address not set
+        CANCELLED_BY_ADMIN, // 5 - Admin cancelled the pending close
+        ORACLE_ERROR // 6 - Oracle call failed
+
+    }
+
+    /// @notice Pending close request data
+    struct PendingCloseRequest {
+        uint64 positionId;
+        uint256 requestTime;
+        uint256 deadline;
+        uint256 maxAcceptablePrice;
+    }
+
+    /// @notice Mapping from positionId to pending close request
+    mapping(uint64 => PendingCloseRequest) public pendingCloseRequests;
+
+    /// @notice Array of pending close position IDs
+    uint64[] public pendingClosePositionIds;
+
+    /// @notice Mapping to track if position is in pending array
+    mapping(uint64 => bool) public isPendingClose;
+
     // ========================================================================
     // STORAGE GAP (for future upgrades)
     // ========================================================================
 
     /// @dev Storage gap to allow for new variables in future versions
-    /// @notice Currently using 8 storage slots, reserving 42 slots for future use
-    uint256[42] private __gap;
+    /// @notice Currently using 12 storage slots, reserving 38 slots for future use
+    uint256[38] private __gap;
 
     // ========================================================================
     // EVENTS
@@ -128,6 +157,17 @@ contract PositionManager is
         uint256 timestamp
     );
 
+    event PositionPendingClose(
+        uint64 indexed positionId,
+        address indexed user,
+        uint256 requestTime,
+        uint256 deadline,
+        uint256 maxAcceptablePrice,
+        PendingCloseReason reason
+    );
+
+    event PendingCloseProcessed(uint64 indexed positionId, bool success, PendingCloseReason reason);
+
     // ========================================================================
     // ERRORS
     // ========================================================================
@@ -155,6 +195,8 @@ contract PositionManager is
     error DirectTransferNotAllowed();
 
     error NativeTokenNotAllowed();
+    error NoPendingCloseRequest();
+    error TooManyPendingCloseRequests();
 
     // ========================================================================
     // CONSTRUCTOR / INITIALIZER
@@ -390,36 +432,45 @@ contract PositionManager is
             revert PositionClosedTooEarly();
         }
 
-        // Get close price from Blocksense Oracle via SettlementEngine
+        // Try to get close price from Blocksense Oracle via SettlementEngine
         if (settlementEngine == address(0)) revert InvalidAddress();
+
         // Use deadline as maxAge for price validation
         uint256 maxAge = deadline > block.timestamp ? deadline - block.timestamp : 60;
-        (uint256 closePrice, uint256 pricePublishTime) =
-            ISettlementEngine(settlementEngine).getSettlementPrice(pos.projectToken, maxAge);
-        if (closePrice == 0) revert InvalidPrice();
 
-        // Check maxAcceptablePrice if specified
-        if (maxAcceptablePrice > 0) {
-            if (pos.direction == PositionLib.BET_DIRECTION_LONG) {
-                // LONG: User wants to sell, so limit min price
-                if (closePrice < maxAcceptablePrice) {
-                    revert SlippageExceeded();
-                }
-            } else {
-                // SHORT: User wants to buy back, so limit max price
-                if (closePrice > maxAcceptablePrice) {
-                    revert SlippageExceeded();
+        // Try to get price - if stale, move to pending instead of reverting
+        try ISettlementEngine(settlementEngine).getSettlementPrice(pos.projectToken, maxAge)
+        returns (uint256 closePrice, uint256 pricePublishTime) {
+            if (closePrice == 0) revert InvalidPrice();
+
+            // Check maxAcceptablePrice if specified
+            if (maxAcceptablePrice > 0) {
+                if (pos.direction == PositionLib.BET_DIRECTION_LONG) {
+                    // LONG: User wants to sell, so limit min price
+                    if (closePrice < maxAcceptablePrice) {
+                        revert SlippageExceeded();
+                    }
+                } else {
+                    // SHORT: User wants to buy back, so limit max price
+                    if (closePrice > maxAcceptablePrice) {
+                        revert SlippageExceeded();
+                    }
                 }
             }
-        }
 
-        // Check liquidation
-        if (PositionLib.isLiquidated(pos, closePrice)) {
-            revert PositionAlreadyLiquidated();
-        }
+            // Check liquidation
+            if (PositionLib.isLiquidated(pos, closePrice)) {
+                revert PositionAlreadyLiquidated();
+            }
 
-        // Process settlement
-        _processSettlement(positionId, closePrice, false, pricePublishTime);
+            // Process settlement immediately
+            _processSettlement(positionId, closePrice, false, pricePublishTime);
+        } catch {
+            // Price is stale or unavailable - move to pending close
+            _addPendingCloseRequest(
+                positionId, deadline, maxAcceptablePrice, PendingCloseReason.PRICE_STALE
+            );
+        }
     }
 
     /**
@@ -579,6 +630,214 @@ contract PositionManager is
 
         // Process settlement
         _processSettlement(positionId, closePrice, isLiquidation, pricePublishTime);
+    }
+
+    // ========================================================================
+    // PENDING CLOSE FUNCTIONS
+    // ========================================================================
+
+    /**
+     * @notice Add position to pending close queue
+     * @param positionId Position ID
+     * @param deadline Original deadline
+     * @param maxAcceptablePrice Original max acceptable price
+     * @param reason Reason for pending
+     */
+    function _addPendingCloseRequest(
+        uint64 positionId,
+        uint256 deadline,
+        uint256 maxAcceptablePrice,
+        PendingCloseReason reason
+    ) internal {
+        PositionLib.Position storage pos = positions[positionId];
+
+        // Update position state
+        pos.state = PositionLib.POSITION_STATE_PENDING_CLOSE;
+        pos.lastModifiedTimestamp = block.timestamp;
+
+        // Add to pending requests if not already there
+        if (!isPendingClose[positionId]) {
+            pendingCloseRequests[positionId] = PendingCloseRequest({
+                positionId: positionId,
+                requestTime: block.timestamp,
+                deadline: deadline,
+                maxAcceptablePrice: maxAcceptablePrice
+            });
+
+            pendingClosePositionIds.push(positionId);
+            isPendingClose[positionId] = true;
+
+            emit PositionPendingClose(
+                positionId, pos.user, block.timestamp, deadline, maxAcceptablePrice, reason
+            );
+        }
+    }
+
+    /**
+     * @notice Remove position from pending close queue
+     * @param positionId Position ID
+     */
+    function _removePendingCloseRequest(uint64 positionId) internal {
+        if (!isPendingClose[positionId]) return;
+
+        // Remove from mapping
+        delete pendingCloseRequests[positionId];
+        isPendingClose[positionId] = false;
+
+        // Remove from array (find and swap with last element)
+        uint256 length = pendingClosePositionIds.length;
+        for (uint256 i = 0; i < length; i++) {
+            if (pendingClosePositionIds[i] == positionId) {
+                pendingClosePositionIds[i] = pendingClosePositionIds[length - 1];
+                pendingClosePositionIds.pop();
+                break;
+            }
+        }
+    }
+
+    /**
+     * @notice Admin function to process pending close positions
+     * @param maxPositions Maximum number of positions to process in this batch
+     * @dev Should be called by backend cron task
+     */
+    function processPendingClosePositions(uint256 maxPositions) external nonReentrant onlyAdmin {
+        uint256 processed = 0;
+        uint256 i = 0;
+
+        while (i < pendingClosePositionIds.length && processed < maxPositions) {
+            uint64 positionId = pendingClosePositionIds[i];
+
+            // Process single pending close
+            bool success = _processSinglePendingClose(positionId);
+
+            if (success) {
+                // Don't increment i since we removed an element
+                processed++;
+            } else {
+                // Move to next position
+                i++;
+            }
+        }
+    }
+
+    /**
+     * @notice Process a single pending close position
+     * @param positionId Position ID to process
+     * @return success True if position was successfully closed
+     */
+    function _processSinglePendingClose(uint64 positionId) internal returns (bool success) {
+        PendingCloseRequest memory request = pendingCloseRequests[positionId];
+        PositionLib.Position storage pos = positions[positionId];
+
+        // Skip if position no longer in pending state
+        if (pos.state != PositionLib.POSITION_STATE_PENDING_CLOSE) {
+            _removePendingCloseRequest(positionId);
+            return false;
+        }
+
+        // Check settlement engine is set
+        if (settlementEngine == address(0)) {
+            emit PendingCloseProcessed(
+                positionId, false, PendingCloseReason.SETTLEMENT_ENGINE_NOT_SET
+            );
+            return false;
+        }
+
+        // Try to get price and close position
+        (bool closed, PendingCloseReason reason) =
+            _tryClosePendingPosition(positionId, request, pos);
+
+        emit PendingCloseProcessed(positionId, closed, reason);
+        return closed;
+    }
+
+    /**
+     * @notice Try to close a pending position with current price
+     * @param positionId Position ID
+     * @param request Pending close request data
+     * @param pos Position storage reference
+     * @return success True if successfully closed
+     * @return reason Reason code for success/failure
+     */
+    function _tryClosePendingPosition(
+        uint64 positionId,
+        PendingCloseRequest memory request,
+        PositionLib.Position storage pos
+    ) internal returns (bool success, PendingCloseReason reason) {
+        // Use a reasonable maxAge for pending closes (120 seconds)
+        uint256 maxAge = 120;
+
+        // Try to get settlement price
+        try ISettlementEngine(settlementEngine).getSettlementPrice(pos.projectToken, maxAge)
+        returns (uint256 closePrice, uint256 pricePublishTime) {
+            // Validate price
+            if (closePrice == 0) {
+                return (false, PendingCloseReason.INVALID_PRICE);
+            }
+
+            // Check if price is acceptable
+            if (!_isPriceAcceptable(closePrice, request.maxAcceptablePrice, pos.direction)) {
+                return (false, PendingCloseReason.PRICE_NOT_ACCEPTABLE);
+            }
+
+            // Close position (liquidation or normal)
+            bool isLiquidation = PositionLib.isLiquidated(pos, closePrice);
+            _processSettlement(positionId, closePrice, isLiquidation, pricePublishTime);
+            _removePendingCloseRequest(positionId);
+
+            return (true, PendingCloseReason.NONE);
+        } catch {
+            return (false, PendingCloseReason.PRICE_STALE);
+        }
+    }
+
+    /**
+     * @notice Check if price meets maxAcceptablePrice criteria
+     * @param price Current price
+     * @param maxAcceptablePrice Max acceptable price from request (0 = no limit)
+     * @param direction Position direction (LONG or SHORT)
+     * @return acceptable True if price is acceptable
+     */
+    function _isPriceAcceptable(uint256 price, uint256 maxAcceptablePrice, uint8 direction)
+        internal
+        pure
+        returns (bool acceptable)
+    {
+        // No limit specified
+        if (maxAcceptablePrice == 0) {
+            return true;
+        }
+
+        // LONG: price must be >= maxAcceptablePrice
+        if (direction == PositionLib.BET_DIRECTION_LONG) {
+            return price >= maxAcceptablePrice;
+        }
+
+        // SHORT: price must be <= maxAcceptablePrice
+        return price <= maxAcceptablePrice;
+    }
+
+    /**
+     * @notice Admin function to cancel a pending close request
+     * @param positionId Position ID
+     * @dev Reverts position back to OPEN state
+     */
+    function cancelPendingClose(uint64 positionId) external nonReentrant onlyAdmin {
+        PositionLib.Position storage pos = positions[positionId];
+
+        if (pos.user == address(0)) revert PositionNotFound();
+        if (pos.state != PositionLib.POSITION_STATE_PENDING_CLOSE) {
+            revert NoPendingCloseRequest();
+        }
+
+        // Revert to OPEN state
+        pos.state = PositionLib.POSITION_STATE_OPEN;
+        pos.lastModifiedTimestamp = block.timestamp;
+
+        // Remove from pending queue
+        _removePendingCloseRequest(positionId);
+
+        emit PendingCloseProcessed(positionId, false, PendingCloseReason.CANCELLED_BY_ADMIN);
     }
 
     // ========================================================================
@@ -862,5 +1121,86 @@ contract PositionManager is
      */
     function version() external pure returns (string memory) {
         return "1.0.0-position-manager";
+    }
+
+    /**
+     * @notice Get all pending close position IDs
+     * @return Array of position IDs waiting to be closed
+     */
+    function getPendingClosePositionIds() external view returns (uint64[] memory) {
+        return pendingClosePositionIds;
+    }
+
+    /**
+     * @notice Get pending close request details
+     * @param positionId Position ID
+     * @return request Pending close request data
+     */
+    function getPendingCloseRequest(uint64 positionId)
+        external
+        view
+        returns (PendingCloseRequest memory)
+    {
+        if (!isPendingClose[positionId]) revert NoPendingCloseRequest();
+        return pendingCloseRequests[positionId];
+    }
+
+    /**
+     * @notice Get count of pending close positions
+     * @return count Number of positions waiting to be closed
+     */
+    function getPendingCloseCount() external view returns (uint256) {
+        return pendingClosePositionIds.length;
+    }
+
+    /**
+     * @notice Check if position has a pending close request
+     * @param positionId Position ID
+     * @return hasPending True if position has pending close request
+     */
+    function hasPendingCloseRequest(uint64 positionId) external view returns (bool) {
+        return isPendingClose[positionId];
+    }
+
+    /**
+     * @notice Get batch of pending close positions with full details
+     * @param offset Starting index
+     * @param limit Maximum number of positions to return
+     * @return positionIds Array of position IDs
+     * @return requests Array of pending requests
+     * @return positionsData Array of position data
+     */
+    function getPendingClosePositionsBatch(uint256 offset, uint256 limit)
+        external
+        view
+        returns (
+            uint64[] memory positionIds,
+            PendingCloseRequest[] memory requests,
+            PositionLib.Position[] memory positionsData
+        )
+    {
+        uint256 total = pendingClosePositionIds.length;
+        if (offset >= total) {
+            return (new uint64[](0), new PendingCloseRequest[](0), new PositionLib.Position[](0));
+        }
+
+        uint256 end = offset + limit;
+        if (end > total) {
+            end = total;
+        }
+
+        uint256 resultLength = end - offset;
+        positionIds = new uint64[](resultLength);
+        requests = new PendingCloseRequest[](resultLength);
+        positionsData = new PositionLib.Position[](resultLength);
+
+        for (uint256 i = 0; i < resultLength; i++) {
+            uint64 posId = pendingClosePositionIds[offset + i];
+            positionIds[i] = posId;
+            requests[i] = pendingCloseRequests[posId];
+            positionsData[i] = positions[posId];
+        }
+
+        return (positionIds, requests, positionsData);
     }
 }
