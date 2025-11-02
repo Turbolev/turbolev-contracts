@@ -306,13 +306,14 @@ contract InteractPositionManager is DeployHelper {
     /**
      * @notice Admin force close position
      */
-    function adminClosePosition(uint64 positionId, bool isLiquidation) public {
+    function adminClosePosition(uint64 positionId, uint256 deadline, bool isLiquidation) public {
         console.log("\n=== Admin Close Position ===");
         console.log("Position ID:", positionId);
+        console.log("Deadline:", deadline);
         console.log("Is Liquidation:", isLiquidation);
 
         vm.startBroadcast(deployer);
-        positionMgr.adminClosePosition(positionId, isLiquidation);
+        positionMgr.adminClosePosition(positionId, deadline, isLiquidation);
         console.log("Position closed by admin successfully");
         vm.stopBroadcast();
     }
@@ -404,9 +405,10 @@ contract InteractPositionManager is DeployHelper {
     /**
      * @notice Process pending close positions (admin only)
      */
-    function processPendingClosePositions(uint256 maxPositions) public {
+    function processPendingClosePositions(uint256 maxPositions, uint256 maxAge) public {
         console.log("\n=== Process Pending Close Positions ===");
         console.log("Max Positions:", maxPositions);
+        console.log("Max Age:", maxAge);
 
         uint256 countBefore = positionMgr.getPendingCloseCount();
         console.log("Pending count before:", countBefore);
@@ -417,7 +419,7 @@ contract InteractPositionManager is DeployHelper {
         }
 
         vm.startBroadcast(deployer);
-        positionMgr.processPendingClosePositions(maxPositions);
+        positionMgr.processPendingClosePositions(maxPositions, maxAge);
         vm.stopBroadcast();
 
         uint256 countAfter = positionMgr.getPendingCloseCount();
@@ -646,9 +648,10 @@ contract InteractPositionManager is DeployHelper {
      * @notice Process pending closes with detailed logging
      * @param maxPositions Maximum positions to process
      */
-    function processPendingClosePositionsVerbose(uint256 maxPositions) public {
+    function processPendingClosePositionsVerbose(uint256 maxPositions, uint256 maxAge) public {
         console.log("\n=== Verbose Process Pending Close ===");
         console.log("Max Positions:", maxPositions);
+        console.log("Max Age:", maxAge);
         console.log("Timestamp:", block.timestamp);
 
         uint256 countBefore = positionMgr.getPendingCloseCount();
@@ -671,7 +674,7 @@ contract InteractPositionManager is DeployHelper {
         }
 
         vm.startBroadcast(deployer);
-        positionMgr.processPendingClosePositions(maxPositions);
+        positionMgr.processPendingClosePositions(maxPositions, maxAge);
         vm.stopBroadcast();
 
         uint256 countAfter = positionMgr.getPendingCloseCount();
@@ -889,11 +892,13 @@ contract InteractPositionManager is DeployHelper {
      * @param batchSize Batch size per iteration
      * @param maxIterations Maximum iterations
      */
-    function processAllPendingWithRetry(uint256 batchSize, uint256 maxIterations) public {
+    function processAllPendingWithRetry(uint256 batchSize, uint256 maxIterations, uint256 maxAge)
+        public
+    {
         console.log("\n=== Process All Pending With Retry ===");
         console.log("Batch size:", batchSize);
         console.log("Max iterations:", maxIterations);
-
+        console.log("Max Age:", maxAge);
         vm.startBroadcast(deployer);
 
         uint256 iteration = 0;
@@ -910,7 +915,7 @@ contract InteractPositionManager is DeployHelper {
             console.log("\nIteration:", iteration + 1);
             console.log("  Pending:", countBefore);
 
-            positionMgr.processPendingClosePositions(batchSize);
+            positionMgr.processPendingClosePositions(batchSize, maxAge);
 
             uint256 countAfter = positionMgr.getPendingCloseCount();
             uint256 processed = countBefore > countAfter ? countBefore - countAfter : 0;

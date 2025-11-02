@@ -598,7 +598,7 @@ contract PositionManager is
      * @param positionId Position ID
      * @param isLiquidation True if this is a liquidation
      */
-    function adminClosePosition(uint64 positionId, bool isLiquidation)
+    function adminClosePosition(uint64 positionId, uint256 deadline, bool isLiquidation)
         external
         nonReentrant
         onlyAdmin
@@ -616,7 +616,7 @@ contract PositionManager is
         // Get close price from Blocksense Oracle via SettlementEngine
         if (settlementEngine == address(0)) revert InvalidAddress();
         // Use default maxAge for admin operations
-        uint256 maxAge = 60; // 60 seconds default for admin operations
+        uint256 maxAge = deadline > block.timestamp ? deadline - block.timestamp : 60;
         (uint256 closePrice, uint256 pricePublishTime) =
             ISettlementEngine(settlementEngine).getSettlementPrice(pos.projectToken, maxAge);
         if (closePrice == 0) revert InvalidPrice();
@@ -700,7 +700,11 @@ contract PositionManager is
      * @param maxPositions Maximum number of positions to process in this batch
      * @dev Should be called by backend cron task
      */
-    function processPendingClosePositions(uint256 maxPositions) external nonReentrant onlyAdmin {
+    function processPendingClosePositions(uint256 maxPositions, uint256 maxAge)
+        external
+        nonReentrant
+        onlyAdmin
+    {
         uint256 processed = 0;
         uint256 i = 0;
 
@@ -708,7 +712,7 @@ contract PositionManager is
             uint64 positionId = pendingClosePositionIds[i];
 
             // Process single pending close
-            bool success = _processSinglePendingClose(positionId);
+            bool success = _processSinglePendingClose(positionId, maxAge);
 
             if (success) {
                 // Don't increment i since we removed an element
@@ -725,7 +729,10 @@ contract PositionManager is
      * @param positionId Position ID to process
      * @return success True if position was successfully closed
      */
-    function _processSinglePendingClose(uint64 positionId) internal returns (bool success) {
+    function _processSinglePendingClose(uint64 positionId, uint256 maxAge)
+        internal
+        returns (bool success)
+    {
         PendingCloseRequest memory request = pendingCloseRequests[positionId];
         PositionLib.Position storage pos = positions[positionId];
 
@@ -745,7 +752,7 @@ contract PositionManager is
 
         // Try to get price and close position
         (bool closed, PendingCloseReason reason) =
-            _tryClosePendingPosition(positionId, request, pos);
+            _tryClosePendingPosition(positionId, request, pos, maxAge);
 
         emit PendingCloseProcessed(positionId, closed, reason);
         return closed;
@@ -762,11 +769,9 @@ contract PositionManager is
     function _tryClosePendingPosition(
         uint64 positionId,
         PendingCloseRequest memory request,
-        PositionLib.Position storage pos
+        PositionLib.Position storage pos,
+        uint256 maxAge
     ) internal returns (bool success, PendingCloseReason reason) {
-        // Use a reasonable maxAge for pending closes (120 seconds)
-        uint256 maxAge = 120;
-
         // Try to get settlement price
         try ISettlementEngine(settlementEngine).getSettlementPrice(pos.projectToken, maxAge)
         returns (uint256 closePrice, uint256 pricePublishTime) {
