@@ -87,11 +87,11 @@ contract PendingCloseUnitTest is Test {
         // Non-admin cannot call
         vm.prank(user1);
         vm.expectRevert();
-        positionManager.processPendingClosePositions(10);
+        positionManager.processPendingClosePositions(10, 3600);
 
         // Admin can call (but nothing to process)
         vm.prank(admin);
-        positionManager.processPendingClosePositions(10);
+        positionManager.processPendingClosePositions(10, 3600);
     }
 
     function test_CancelPendingClose_OnlyAdmin() public {
@@ -132,7 +132,7 @@ contract PendingCloseUnitTest is Test {
     function test_GasEstimate_ProcessEmptyQueue() public {
         vm.prank(admin);
         uint256 gasBefore = gasleft();
-        positionManager.processPendingClosePositions(10);
+        positionManager.processPendingClosePositions(10, 3600);
         uint256 gasUsed = gasBefore - gasleft();
 
         console.log("Gas used for empty queue:", gasUsed);

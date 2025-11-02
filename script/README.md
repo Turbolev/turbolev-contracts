@@ -141,7 +141,7 @@ forge script script/DeploySettlementEngine.s.sol:DeploySettlementEngine \
 #### PositionManager
 
 ```bash
-forge script script/DeployPositionManager.s.sol:DeployPositionManager \
+forge script script/DeployPositionManager.s.sol:DeployPositionManager\
   --rpc-url $RPC_URL --broadcast -vvv
 ```
 

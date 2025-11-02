@@ -8,18 +8,6 @@ pragma solidity ^0.8.22;
  */
 interface IBlocksenseOracle {
     /**
-     * @notice Get price with validation (legacy)
-     * @param base Base asset address (e.g., WETH)
-     * @param quote Quote asset address (e.g., USDC)
-     * @return price Price in int256 format (scaled to 18 decimals)
-     * @return updatedAt When price was last updated
-     */
-    function getPrice(address base, address quote)
-        external
-        view
-        returns (int256 price, uint256 updatedAt);
-
-    /**
      * @notice Get price with validation using CLAggregatorAdapter
      * @param adapter CLAggregatorAdapter address for the specific feed
      * @return price Price in int256 format (scaled to 18 decimals)
