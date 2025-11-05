@@ -76,6 +76,16 @@ contract PositionManager is
 
     }
 
+    enum PositionClosedBy {
+        USER_REQUESTED, // 0 - User requested close
+        LIQUIDATION, // 1 - Position liquidated
+        TAKE_PROFIT, // 2 - Take profit requested
+        STOP_LOSS, // 3 - Stop loss requested
+        MAX_PROFIT_REACHED, // 4 - Max profit reached
+        PENDING_CLOSE_REQUESTED // 5 - Pending close requested
+
+    }
+
     /// @notice Pending close request data
     struct PendingCloseRequest {
         uint64 positionId;
@@ -128,7 +138,8 @@ contract PositionManager is
         uint256 closePrice,
         int256 pnl,
         uint256 closeTimestamp,
-        uint256 pricePublishTime
+        uint256 pricePublishTime,
+        PositionClosedBy closedBy
     );
 
     event BetLiquidated(
@@ -163,7 +174,8 @@ contract PositionManager is
         uint256 requestTime,
         uint256 deadline,
         uint256 maxAcceptablePrice,
-        PendingCloseReason reason
+        PendingCloseReason reason,
+        PositionClosedBy closedBy
     );
 
     event PendingCloseProcessed(uint64 indexed positionId, bool success, PendingCloseReason reason);
@@ -464,7 +476,9 @@ contract PositionManager is
             }
 
             // Process settlement immediately
-            _processSettlement(positionId, closePrice, false, pricePublishTime);
+            _processSettlement(
+                positionId, closePrice, false, pricePublishTime, PositionClosedBy.USER_REQUESTED
+            );
         } catch {
             // Price is stale or unavailable - move to pending close
             _addPendingCloseRequest(
@@ -598,11 +612,12 @@ contract PositionManager is
      * @param positionId Position ID
      * @param isLiquidation True if this is a liquidation
      */
-    function adminClosePosition(uint64 positionId, uint256 deadline, bool isLiquidation)
-        external
-        nonReentrant
-        onlyAdmin
-    {
+    function adminClosePosition(
+        uint64 positionId,
+        uint256 deadline,
+        bool isLiquidation,
+        PositionClosedBy closedBy
+    ) external nonReentrant onlyAdmin {
         PositionLib.Position storage pos = positions[positionId];
         if (pos.user == address(0)) revert PositionNotFound();
         if (pos.state != PositionLib.POSITION_STATE_OPEN) {
@@ -629,7 +644,7 @@ contract PositionManager is
         }
 
         // Process settlement
-        _processSettlement(positionId, closePrice, isLiquidation, pricePublishTime);
+        _processSettlement(positionId, closePrice, isLiquidation, pricePublishTime, closedBy);
     }
 
     // ========================================================================
@@ -668,7 +683,13 @@ contract PositionManager is
             isPendingClose[positionId] = true;
 
             emit PositionPendingClose(
-                positionId, pos.user, block.timestamp, deadline, maxAcceptablePrice, reason
+                positionId,
+                pos.user,
+                block.timestamp,
+                deadline,
+                maxAcceptablePrice,
+                reason,
+                PositionClosedBy.PENDING_CLOSE_REQUESTED
             );
         }
     }
@@ -787,7 +808,13 @@ contract PositionManager is
 
             // Close position (liquidation or normal)
             bool isLiquidation = PositionLib.isLiquidated(pos, closePrice);
-            _processSettlement(positionId, closePrice, isLiquidation, pricePublishTime);
+            _processSettlement(
+                positionId,
+                closePrice,
+                isLiquidation,
+                pricePublishTime,
+                PositionClosedBy.PENDING_CLOSE_REQUESTED
+            );
             _removePendingCloseRequest(positionId);
 
             return (true, PendingCloseReason.NONE);
@@ -857,7 +884,8 @@ contract PositionManager is
         uint64 positionId,
         uint256 closePrice,
         bool isLiquidation,
-        uint256 pricePublishTime
+        uint256 pricePublishTime,
+        PositionClosedBy closedBy
     ) internal {
         PositionLib.Position storage pos = positions[positionId];
 
@@ -904,7 +932,8 @@ contract PositionManager is
             closePrice,
             pnl,
             block.timestamp,
-            pricePublishTime
+            pricePublishTime,
+            closedBy
         );
     }
 

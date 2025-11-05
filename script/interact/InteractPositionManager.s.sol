@@ -306,14 +306,19 @@ contract InteractPositionManager is DeployHelper {
     /**
      * @notice Admin force close position
      */
-    function adminClosePosition(uint64 positionId, uint256 deadline, bool isLiquidation) public {
+    function adminClosePosition(
+        uint64 positionId,
+        uint256 deadline,
+        bool isLiquidation,
+        PositionManager.PositionClosedBy closedBy
+    ) public {
         console.log("\n=== Admin Close Position ===");
         console.log("Position ID:", positionId);
         console.log("Deadline:", deadline);
         console.log("Is Liquidation:", isLiquidation);
 
         vm.startBroadcast(deployer);
-        positionMgr.adminClosePosition(positionId, deadline, isLiquidation);
+        positionMgr.adminClosePosition(positionId, deadline, isLiquidation, closedBy);
         console.log("Position closed by admin successfully");
         vm.stopBroadcast();
     }
