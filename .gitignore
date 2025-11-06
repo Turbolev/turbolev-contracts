@@ -48,3 +48,6 @@ broadcast/
 deployments/
 
 .claude
+
+# Node scripts
+node_scripts/

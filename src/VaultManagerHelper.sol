@@ -354,4 +354,18 @@ contract VaultManagerHelper {
 
         IAssetVault(vaultAddress).setBlocksenseOracle(blocksenseOracle);
     }
+
+    /**
+     * @notice Set Chainlink feed for a vault
+     * @param tokenAddress Token address
+     * @param chainlinkFeed Chainlink feed address
+     */
+    function setVaultChainlinkFeed(address tokenAddress, address chainlinkFeed)
+        external
+        onlyOwner
+    {
+        address vaultAddress = IVaultManager(vaultManager).getVault(tokenAddress);
+        if (vaultAddress == address(0)) revert VaultNotFound();
+        IAssetVault(vaultAddress).setChainlinkFeed(chainlinkFeed);
+    }
 }

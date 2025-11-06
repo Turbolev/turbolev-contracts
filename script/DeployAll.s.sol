@@ -5,6 +5,7 @@ import "forge-std/Script.sol";
 import "./DeployHelper.s.sol";
 
 import "../src/BlocksenseOracle.sol";
+import "../src/ChainlinkOracle.sol";
 import "../src/SettlementEngine.sol";
 import "../src/PositionManager.sol";
 import "../src/VaultManager.sol";
@@ -19,12 +20,14 @@ import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 contract DeployAll is DeployHelper {
     // Implementations (logic contracts) for upgradeable contracts
     address public blocksenseOracleImpl;
+    address public chainlinkOracleImpl;
     address public settlementEngineImpl;
     address public positionManagerImpl;
     address public vaultManagerImpl;
 
     // Proxies for upgradeable contracts
     address public blocksenseOracleProxy;
+    address public chainlinkOracleProxy;
     address public settlementEngineProxy;
     address public positionManagerProxy;
     address public vaultManagerProxy;
@@ -44,25 +47,28 @@ contract DeployAll is DeployHelper {
         // Step 1: Deploy BlocksenseOracle
         _deployBlocksenseOracle();
 
-        // Step 2: Deploy SettlementEngine
+        // Step 2: Deploy ChainlinkOracle
+        _deployChainlinkOracle();
+
+        // Step 3: Deploy SettlementEngine
         _deploySettlementEngine();
 
-        // Step 3: Deploy PositionManager
+        // Step 4: Deploy PositionManager
         _deployPositionManager();
 
-        // Step 4: Deploy VaultManager
+        // Step 5: Deploy VaultManager
         _deployVaultManager();
 
-        // Step 5: Deploy VaultManagerHelper
+        // Step 6: Deploy VaultManagerHelper
         _deployVaultManagerHelper();
 
-        // Step 6: Setup contract connections
+        // Step 7: Setup contract connections
         _setupConnections();
 
-        // Step 7: Verify deployment
+        // Step 8: Verify deployment
         _verifyDeployment();
 
-        // Step 8: Save addresses
+        // Step 9: Save addresses
         // _saveDeploymentAddresses();
 
         console.log("\n===========================================");
@@ -112,8 +118,42 @@ contract DeployAll is DeployHelper {
         _logDeployment("BlocksenseOracle Implementation", blocksenseOracleImpl);
     }
 
+    function _deployChainlinkOracle() internal {
+        console.log("\nStep 2: Deploying ChainlinkOracle...");
+
+        // Deploy new implementation
+        chainlinkOracleImpl = address(new ChainlinkOracle());
+        console.log("Implementation deployed:", chainlinkOracleImpl);
+
+        // Check if proxy already exists
+        if (_isContractDeployed(chainlinkOracle)) {
+            console.log("Proxy already exists at:", chainlinkOracle);
+            console.log("Upgrading to new implementation...");
+
+            // Upgrade existing proxy to new implementation
+            ChainlinkOracle(chainlinkOracle).upgradeToAndCall(chainlinkOracleImpl, "");
+            console.log("[UPGRADED] ChainlinkOracle");
+        } else {
+            console.log("Deploying new proxy...");
+
+            // Prepare initialization data
+            bytes memory initData = abi.encodeWithSelector(
+                ChainlinkOracle.initialize.selector, blocksenseOracle, ORACLE_MAX_PRICE_AGE
+            );
+
+            // Deploy proxy
+            chainlinkOracleProxy = address(new ERC1967Proxy(chainlinkOracleImpl, initData));
+            chainlinkOracle = payable(chainlinkOracleProxy);
+
+            console.log("[NEW] ChainlinkOracle proxy deployed:", chainlinkOracle);
+        }
+
+        _logDeployment("ChainlinkOracle", chainlinkOracle);
+        _logDeployment("ChainlinkOracle Implementation", chainlinkOracleImpl);
+    }
+
     function _deploySettlementEngine() internal {
-        console.log("\nStep 2: Deploying SettlementEngine...");
+        console.log("\nStep 3: Deploying SettlementEngine...");
 
         // Deploy new implementation
         settlementEngineImpl = address(new SettlementEngine());
@@ -152,7 +192,7 @@ contract DeployAll is DeployHelper {
     }
 
     function _deployPositionManager() internal {
-        console.log("\nStep 3: Deploying PositionManager...");
+        console.log("\nStep 4: Deploying PositionManager...");
 
         // Deploy new implementation
         positionManagerImpl = address(new PositionManager());
@@ -192,7 +232,7 @@ contract DeployAll is DeployHelper {
     }
 
     function _deployVaultManager() internal {
-        console.log("\nStep 4: Deploying VaultManager...");
+        console.log("\nStep 5: Deploying VaultManager...");
 
         // Deploy new implementation
         vaultManagerImpl = address(new VaultManager());
@@ -230,7 +270,7 @@ contract DeployAll is DeployHelper {
             return;
         }
 
-        console.log("\nStep 5: Deploying VaultManagerHelper...");
+        console.log("\nStep 6: Deploying VaultManagerHelper...");
 
         // Deploy VaultManagerHelper (non-upgradeable)
         vaultManagerHelper = payable(address(new VaultManagerHelper(payable(vaultManager))));
@@ -243,17 +283,21 @@ contract DeployAll is DeployHelper {
     // ========================================================================
 
     function _setupConnections() internal {
-        console.log("\nStep 6: Setting up contract connections...");
+        console.log("\nStep 7: Setting up contract connections...");
 
         // BlocksenseOracle: Set in SettlementEngine
         SettlementEngine(settlementEngine).setBlocksenseOracle(blocksenseOracle);
         console.log("Connected BlocksenseOracle to SettlementEngine");
 
+        // ChainlinkOracle: Set in SettlementEngine (for fallback)
+        SettlementEngine(settlementEngine).setChainlinkOracle(chainlinkOracle);
+        console.log("Connected ChainlinkOracle to SettlementEngine");
+
         SettlementEngine(settlementEngine).setVaultManager(vaultManager);
-        console.log("Connected SettlementEngine to VaultManager");
+        console.log("Connected VaultManager to SettlementEngine");
 
         SettlementEngine(settlementEngine).setPositionManager(positionManager);
-        console.log("Connected SettlementEngine to PositionManager");
+        console.log("Connected PositionManager to SettlementEngine");
 
         // SettlementEngine: Set in PositionManager
         PositionManager(payable(positionManager)).setSettlementEngine(settlementEngine);
@@ -285,9 +329,10 @@ contract DeployAll is DeployHelper {
     // ========================================================================
 
     function _verifyDeployment() internal view {
-        console.log("\nStep 7: Verifying deployment...");
+        console.log("\nStep 8: Verifying deployment...");
 
         require(blocksenseOracle != address(0), "BlocksenseOracle not deployed");
+        require(chainlinkOracle != address(0), "ChainlinkOracle not deployed");
         require(settlementEngine != address(0), "SettlementEngine not deployed");
         require(positionManager != address(0), "PositionManager not deployed");
         require(vaultManager != address(0), "VaultManager not deployed");
@@ -295,6 +340,7 @@ contract DeployAll is DeployHelper {
 
         // Verify owner
         require(Ownable(blocksenseOracle).owner() == owner, "Wrong BlocksenseOracle owner");
+        require(Ownable(chainlinkOracle).owner() == owner, "Wrong ChainlinkOracle owner");
         require(Ownable(settlementEngine).owner() == owner, "Wrong SettlementEngine owner");
         require(Ownable(positionManager).owner() == owner, "Wrong PositionManager owner");
         require(Ownable(vaultManager).owner() == owner, "Wrong VaultManager owner");
@@ -302,7 +348,12 @@ contract DeployAll is DeployHelper {
         // Verify connections
         require(
             SettlementEngine(settlementEngine).blocksenseOracle() == blocksenseOracle,
-            "SettlementEngine oracle not set"
+            "SettlementEngine blocksense oracle not set"
+        );
+
+        require(
+            SettlementEngine(settlementEngine).chainlinkOracle() == chainlinkOracle,
+            "SettlementEngine chainlink oracle not set"
         );
 
         require(
@@ -332,12 +383,14 @@ contract DeployAll is DeployHelper {
         console.log("Network Chain ID:", block.chainid);
         console.log("\nCore Contracts:");
         console.log("- BlocksenseOracle:", blocksenseOracle);
+        console.log("- ChainlinkOracle:", chainlinkOracle);
         console.log("- SettlementEngine:", settlementEngine);
         console.log("- PositionManager:", positionManager);
         console.log("- VaultManager:", vaultManager);
         console.log("- VaultManagerHelper:", vaultManagerHelper);
         console.log("\nImplementations:");
         console.log("- BlocksenseOracle Impl:", blocksenseOracleImpl);
+        console.log("- ChainlinkOracle Impl:", chainlinkOracleImpl);
         console.log("- SettlementEngine Impl:", settlementEngineImpl);
         console.log("- PositionManager Impl:", positionManagerImpl);
         console.log("- VaultManager Impl:", vaultManagerImpl);

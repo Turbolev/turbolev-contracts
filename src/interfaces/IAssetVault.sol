@@ -263,10 +263,22 @@ interface IAssetVault {
     function setOracleAdapter(address oracleAdapter) external;
 
     /**
+     * @notice Set Chainlink Feed address (for fallback)
+     * @param chainlinkFeed Chainlink price feed address
+     */
+    function setChainlinkFeed(address chainlinkFeed) external;
+
+    /**
      * @notice Get oracle adapter address for price feed
      * @return adapter CLAggregatorAdapter address
      */
     function oracleAdapter() external view returns (address);
+
+    /**
+     * @notice Get chainlink feed address (for fallback)
+     * @return feed Chainlink price feed address
+     */
+    function chainlinkFeed() external view returns (address);
 
     /**
      * @notice Get blocksense oracle address

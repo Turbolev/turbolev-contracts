@@ -55,6 +55,9 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
     /// @notice CLAggregatorAdapter address for this vault's price feed
     address public oracleAdapter;
 
+    /// @notice Chainlink price feed address (for fallback)
+    address public chainlinkFeed;
+
     /// @notice Vault information
     VaultInfo public vaultInfo;
 
@@ -293,6 +296,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
     event TradingEnabledUpdated(bool enabled);
     event BlocksenseOracleUpdated(address indexed oldOracle, address indexed newOracle);
     event OracleAdapterUpdated(address indexed oldAdapter, address indexed newAdapter);
+    event ChainlinkFeedUpdated(address indexed oldFeed, address indexed newFeed);
 
     event DailyRewardFinalized(
         uint256 indexed day,
@@ -1598,5 +1602,15 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         address oldAdapter = oracleAdapter;
         oracleAdapter = _oracleAdapter;
         emit OracleAdapterUpdated(oldAdapter, _oracleAdapter);
+    }
+
+    /**
+     * @notice Set Chainlink feed address (for fallback)
+     * @param _chainlinkFeed Chainlink price feed address
+     */
+    function setChainlinkFeed(address _chainlinkFeed) external onlyVaultManagerOrHelper {
+        address oldFeed = chainlinkFeed;
+        chainlinkFeed = _chainlinkFeed;
+        emit ChainlinkFeedUpdated(oldFeed, _chainlinkFeed);
     }
 }
