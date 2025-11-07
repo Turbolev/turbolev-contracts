@@ -12,6 +12,7 @@ import "./libraries/PositionLib.sol";
 import "./libraries/AdminAccessControlUpgradeable.sol";
 import "./interfaces/IVaultManager.sol";
 import "./interfaces/ISettlementEngine.sol";
+import "./interfaces/IPriceFeedManager.sol";
 
 /**
  * @title PositionManager
@@ -45,6 +46,9 @@ contract PositionManager is
     /// @notice Vault manager address
     address public vaultManager;
 
+    /// @notice Price feed manager address
+    address public priceFeedManager;
+
     /// @notice Position counter
     uint64 private nextPositionId;
 
@@ -63,6 +67,12 @@ contract PositionManager is
 
     /// @notice Minimum time a position must be held before closing (configurable)
     uint256 public minPositionHoldTime;
+
+    /// @notice Default max age for price validation when deadline is invalid (60 seconds)
+    uint256 private constant DEFAULT_PRICE_MAX_AGE = 60;
+
+    /// @notice Maximum allowed min position hold time (1 hour)
+    uint256 private constant MAX_MIN_POSITION_HOLD_TIME = 3600;
 
     /// @notice Pending close reason enum
     enum PendingCloseReason {
@@ -155,6 +165,7 @@ contract PositionManager is
 
     event SettlementEngineUpdated(address indexed oldAddress, address indexed newAddress);
     event VaultManagerUpdated(address indexed oldAddress, address indexed newAddress);
+    event PriceFeedManagerUpdated(address indexed oldAddress, address indexed newAddress);
 
     event MinPositionHoldTimeUpdated(uint256 oldTime, uint256 newTime);
 
@@ -316,11 +327,13 @@ contract PositionManager is
         // Transfer project token from user to this contract
         IERC20(projectToken).transferFrom(msg.sender, address(this), amount);
 
-        // Get price from Blocksense Oracle via SettlementEngine
+        // Get price from PriceFeedManager
         // Use deadline as maxAge for price validation
-        uint256 maxAge = deadline > block.timestamp ? deadline - block.timestamp : 60;
+        if (priceFeedManager == address(0)) revert InvalidAddress();
+        uint256 maxAge =
+            deadline > block.timestamp ? deadline - block.timestamp : DEFAULT_PRICE_MAX_AGE;
         (openPrice, pricePublishTime) =
-            ISettlementEngine(settlementEngine).getSettlementPrice(projectToken, maxAge);
+            IPriceFeedManager(priceFeedManager).getPrice(projectToken, maxAge);
 
         if (openPrice == 0) revert InvalidPrice();
 
@@ -448,11 +461,16 @@ contract PositionManager is
         if (settlementEngine == address(0)) revert InvalidAddress();
 
         // Use deadline as maxAge for price validation
-        uint256 maxAge = deadline > block.timestamp ? deadline - block.timestamp : 60;
+        uint256 maxAge =
+            deadline > block.timestamp ? deadline - block.timestamp : DEFAULT_PRICE_MAX_AGE;
 
         // Try to get price - if stale, move to pending instead of reverting
-        try ISettlementEngine(settlementEngine).getSettlementPrice(pos.projectToken, maxAge)
-        returns (uint256 closePrice, uint256 pricePublishTime) {
+        if (priceFeedManager == address(0)) {
+            revert InvalidAddress();
+        }
+        try IPriceFeedManager(priceFeedManager).getPrice(pos.projectToken, maxAge) returns (
+            uint256 closePrice, uint256 pricePublishTime
+        ) {
             if (closePrice == 0) revert InvalidPrice();
 
             // Check maxAcceptablePrice if specified
@@ -518,13 +536,13 @@ contract PositionManager is
         }
         if (marginAmount == 0) revert InvalidAmount();
 
-        // Get current price from Blocksense Oracle to verify position is not liquidated
+        // Get current price from PriceFeedManager to verify position is not liquidated
         uint256 currentPrice;
-        if (settlementEngine != address(0)) {
+        if (priceFeedManager != address(0)) {
             // Use deadline as maxAge for price validation
-            uint256 maxAge = deadline > block.timestamp ? deadline - block.timestamp : 60;
-            (currentPrice,) =
-                ISettlementEngine(settlementEngine).getSettlementPrice(pos.projectToken, maxAge);
+            uint256 maxAge =
+                deadline > block.timestamp ? deadline - block.timestamp : DEFAULT_PRICE_MAX_AGE;
+            (currentPrice,) = IPriceFeedManager(priceFeedManager).getPrice(pos.projectToken, maxAge);
 
             // Check maxAcceptablePrice if specified
             if (maxAcceptablePrice > 0) {
@@ -628,12 +646,13 @@ contract PositionManager is
             revert PositionClosedTooEarly();
         }
 
-        // Get close price from Blocksense Oracle via SettlementEngine
-        if (settlementEngine == address(0)) revert InvalidAddress();
+        // Get close price from PriceFeedManager
+        if (priceFeedManager == address(0)) revert InvalidAddress();
         // Use default maxAge for admin operations
-        uint256 maxAge = deadline > block.timestamp ? deadline - block.timestamp : 60;
+        uint256 maxAge =
+            deadline > block.timestamp ? deadline - block.timestamp : DEFAULT_PRICE_MAX_AGE;
         (uint256 closePrice, uint256 pricePublishTime) =
-            ISettlementEngine(settlementEngine).getSettlementPrice(pos.projectToken, maxAge);
+            IPriceFeedManager(priceFeedManager).getPrice(pos.projectToken, maxAge);
         if (closePrice == 0) revert InvalidPrice();
 
         if (isLiquidation) {
@@ -794,8 +813,12 @@ contract PositionManager is
         uint256 maxAge
     ) internal returns (bool success, PendingCloseReason reason) {
         // Try to get settlement price
-        try ISettlementEngine(settlementEngine).getSettlementPrice(pos.projectToken, maxAge)
-        returns (uint256 closePrice, uint256 pricePublishTime) {
+        if (priceFeedManager == address(0)) {
+            return (false, PendingCloseReason.SETTLEMENT_ENGINE_NOT_SET);
+        }
+        try IPriceFeedManager(priceFeedManager).getPrice(pos.projectToken, maxAge) returns (
+            uint256 closePrice, uint256 pricePublishTime
+        ) {
             // Validate price
             if (closePrice == 0) {
                 return (false, PendingCloseReason.INVALID_PRICE);
@@ -972,6 +995,19 @@ contract PositionManager is
     }
 
     /**
+     * @notice Set price feed manager address
+     */
+    function setPriceFeedManager(address _priceFeedManager)
+        external
+        onlyOwner
+        validAddress(_priceFeedManager)
+    {
+        address oldAddress = priceFeedManager;
+        priceFeedManager = _priceFeedManager;
+        emit PriceFeedManagerUpdated(oldAddress, _priceFeedManager);
+    }
+
+    /**
      * @notice Add an admin address
      * @param _admin Admin address to add
      */
@@ -1031,7 +1067,9 @@ contract PositionManager is
      * @param _minPositionHoldTime New minimum hold time in seconds
      */
     function setMinPositionHoldTime(uint256 _minPositionHoldTime) external onlyOwner {
-        if (_minPositionHoldTime > 3600) revert InvalidHoldTime();
+        if (_minPositionHoldTime > MAX_MIN_POSITION_HOLD_TIME) {
+            revert InvalidHoldTime();
+        }
 
         uint256 oldTime = minPositionHoldTime;
         minPositionHoldTime = _minPositionHoldTime;

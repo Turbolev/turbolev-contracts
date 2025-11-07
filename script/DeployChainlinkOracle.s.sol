@@ -58,7 +58,6 @@ contract DeployChainlinkOracle is DeployHelper {
 
         // 4. Verify deployment
         console.log("\n3. Verifying deployment...");
-        console.log("BlocksenseOracle:", chainlinkOracleContract.blocksenseOracle());
         console.log("Max Price Age:", chainlinkOracleContract.maxPriceAge());
         console.log("Owner:", chainlinkOracleContract.owner());
 

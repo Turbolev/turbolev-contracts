@@ -29,6 +29,7 @@ contract DeployHelper is Script {
     address payable public positionManager;
     address payable public vaultManager;
     address payable public vaultManagerHelper;
+    address payable public priceFeedManager;
 
     // ========================================================================
     // CONFIGURATION CONSTANTS

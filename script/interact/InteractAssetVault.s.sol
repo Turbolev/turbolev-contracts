@@ -290,19 +290,6 @@ contract InteractAssetVault is DeployHelper {
     }
 
     /**
-     * @notice Set Blocksense Oracle address
-     */
-    function setBlocksenseOracle(address newOracle) public {
-        console.log("\n=== Set Blocksense Oracle ===");
-        console.log("New Oracle:", newOracle);
-
-        vm.startBroadcast(deployer);
-        vault.setBlocksenseOracle(newOracle);
-        console.log("Blocksense Oracle updated successfully");
-        vm.stopBroadcast();
-    }
-
-    /**
      * @notice Add admin address
      */
     function addAdmin(address newAdmin) public {

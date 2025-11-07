@@ -35,9 +35,9 @@ contract SetChainlinkFeed is DeployHelper {
         vm.startBroadcast(deployerPrivateKey);
 
         ChainlinkOracle oracle = ChainlinkOracle(chainlinkOracle);
-        oracle.setChainlinkFeed(adapter, chainlinkFeed);
-
-        console.log("\nChainlink feed set successfully!");
+        // Note: ChainlinkOracle doesn't have setChainlinkFeed - feeds are passed directly to getPrice()
+        console.log("\nNote: ChainlinkOracle uses feed addresses directly in getPrice() calls");
+        console.log("To set feeds, use PriceFeedManager.setChainlinkFeed() instead");
 
         vm.stopBroadcast();
     }
@@ -69,9 +69,9 @@ contract SetChainlinkFeeds is DeployHelper {
         vm.startBroadcast(deployerPrivateKey);
 
         ChainlinkOracle oracle = ChainlinkOracle(chainlinkOracle);
-        oracle.setChainlinkFeeds(adapters, feeds);
-
-        console.log("\nChainlink feeds set successfully!");
+        // Note: ChainlinkOracle doesn't have setChainlinkFeeds - feeds are passed directly to getPrice()
+        console.log("\nNote: ChainlinkOracle uses feed addresses directly in getPrice() calls");
+        console.log("To set feeds, use PriceFeedManager.setChainlinkFeed() instead");
 
         vm.stopBroadcast();
     }
@@ -101,18 +101,18 @@ contract GetPrice is DeployHelper {
 
         ChainlinkOracle oracle = ChainlinkOracle(oracleAddress);
 
-        try oracle.getPrice(adapter) returns (int256 price, uint256 updatedAt, bool usedFallback) {
+        // ChainlinkOracle.getPrice() takes chainlinkFeed address, not adapter
+        address chainlinkFeed = vm.envOr("CHAINLINK_FEED_ADDRESS", address(0));
+        if (chainlinkFeed == address(0)) {
+            console.log("\nERROR: CHAINLINK_FEED_ADDRESS not set");
+            return;
+        }
+
+        try oracle.getPrice(chainlinkFeed) returns (int256 price, uint256 updatedAt) {
             console.log("\nPrice Retrieved:");
             console.log("Price (18 decimals):", uint256(price));
             console.log("Updated At:", updatedAt);
-            console.log("Used Fallback:", usedFallback);
             console.log("Age (seconds):", block.timestamp - updatedAt);
-
-            if (usedFallback) {
-                console.log("\nWARNING: Fallback to Chainlink was used!");
-            } else {
-                console.log("\nPrimary source (Blocksense) was used successfully.");
-            }
         } catch Error(string memory reason) {
             console.log("\nERROR: Failed to get price");
             console.log("Reason:", reason);
@@ -124,11 +124,11 @@ contract GetPrice is DeployHelper {
 
 /**
  * @title GetPriceBothSources
- * @notice Get price from both sources for comparison
+ * @notice Get price from ChainlinkOracle (simplified - ChainlinkOracle only has getPrice)
  *
  * Usage:
  * export CHAINLINK_ORACLE_ADDRESS=0x...
- * export ADAPTER_ADDRESS=0x...
+ * export CHAINLINK_FEED_ADDRESS=0x...
  * forge script script/interact/InteractChainlinkOracle.s.sol:GetPriceBothSources \
  *   --rpc-url $RPC_URL
  */
@@ -138,57 +138,29 @@ contract GetPriceBothSources is DeployHelper {
             ? chainlinkOracle
             : payable(vm.envAddress("CHAINLINK_ORACLE_ADDRESS"));
 
-        address adapter = vm.envAddress("ADAPTER_ADDRESS");
+        address chainlinkFeed = vm.envOr("CHAINLINK_FEED_ADDRESS", address(0));
+        if (chainlinkFeed == address(0)) {
+            console.log("\nERROR: CHAINLINK_FEED_ADDRESS not set");
+            return;
+        }
 
-        console.log("\n=== Getting Price from Both Sources ===");
+        console.log("\n=== Getting Price from ChainlinkOracle ===");
         console.log("Oracle Address:", oracleAddress);
-        console.log("Adapter:", adapter);
+        console.log("Chainlink Feed:", chainlinkFeed);
 
         ChainlinkOracle oracle = ChainlinkOracle(oracleAddress);
 
-        (
-            int256 blocksensePrice,
-            uint256 blocksenseUpdatedAt,
-            bool blocksenseSuccess,
-            int256 chainlinkPrice,
-            uint256 chainlinkUpdatedAt,
-            bool chainlinkSuccess
-        ) = oracle.getPriceBothSources(adapter);
-
-        console.log("\n--- Blocksense Oracle ---");
-        if (blocksenseSuccess) {
-            console.log("Status: SUCCESS");
-            console.log("Price:", uint256(blocksensePrice));
-            console.log("Updated At:", blocksenseUpdatedAt);
-            console.log("Age (seconds):", block.timestamp - blocksenseUpdatedAt);
-        } else {
-            console.log("Status: FAILED");
-        }
-
-        console.log("\n--- Chainlink Oracle ---");
-        if (chainlinkSuccess) {
+        try oracle.getPrice(chainlinkFeed) returns (
+            int256 chainlinkPrice, uint256 chainlinkUpdatedAt
+        ) {
+            console.log("\n--- Chainlink Oracle ---");
             console.log("Status: SUCCESS");
             console.log("Price:", uint256(chainlinkPrice));
             console.log("Updated At:", chainlinkUpdatedAt);
             console.log("Age (seconds):", block.timestamp - chainlinkUpdatedAt);
-        } else {
-            console.log("Status: FAILED or NOT CONFIGURED");
-        }
-
-        // Compare prices if both succeeded
-        if (blocksenseSuccess && chainlinkSuccess) {
-            console.log("\n--- Price Comparison ---");
-            int256 diff = blocksensePrice - chainlinkPrice;
-            int256 diffPercent = (diff * 10_000) / blocksensePrice; // in basis points
-            console.log("Difference:", diff > 0 ? uint256(diff) : uint256(-diff));
-            console.log(
-                "Difference (bps):", diffPercent > 0 ? uint256(diffPercent) : uint256(-diffPercent)
-            );
-
-            if (diffPercent > 100 || diffPercent < -100) {
-                // > 1%
-                console.log("\nWARNING: Large price difference detected (>1%)!");
-            }
+        } catch {
+            console.log("\n--- Chainlink Oracle ---");
+            console.log("Status: FAILED");
         }
     }
 }
@@ -217,18 +189,16 @@ contract CheckFallback is DeployHelper {
 
         ChainlinkOracle oracle = ChainlinkOracle(oracleAddress);
 
-        (bool hasFallback, address chainlinkFeed) = oracle.hasFallback(adapter);
-
-        console.log("\nFallback Status:");
-        console.log("Has Fallback:", hasFallback);
-        if (hasFallback) {
+        // ChainlinkOracle doesn't have hasFallback() - it takes feed address directly
+        address chainlinkFeed = vm.envOr("CHAINLINK_FEED_ADDRESS", address(0));
+        console.log("\nChainlinkOracle Configuration:");
+        console.log("Max Price Age:", oracle.maxPriceAge(), "seconds");
+        console.log("Owner:", oracle.owner());
+        console.log("Paused:", oracle.paused());
+        if (chainlinkFeed != address(0)) {
             console.log("Chainlink Feed:", chainlinkFeed);
-
-            // Get fallback count
-            uint256 count = oracle.fallbackCount(adapter);
-            console.log("Fallback Used Count:", count);
         } else {
-            console.log("\nWARNING: No Chainlink fallback configured for this adapter!");
+            console.log("\nNote: Feed address should be passed to getPrice() directly");
         }
     }
 }
@@ -289,7 +259,6 @@ contract GetOracleConfig is DeployHelper {
         ChainlinkOracle oracle = ChainlinkOracle(oracleAddress);
 
         console.log("\nConfiguration:");
-        console.log("BlocksenseOracle:", oracle.blocksenseOracle());
         console.log("Max Price Age:", oracle.maxPriceAge(), "seconds");
         console.log("Owner:", oracle.owner());
         console.log("Paused:", oracle.paused());

@@ -1,0 +1,26 @@
+{
+  "name": "blocksense-oracle-scripts",
+  "version": "1.0.0",
+  "description": "Scripts để tương tác với Blocksense Oracle và CL Adapter",
+  "main": "get-price-from-cl-adapter.js",
+  "scripts": {
+    "get-price": "node get-price-from-cl-adapter.js",
+    "get-pending-close": "node get-pending-close-events.js",
+    "example:adapter": "node get-price-from-cl-adapter.js --adapter 0x1234567890123456789012345678901234567890 --rpc https://rpc.ankr.com/eth",
+    "example:oracle": "node get-price-from-cl-adapter.js --adapter 0x1234567890123456789012345678901234567890 --oracle 0x0987654321098765432109876543210987654321 --rpc https://rpc.ankr.com/eth",
+    "example:pending-close": "node get-pending-close-events.js --contract 0x1234567890123456789012345678901234567890 --from-block 1000000 --rpc https://rpc.ankr.com/eth"
+  },
+  "keywords": [
+    "blocksense",
+    "oracle",
+    "chainlink",
+    "price-feed",
+    "ethereum"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "ethers": "^6.10.0",
+    "dotenv": "^16.3.1"
+  }
+}

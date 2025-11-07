@@ -45,18 +45,9 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
     /// @notice PositionManager contract address
     address public positionManager;
 
-    /// @notice BlocksenseOracle contract address
-    address public blocksenseOracle;
-
     /// @notice Project token address (the asset being bet on - must be on Monad)
     /// @dev This is the ONLY token vault accepts for staking and trading
     address public projectToken;
-
-    /// @notice CLAggregatorAdapter address for this vault's price feed
-    address public oracleAdapter;
-
-    /// @notice Chainlink price feed address (for fallback)
-    address public chainlinkFeed;
 
     /// @notice Vault information
     VaultInfo public vaultInfo;
@@ -126,6 +117,16 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
 
     /// @notice Position IDs settled in current day (for tracking)
     uint64[] public dailyPositionIds;
+
+    /// @notice Claimable rewards mapping: user => total claimable reward amount
+    /// @dev Rewards are accumulated during finalizeDailyReward to avoid recalculation
+    mapping(address => uint256) public claimableRewards;
+
+    /// @notice Last LP index processed during finalize (for batch processing)
+    uint256 public finalizeLPIndex;
+
+    /// @notice Maximum LPs to process per finalize call (DoS protection)
+    uint256 public constant MAX_LPS_PER_FINALIZE = 200;
 
     // ========================================================================
     // STRUCTS
@@ -198,6 +199,9 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
 
     /// @notice Maximum retry attempts for failed payouts
     uint8 public constant MAX_PAYOUT_RETRIES = 3;
+
+    /// @notice Maximum days to process per reward calculation (DoS protection)
+    uint256 public constant MAX_DAYS_PER_CALCULATION = 365;
 
     // ========================================================================
     // ENUMS
@@ -294,9 +298,6 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
     );
     event GraduationThresholdUpdated(uint256 oldThreshold, uint256 newThreshold);
     event TradingEnabledUpdated(bool enabled);
-    event BlocksenseOracleUpdated(address indexed oldOracle, address indexed newOracle);
-    event OracleAdapterUpdated(address indexed oldAdapter, address indexed newAdapter);
-    event ChainlinkFeedUpdated(address indexed oldFeed, address indexed newFeed);
 
     event DailyRewardFinalized(
         uint256 indexed day,
@@ -397,8 +398,6 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
      * @param _projectToken Project token address
      * @param _vaultManager VaultManager address
      * @param _positionManager PositionManager contract address
-     * @param _blocksenseOracle BlocksenseOracle contract address
-     * @param _oracleAdapter Oracle adapter address for this vault's price feed
      * @param _minBetAmount Min bet amount
      * @param _maxBetAmount Max bet amount
      * @param _graduationThreshold Token amount threshold for graduation
@@ -408,8 +407,6 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         address _vaultManager,
         address _vaultManagerHelper,
         address _positionManager,
-        address _blocksenseOracle,
-        address _oracleAdapter,
         uint256 _minBetAmount,
         uint256 _maxBetAmount,
         uint256 _graduationThreshold
@@ -422,16 +419,10 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
             revert InvalidAddress();
         }
 
-        if (_blocksenseOracle == address(0) || _oracleAdapter == address(0)) {
-            revert InvalidAddress();
-        }
-
         projectToken = _projectToken;
         vaultManager = _vaultManager;
         vaultManagerHelper = _vaultManagerHelper;
         positionManager = _positionManager;
-        blocksenseOracle = _blocksenseOracle;
-        oracleAdapter = _oracleAdapter;
 
         vaultInfo.createdAt = block.timestamp;
         vaultInfo.graduationThreshold = _graduationThreshold;
@@ -910,8 +901,9 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
      * @notice Finalize daily rewards and take snapshot
      * @dev Called by admin bot at end of each day (UTC midnight)
      *      Only callable once per day
+     *      Pre-calculates and stores rewards for all LPs to avoid recalculation on claim
      */
-    function finalizeDailyReward() external onlyAdmin {
+    function finalizeDailyReward() external onlyAdmin returns (bool isComplete) {
         uint256 today = block.timestamp / 1 days;
 
         // Check if already processed today
@@ -939,78 +931,128 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
             snapshot.positionIds.push(dailyPositionIds[i]);
         }
 
+        // Reset finalize index for new day
+        finalizeLPIndex = 0;
+
+        // Pre-calculate rewards for all LPs (only if netPnL > 0)
+        int256 finalizedPnL = dailyNetPnL;
+        if (finalizedPnL > 0 && snapshot.totalShares > 0) {
+            uint256 dayStartTimestamp = today * 1 days;
+            uint256 totalLPs = vaultLPs.length;
+            uint256 maxIterations =
+                totalLPs > MAX_LPS_PER_FINALIZE ? MAX_LPS_PER_FINALIZE : totalLPs;
+
+            // Process LPs in batches to prevent out of gas
+            for (uint256 i = 0; i < maxIterations; i++) {
+                address lp = vaultLPs[i];
+                LPPosition storage lpPos = lpPositions[lp];
+
+                // Skip if user has no shares
+                if (lpPos.shares == 0) {
+                    continue;
+                }
+
+                // Check if user was staked for at least 1 day before this reward day
+                if (lpPos.stakedAt + REWARD_MIN_STAKE_PERIOD <= dayStartTimestamp) {
+                    // Calculate user's share of profit for this day
+                    uint256 userReward =
+                        (lpPos.shares * uint256(finalizedPnL)) / snapshot.totalShares;
+
+                    if (userReward > 0) {
+                        // Add reward to user's claimable rewards
+                        claimableRewards[lp] += userReward;
+                    }
+                }
+            }
+
+            // Update finalize index
+            finalizeLPIndex = maxIterations;
+        }
+
         // Update state
         lastSnapshotDay = today;
         currentDay = today;
 
         // Reset daily accumulators for next day
-        int256 finalizedPnL = dailyNetPnL;
         dailyNetPnL = 0;
         delete dailyPositionIds; // Clear position IDs array
 
         emit DailyRewardFinalized(
             today, vaultInfo.totalLiquidity, vaultInfo.totalShares, finalizedPnL, block.timestamp
         );
+
+        return vaultLPs.length <= MAX_LPS_PER_FINALIZE;
     }
 
     /**
-     * @notice Calculate pending rewards for a staker
-     * @param user Address of staker
-     * @return pendingRewards Total pending rewards (in tokens)
-     * @return processableDays Number of days that can be processed
+     * @notice Finalize daily rewards for remaining LPs (if there are more than MAX_LPS_PER_FINALIZE)
+     * @dev Can be called multiple times to process remaining LPs
+     *      Automatically continues from last processed index
+     * @return isComplete True if all LPs have been processed
      */
-    function calculatePendingRewards(address user)
-        public
-        view
-        returns (uint256 pendingRewards, uint256 processableDays)
-    {
-        LPPosition memory lpPos = lpPositions[user];
+    function finalizeDailyRewardRemaining() external onlyAdmin returns (bool isComplete) {
+        uint256 today = block.timestamp / 1 days;
 
-        if (lpPos.shares == 0) {
-            return (0, 0);
+        // Check if snapshot exists
+        if (!dailySnapshots[today].isProcessed) {
+            revert DailySnapshotAlreadyProcessed(); // Use same error for consistency
         }
 
-        // Start from last processed day + 1
-        uint256 startDay = lpPos.lastProcessedDay + 1;
-        uint256 endDay = lastSnapshotDay; // Last finalized day
+        DailySnapshot storage snapshot = dailySnapshots[today];
+        int256 finalizedPnL = snapshot.netPnL;
 
-        if (startDay > endDay) {
-            return (0, 0); // No new days to process
+        // Only process if there are rewards to distribute
+        if (finalizedPnL <= 0 || snapshot.totalShares == 0) {
+            return true; // Nothing to process
         }
 
-        pendingRewards = 0;
-        processableDays = 0;
+        uint256 totalLPs = vaultLPs.length;
+        uint256 startIndex = finalizeLPIndex;
 
-        for (uint256 day = startDay; day <= endDay; day++) {
-            DailySnapshot memory snapshot = dailySnapshots[day];
+        if (startIndex >= totalLPs) {
+            return true; // Already processed all
+        }
 
-            if (!snapshot.isProcessed) {
-                continue; // Skip unprocessed days
+        uint256 endIndex = startIndex + MAX_LPS_PER_FINALIZE;
+        if (endIndex > totalLPs) {
+            endIndex = totalLPs;
+        }
+
+        uint256 dayStartTimestamp = today * 1 days;
+
+        // Process remaining LPs
+        for (uint256 i = startIndex; i < endIndex; i++) {
+            address lp = vaultLPs[i];
+            LPPosition storage lpPos = lpPositions[lp];
+
+            // Skip if user has no shares
+            if (lpPos.shares == 0) {
+                continue;
             }
 
             // Check if user was staked for at least 1 day before this reward day
-            uint256 dayStartTimestamp = day * 1 days;
-            if (lpPos.stakedAt + REWARD_MIN_STAKE_PERIOD > dayStartTimestamp) {
-                continue; // Not eligible yet
-            }
+            if (lpPos.stakedAt + REWARD_MIN_STAKE_PERIOD <= dayStartTimestamp) {
+                // Calculate user's share of profit for this day
+                uint256 userReward = (lpPos.shares * uint256(finalizedPnL)) / snapshot.totalShares;
 
-            // Only distribute if net profit > 0
-            if (snapshot.netPnL > 0 && snapshot.totalShares > 0) {
-                // Calculate user's share of profit
-                uint256 userShare = (lpPos.shares * uint256(snapshot.netPnL)) / snapshot.totalShares;
-                pendingRewards += userShare;
+                if (userReward > 0) {
+                    // Add reward to user's claimable rewards
+                    claimableRewards[lp] += userReward;
+                }
             }
-            // If netPnL <= 0, no rewards for this day (stakers don't lose principal)
-
-            processableDays++;
         }
 
-        return (pendingRewards, processableDays);
+        // Update finalize index
+        finalizeLPIndex = endIndex;
+
+        // Check if all LPs have been processed
+        return endIndex >= totalLPs;
     }
 
     /**
      * @notice Claim pending rewards
-     * @dev Processes all pending days and transfers rewards to user
+     * @dev Processes rewards in batches to prevent out of gas errors
+     *      If there are more days to process, user can call this function again
      */
     function claimRewards() external nonReentrant whenNotPaused {
         LPPosition storage lpPos = lpPositions[msg.sender];
@@ -1019,8 +1061,8 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
             revert NoStakeFound();
         }
 
-        // Calculate pending rewards
-        (uint256 rewards, uint256 daysProcessed) = calculatePendingRewards(msg.sender);
+        // Get claimable rewards (already accumulated from all days)
+        uint256 rewards = claimableRewards[msg.sender];
 
         if (rewards == 0) {
             revert NoRewardsToClaim();
@@ -1056,6 +1098,9 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         lpPos.lastRewardClaim = block.timestamp;
         lpPos.totalRewardsClaimed += actualRewards;
 
+        // Subtract claimed rewards from claimableRewards
+        claimableRewards[msg.sender] -= actualRewards;
+
         // Transfer rewards (capped amount) - ONLY project token
         if (projectToken == address(0)) {
             (bool success,) = msg.sender.call{ value: actualRewards }("");
@@ -1064,7 +1109,12 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
             IERC20(projectToken).safeTransfer(msg.sender, actualRewards);
         }
 
-        emit RewardsClaimed(msg.sender, actualRewards, daysProcessed, block.timestamp);
+        emit RewardsClaimed(
+            msg.sender,
+            actualRewards,
+            0, // daysProcessed not applicable with new design
+            block.timestamp
+        );
     }
 
     // ========================================================================
@@ -1244,6 +1294,35 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
      */
     function getPendingPayoutQueue() external view returns (uint64[] memory) {
         return pendingPayoutQueue;
+    }
+
+    /**
+     * @notice Calculate pending rewards for a staker
+     * @param user Address of staker
+     * @return pendingRewards Total pending rewards
+     * @return lastProcessedDay Last day that was processed in this calculation
+     */
+    function calculatePendingRewards(address user)
+        external
+        view
+        returns (uint256 pendingRewards, uint256 lastProcessedDay)
+    {
+        LPPosition storage lpPos = lpPositions[user];
+        if (lpPos.shares == 0) {
+            return (0, 0);
+        }
+        // check vault balance
+        uint256 vaultBalance = 0;
+        if (projectToken == address(0)) {
+            vaultBalance = address(this).balance;
+        } else {
+            vaultBalance = IERC20(projectToken).balanceOf(address(this));
+        }
+        if (claimableRewards[user] > vaultBalance) {
+            return (vaultBalance, lpPos.lastProcessedDay);
+        }
+
+        return (claimableRewards[user], lpPos.lastProcessedDay);
     }
 
     // ========================================================================
@@ -1580,37 +1659,5 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
      */
     function removeAdmin(address _admin) external onlyVaultManagerOrHelper {
         _removeAdmin(_admin);
-    }
-
-    /**
-     * @notice Set Blocksense Oracle address
-     * @param _blocksenseOracle Blocksense Oracle contract address
-     */
-    function setBlocksenseOracle(address _blocksenseOracle) external onlyVaultManagerOrHelper {
-        if (_blocksenseOracle == address(0)) revert InvalidAddress();
-        address oldOracle = blocksenseOracle;
-        blocksenseOracle = _blocksenseOracle;
-        emit BlocksenseOracleUpdated(oldOracle, _blocksenseOracle);
-    }
-
-    /**
-     * @notice Set Oracle Adapter address
-     * @param _oracleAdapter CLAggregatorAdapter contract address
-     */
-    function setOracleAdapter(address _oracleAdapter) external onlyVaultManagerOrHelper {
-        if (_oracleAdapter == address(0)) revert InvalidAddress();
-        address oldAdapter = oracleAdapter;
-        oracleAdapter = _oracleAdapter;
-        emit OracleAdapterUpdated(oldAdapter, _oracleAdapter);
-    }
-
-    /**
-     * @notice Set Chainlink feed address (for fallback)
-     * @param _chainlinkFeed Chainlink price feed address
-     */
-    function setChainlinkFeed(address _chainlinkFeed) external onlyVaultManagerOrHelper {
-        address oldFeed = chainlinkFeed;
-        chainlinkFeed = _chainlinkFeed;
-        emit ChainlinkFeedUpdated(oldFeed, _chainlinkFeed);
     }
 }

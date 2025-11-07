@@ -94,6 +94,13 @@ interface IVaultManager {
     function getAllVaults() external view returns (address[] memory);
 
     /**
+     * @notice Get project token address for a vault
+     * @param vaultAddress Vault address
+     * @return projectToken Project token address
+     */
+    function vaultProjectToken(address vaultAddress) external view returns (address projectToken);
+
+    /**
      * @notice Pause factory
      */
     function pause() external;
@@ -114,11 +121,4 @@ interface IVaultManager {
      * @param _projectToken Project token address
      */
     function unpauseVault(address _projectToken) external;
-
-    /**
-     * @notice Set BlocksenseOracle for a vault
-     * @param _projectToken Project token address
-     * @param _blocksenseOracle BlocksenseOracle address
-     */
-    function setVaultBlocksenseOracle(address _projectToken, address _blocksenseOracle) external;
 }

@@ -269,19 +269,90 @@ BLOCKSENSE_REGISTRY_ADDRESS=0x...
 - Check balance: `cast balance $DEPLOYER_ADDRESS --rpc-url $RPC_URL`
 - Send ETH to deployer account
 
-### 4. "Nonce too low" Error
+### 4. "Nonce too low" Error / Transaction Failures When Deploying Onchain
 
-**Problem:** Transaction nonce conflict.
+**Problem:** 
+- Một số transaction fail khi deploy onchain nhưng simulate thành công
+- Nonce conflicts khi nhiều transaction được gửi cùng lúc
+- Transaction ordering issues
 
-**Solution:**
+**Nguyên nhân:**
+- Khi simulate, tất cả transaction được thực thi trong môi trường giả lập
+- Khi deploy onchain, nhiều transaction được gửi cùng lúc trong một `vm.startBroadcast()` block
+- Có thể có vấn đề về RPC rate limiting hoặc gas estimation
+
+**Giải pháp:**
+
+#### Option 1: Sử dụng UpdateConnections sau khi deploy
+Nếu deployment thành công nhưng một số connection fail:
+
+```bash
+# 1. Deploy contracts (có thể một số connection fail)
+forge script script/DeployAll.s.sol:DeployAll \
+  --rpc-url $RPC_URL \
+  --broadcast \
+  --account monadDeployer \
+  --sender 0xc54840D80bc1eF1A8902C0F1A1db54287335DBe1 \
+  --gas-limit 50000000 \
+  --slow \
+  -vvv
+
+# 2. Fix connections riêng biệt (nếu cần)
+forge script script/UpdateConnections.s.sol:UpdateConnections \
+  --rpc-url $RPC_URL \
+  --broadcast \
+  --account monadDeployer \
+  --sender 0xc54840D80bc1eF1A8902C0F1A1db54287335DBe1 \
+  --gas-limit 50000000 \
+  --slow \
+  -vvv
+```
+
+#### Option 2: Deploy từng contract riêng biệt
+Nếu DeployAll fail, có thể deploy từng contract:
+
+```bash
+# Deploy từng contract một
+forge script script/DeployBlocksenseOracle.s.sol:DeployBlocksenseOracle \
+  --rpc-url $RPC_URL --broadcast --account monadDeployer --slow -vvv
+
+forge script script/DeployChainlinkOracle.s.sol:DeployChainlinkOracle \
+  --rpc-url $RPC_URL --broadcast --account monadDeployer --slow -vvv
+
+# ... tiếp tục với các contract khác
+
+# Sau đó chạy UpdateConnections để connect tất cả
+forge script script/UpdateConnections.s.sol:UpdateConnections \
+  --rpc-url $RPC_URL --broadcast --account monadDeployer --slow -vvv
+```
+
+#### Option 3: Clear cache và thử lại
 ```bash
 # Clear foundry cache
 rm -rf cache/
 forge clean
 
-# Or specify nonce manually
-forge script ... --broadcast --legacy --slow
+# Kiểm tra nonce hiện tại
+cast nonce $DEPLOYER_ADDRESS --rpc-url $RPC_URL
+
+# Thử lại với --slow flag
+forge script script/DeployAll.s.sol:DeployAll \
+  --rpc-url $RPC_URL \
+  --broadcast \
+  --account monadDeployer \
+  --sender 0xc54840D80bc1eF1A8902C0F1A1db54287335DBe1 \
+  --gas-limit 50000000 \
+  --slow \
+  -vvv
 ```
+
+**Best Practices:**
+1. **Luôn simulate trước**: `forge script script/DeployAll.s.sol:DeployAll --rpc-url $RPC_URL` (không có --broadcast)
+2. **Sử dụng `--slow` flag** để đảm bảo transaction được gửi tuần tự
+3. **Kiểm tra balance** trước khi deploy: `cast balance $DEPLOYER_ADDRESS --rpc-url $RPC_URL`
+4. **Monitor transactions** trên block explorer
+5. **Nếu một số transaction fail**, sử dụng `UpdateConnections.s.sol` để fix riêng
+6. **Script sẽ tự động skip** các contract đã deploy nếu chạy lại
 
 ### 5. Contract Not Verified
 

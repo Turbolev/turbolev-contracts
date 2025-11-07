@@ -11,6 +11,7 @@ import "./ChainlinkOracle.sol";
 import "./libraries/PositionLib.sol";
 import "./interfaces/IVaultManager.sol";
 import "./interfaces/IAssetVault.sol";
+import "./interfaces/IPriceFeedManager.sol";
 
 /**
  * @title SettlementEngine
@@ -58,6 +59,9 @@ contract SettlementEngine is
     /// @notice ChainlinkOracle contract address (for fallback)
     address public chainlinkOracle;
 
+    /// @notice PriceFeedManager contract address
+    address public priceFeedManager;
+
     /// @notice Max profit cap in bps (200 = 2% of vault USD value)
     uint16 public maxProfitCapBps;
 
@@ -66,8 +70,8 @@ contract SettlementEngine is
     // ========================================================================
 
     /// @dev Storage gap to allow for new variables in future versions
-    /// @notice Currently using 9 storage slots, reserving 41 slots for future use
-    uint256[41] private __gap;
+    /// @notice Currently using 10 storage slots, reserving 40 slots for future use
+    uint256[40] private __gap;
 
     // ========================================================================
     // STRUCTS
@@ -112,6 +116,8 @@ contract SettlementEngine is
     event VaultManagerUpdated(address indexed oldAddress, address indexed newAddress);
 
     event BlocksenseOracleUpdated(address indexed oldAddress, address indexed newAddress);
+
+    event PriceFeedManagerUpdated(address indexed oldAddress, address indexed newAddress);
 
     event ProfitCapped(
         uint64 indexed positionId,
@@ -338,7 +344,8 @@ contract SettlementEngine is
      * @param maxAge Maximum acceptable price age in seconds
      * @return closePrice Settlement price
      * @return publishTime When price was last updated
-     * @dev Gets price from Blocksense Oracle, falls back to ChainlinkOracle if needed
+     * @dev Gets price from ChainlinkOracle first, falls back to BlocksenseOracle if needed
+     *      Now uses PriceFeedManager to get price feed addresses
      */
     function getSettlementPrice(address projectToken, uint256 maxAge)
         external
@@ -346,17 +353,24 @@ contract SettlementEngine is
         whenNotPaused
         returns (uint256 closePrice, uint256 publishTime)
     {
-        if (vaultManager == address(0)) revert InvalidAddress();
+        if (priceFeedManager == address(0)) revert InvalidAddress();
 
-        // Get vault for project token from VaultManager
-        address vaultAddr = IVaultManager(vaultManager).getVault(projectToken);
-        if (vaultAddr == address(0)) revert InvalidAddress();
+        // Get price feed config from PriceFeedManager
+        IPriceFeedManager.PriceFeedConfig memory config =
+            IPriceFeedManager(priceFeedManager).getPriceFeedConfig(projectToken);
 
-        IAssetVault vault = IAssetVault(vaultAddr);
-        address adapter = vault.oracleAdapter();
-        address chainlinkFeed = vault.chainlinkFeed();
+        address chainlinkFeed = config.chainlinkFeed;
+        address adapter = config.blocksenseAdapter;
 
-        // Try Blocksense first
+        // Try ChainlinkOracle first
+        (bool chainlinkSuccess, uint256 chainlinkPrice, uint256 chainlinkUpdatedAt) =
+            _tryGetChainlinkPrice(chainlinkFeed, maxAge);
+
+        if (chainlinkSuccess) {
+            return (chainlinkPrice, chainlinkUpdatedAt);
+        }
+
+        // Chainlink failed, try BlocksenseOracle fallback
         (bool blocksenseSuccess, uint256 blocksensePrice, uint256 blocksenseUpdatedAt,) =
             _tryGetBlocksensePrice(adapter, maxAge);
 
@@ -364,30 +378,8 @@ contract SettlementEngine is
             return (blocksensePrice, blocksenseUpdatedAt);
         }
 
-        // Blocksense failed, try ChainlinkOracle fallback
-        if (chainlinkOracle == address(0) || chainlinkFeed == address(0)) {
-            // No fallback available
-            revert InvalidOraclePrice();
-        }
-
-        // Use ChainlinkOracle with fallback mechanism
-        try ChainlinkOracle(chainlinkOracle).getPrice(adapter) returns (
-            int256 price, uint256 updatedAt, bool /* usedFallback */
-        ) {
-            // Validate price
-            if (price <= 0) revert InvalidOraclePrice();
-
-            // Check age
-            if (block.timestamp - updatedAt > maxAge) {
-                revert InvalidOraclePrice();
-            }
-
-            // Price is valid
-            return (uint256(price), updatedAt);
-        } catch {
-            // Both sources failed
-            revert InvalidOraclePrice();
-        }
+        // Both sources failed
+        revert InvalidOraclePrice();
     }
 
     /**
@@ -397,60 +389,87 @@ contract SettlementEngine is
      * @return closePrice Settlement price
      * @return publishTime When price was last updated
      * @dev Same as getSettlementPrice but emits events when fallback is used
+     *      Now uses PriceFeedManager to get price feed addresses
      */
     function getSettlementPriceWithFallback(address projectToken, uint256 maxAge)
         external
         whenNotPaused
         returns (uint256 closePrice, uint256 publishTime)
     {
-        if (vaultManager == address(0)) revert InvalidAddress();
+        if (priceFeedManager == address(0)) revert InvalidAddress();
 
-        // Get vault for project token from VaultManager
-        address vaultAddr = IVaultManager(vaultManager).getVault(projectToken);
-        if (vaultAddr == address(0)) revert InvalidAddress();
+        // Get price feed config from PriceFeedManager
+        IPriceFeedManager.PriceFeedConfig memory config =
+            IPriceFeedManager(priceFeedManager).getPriceFeedConfig(projectToken);
 
-        IAssetVault vault = IAssetVault(vaultAddr);
-        address adapter = vault.oracleAdapter();
-        address chainlinkFeed = vault.chainlinkFeed();
+        address chainlinkFeed = config.chainlinkFeed;
+        address adapter = config.blocksenseAdapter;
 
-        // Try Blocksense first
-        (
-            bool blocksenseSuccess,
-            uint256 blocksensePrice,
-            uint256 blocksenseUpdatedAt,
-            string memory failReason
-        ) = _tryGetBlocksensePrice(adapter, maxAge);
+        // Try ChainlinkOracle first
+        (bool chainlinkSuccess, uint256 chainlinkPrice, uint256 chainlinkUpdatedAt) =
+            _tryGetChainlinkPrice(chainlinkFeed, maxAge);
+
+        if (chainlinkSuccess) {
+            return (chainlinkPrice, chainlinkUpdatedAt);
+        }
+
+        // Chainlink failed, try BlocksenseOracle fallback
+        (bool blocksenseSuccess, uint256 blocksensePrice, uint256 blocksenseUpdatedAt,) =
+            _tryGetBlocksensePrice(adapter, maxAge);
 
         if (blocksenseSuccess) {
+            // Emit fallback event (using Blocksense as fallback from Chainlink)
+            emit PriceFallbackUsed(
+                projectToken, chainlinkFeed, adapter, "Chainlink failed, using Blocksense"
+            );
             return (blocksensePrice, blocksenseUpdatedAt);
         }
 
-        // Blocksense failed, try ChainlinkOracle fallback
-        if (chainlinkOracle == address(0) || chainlinkFeed == address(0)) {
-            // No fallback available
-            revert InvalidOraclePrice();
+        // Both sources failed
+        revert InvalidOraclePrice();
+    }
+
+    /**
+     * @notice Try to get price from ChainlinkOracle
+     * @param chainlinkFeed Chainlink price feed address
+     * @param maxAge Maximum acceptable price age
+     * @return success Whether the call succeeded and price is valid
+     * @return price Price (if successful)
+     * @return updatedAt Update timestamp (if successful)
+     */
+    function _tryGetChainlinkPrice(address chainlinkFeed, uint256 maxAge)
+        internal
+        view
+        returns (bool success, uint256 price, uint256 updatedAt)
+    {
+        // Check if ChainlinkOracle configured
+        if (chainlinkOracle == address(0)) {
+            return (false, 0, 0);
         }
 
-        // Use ChainlinkOracle with fallback mechanism
-        try ChainlinkOracle(chainlinkOracle).getPriceWithFallback(adapter) returns (
-            int256 price, uint256 updatedAt
+        // Check if chainlinkFeed configured
+        if (chainlinkFeed == address(0)) {
+            return (false, 0, 0);
+        }
+
+        // Try to get price from ChainlinkOracle
+        try ChainlinkOracle(chainlinkOracle).getPrice(chainlinkFeed) returns (
+            int256 _price, uint256 _updatedAt
         ) {
             // Validate price
-            if (price <= 0) revert InvalidOraclePrice();
-
-            // Check age
-            if (block.timestamp - updatedAt > maxAge) {
-                revert InvalidOraclePrice();
+            if (_price <= 0) {
+                return (false, 0, 0);
             }
 
-            // Emit fallback event
-            emit PriceFallbackUsed(projectToken, adapter, chainlinkFeed, failReason);
+            // Check staleness
+            if (block.timestamp - _updatedAt > maxAge) {
+                return (false, 0, 0);
+            }
 
-            // Price is valid
-            return (uint256(price), updatedAt);
+            // Success
+            return (true, uint256(_price), _updatedAt);
         } catch {
-            // Both sources failed
-            revert InvalidOraclePrice();
+            return (false, 0, 0);
         }
     }
 
@@ -590,6 +609,16 @@ contract SettlementEngine is
         address oldOracle = chainlinkOracle;
         chainlinkOracle = _chainlinkOracle;
         emit ChainlinkOracleUpdated(oldOracle, _chainlinkOracle);
+    }
+
+    /**
+     * @notice Set PriceFeedManager address
+     */
+    function setPriceFeedManager(address _priceFeedManager) external onlyOwner {
+        if (_priceFeedManager == address(0)) revert InvalidAddress();
+        address oldAddress = priceFeedManager;
+        priceFeedManager = _priceFeedManager;
+        emit PriceFeedManagerUpdated(oldAddress, _priceFeedManager);
     }
 
     /**
