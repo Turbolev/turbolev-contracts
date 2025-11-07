@@ -9,12 +9,17 @@ import "../src/AssetVault.sol";
 import "../src/VaultManager.sol";
 import "../src/SettlementEngine.sol";
 import "../src/BlocksenseOracle.sol";
+import "../src/ChainlinkOracle.sol";
+import "../src/PriceFeedManager.sol";
 import "../src/VaultManagerHelper.sol";
 import "../src/interfaces/ICLFeedRegistryAdapter.sol";
 import "../src/interfaces/ICLAggregatorAdapter.sol";
+import "../src/interfaces/IChainlinkAggregatorV3.sol";
+import "../src/interfaces/chainlink/IChainlinkAggregator.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
-contract MockAdapter is ICLAggregatorAdapter {
+contract MockAdapter is ICLAggregatorAdapter, IChainlinkAggregatorV3 {
+    // Implement both interfaces - functions are shared
     address public dataFeedStore;
     uint256 public id;
     uint256 public mockTimestamp;
@@ -36,7 +41,13 @@ contract MockAdapter is ICLAggregatorAdapter {
         mockTimestamp = _timestamp;
     }
 
-    function latestRoundData() external view returns (uint80, int256, uint256, uint256, uint80) {
+    // Shared functions for both interfaces
+    function latestRoundData()
+        external
+        view
+        override(IChainlinkAggregator, IChainlinkAggregatorV3)
+        returns (uint80, int256, uint256, uint256, uint80)
+    {
         if (baseToken != address(0) && quoteToken != address(0)) {
             // Get price from MockRegistry
             int256 price = MockRegistry(dataFeedStore).latestAnswer(baseToken, quoteToken);
@@ -45,24 +56,40 @@ contract MockAdapter is ICLAggregatorAdapter {
         return (1, 100e18, mockTimestamp, mockTimestamp, 1);
     }
 
-    function decimals() external pure returns (uint8) {
+    function decimals()
+        external
+        pure
+        override(IChainlinkAggregator, IChainlinkAggregatorV3)
+        returns (uint8)
+    {
         return 18;
     }
 
-    function description() external pure returns (string memory) {
+    function description()
+        external
+        pure
+        override(IChainlinkAggregator, IChainlinkAggregatorV3)
+        returns (string memory)
+    {
         return "Mock Adapter";
     }
 
-    function version() external pure returns (uint256) {
+    function version() external pure override returns (uint256) {
         return 1;
     }
 
     function getRoundData(uint80)
         external
         view
+        override
         returns (uint80, int256, uint256, uint256, uint80)
     {
-        return (1, 100e18, block.timestamp, block.timestamp, 1);
+        if (baseToken != address(0) && quoteToken != address(0)) {
+            // Get price from MockRegistry
+            int256 price = MockRegistry(dataFeedStore).latestAnswer(baseToken, quoteToken);
+            return (1, price, mockTimestamp, mockTimestamp, 1);
+        }
+        return (1, 100e18, mockTimestamp, mockTimestamp, 1);
     }
 
     function latestAnswer() external pure returns (int256) {
@@ -195,6 +222,8 @@ contract BaseTest is Test {
     VaultManagerHelper public vaultManagerHelper;
     SettlementEngine public settlementEngine;
     BlocksenseOracle public blocksenseOracle;
+    ChainlinkOracle public chainlinkOracle;
+    PriceFeedManager public priceFeedManager;
     AssetVault public assetVault;
 
     // Mock contracts
@@ -280,6 +309,24 @@ contract BaseTest is Test {
         ERC1967Proxy oracleProxy = new ERC1967Proxy(address(oracleImpl), oracleInitData);
         blocksenseOracle = BlocksenseOracle(payable(address(oracleProxy)));
 
+        // Deploy ChainlinkOracle (upgradeable via ERC1967Proxy)
+        ChainlinkOracle chainlinkImpl = new ChainlinkOracle();
+        bytes memory chainlinkInitData =
+            abi.encodeWithSelector(ChainlinkOracle.initialize.selector, 3600); // max price age
+        ERC1967Proxy chainlinkProxy = new ERC1967Proxy(address(chainlinkImpl), chainlinkInitData);
+        chainlinkOracle = ChainlinkOracle(address(chainlinkProxy));
+
+        // Deploy PriceFeedManager (upgradeable via ERC1967Proxy)
+        PriceFeedManager priceFeedImpl = new PriceFeedManager();
+        bytes memory priceFeedInitData = abi.encodeWithSelector(
+            PriceFeedManager.initialize.selector,
+            owner,
+            payable(address(blocksenseOracle)),
+            address(chainlinkOracle)
+        );
+        ERC1967Proxy priceFeedProxy = new ERC1967Proxy(address(priceFeedImpl), priceFeedInitData);
+        priceFeedManager = PriceFeedManager(address(priceFeedProxy));
+
         // Deploy SettlementEngine (upgradeable via ERC1967Proxy)
         SettlementEngine settlementImpl = new SettlementEngine();
         bytes memory settlementInitData =
@@ -306,31 +353,26 @@ contract BaseTest is Test {
         // Set addresses
         positionManager.setVaultManager(address(vaultManager));
         positionManager.setSettlementEngine(address(settlementEngine));
+        positionManager.setPriceFeedManager(address(priceFeedManager));
 
         vaultManager.setPositionManager(address(positionManager));
         vaultManager.setVaultManagerHelper(address(vaultManagerHelper));
 
         settlementEngine.setPositionManager(address(positionManager));
         settlementEngine.setVaultManager(address(vaultManager));
+        settlementEngine.setPriceFeedManager(address(priceFeedManager));
+        settlementEngine.setChainlinkOracle(address(chainlinkOracle));
+
+        vaultManagerHelper.setPriceFeedManager(address(priceFeedManager));
     }
 
     function _setupContracts() internal {
-        // Set oracle in Settlement Engine
-        settlementEngine.setBlocksenseOracle(payable(address(blocksenseOracle)));
-
         // Set default price decimals for mock registry
         mockRegistry.setDecimals(address(projectToken), address(usdc), 18);
 
-        // Set BlocksenseOracle in VaultManager before creating vault
-        vaultManager.setBlocksenseOracle(address(blocksenseOracle));
-
-        // Create vault for project token (now requires oracleAdapter)
+        // Create vault for project token
         address vaultAddr = vaultManager.createVault(
-            address(projectToken),
-            address(mockAdapter), // oracleAdapter parameter
-            DEFAULT_MIN_BET,
-            DEFAULT_MAX_BET,
-            DEFAULT_GRADUATION_THRESHOLD
+            address(projectToken), DEFAULT_MIN_BET, DEFAULT_MAX_BET, DEFAULT_GRADUATION_THRESHOLD
         );
         assetVault = AssetVault(payable(vaultAddr));
 
@@ -342,12 +384,22 @@ contract BaseTest is Test {
         // Set tokens for mock adapter now that they're created
         mockAdapter.setTokens(address(projectToken), address(usdc));
 
+        // Configure PriceFeedManager for project token
+        // Use mockAdapter as Blocksense adapter and create a mock Chainlink feed
+        // For testing, we'll use mockAdapter for both (since ChainlinkOracle needs a feed address)
+        // In real scenario, Chainlink feed would be a separate contract
+        address mockChainlinkFeed = address(mockAdapter); // Using same mock for simplicity
+        priceFeedManager.setPriceFeedConfig(
+            address(projectToken), address(mockAdapter), mockChainlinkFeed
+        );
+
         // Set position manager in vault so it can accept deposits
         // Note: Already set in constructor by VaultManager, but we re-set to be sure
         assetVault.setPositionManager(address(positionManager));
 
         console.log("AssetVault address:", address(assetVault));
         console.log("PositionManager address:", address(positionManager));
+        console.log("PriceFeedManager address:", address(priceFeedManager));
     }
 
     // Helper functions

@@ -397,6 +397,7 @@ contract IntegrationTest is BaseTest {
     // ========================================================================
 
     function testIntegration_SettlementEngine_GetPrice_WithMaxAge() public {
+        // PriceFeedManager is already configured in BaseTest.setUp()
         // Test new getSettlementPrice function with maxAge parameter
         (uint256 price, uint256 publishTime) = settlementEngine.getSettlementPrice(
             address(projectToken),
@@ -408,14 +409,15 @@ contract IntegrationTest is BaseTest {
     }
 
     function testIntegration_SettlementEngine_StalePrice_Reverts() public {
+        // PriceFeedManager is already configured in BaseTest.setUp()
         // Set old timestamp in mock adapter
         mockAdapter.setMockTimestamp(1);
 
         // Warp time to make price stale
         vm.warp(block.timestamp + 7200); // 2 hours later
 
-        // Should revert with stale price
-        vm.expectRevert(BlocksenseOracle.PriceStale.selector);
+        // PriceFeedManager throws InvalidOraclePrice for stale price
+        vm.expectRevert(PriceFeedManager.InvalidOraclePrice.selector);
         settlementEngine.getSettlementPrice(
             address(projectToken),
             3600 // 1 hour max age
@@ -431,11 +433,7 @@ contract IntegrationTest is BaseTest {
         MockERC20 newToken = new MockERC20("NewToken", "NEW");
 
         address newVaultAddr = vaultManager.createVault(
-            address(newToken),
-            address(mockAdapter), // oracleAdapter parameter
-            DEFAULT_MIN_BET,
-            DEFAULT_MAX_BET,
-            DEFAULT_GRADUATION_THRESHOLD
+            address(newToken), DEFAULT_MIN_BET, DEFAULT_MAX_BET, DEFAULT_GRADUATION_THRESHOLD
         );
 
         // Verify vault was created
