@@ -44,6 +44,13 @@ contract TokenFaucet is
     /// @notice Total amount of tokens claimed
     uint256 public totalClaimed;
 
+    // ============ Storage Gap ============
+
+    /// @dev Storage gap to allow for new variables in future versions
+    /// @notice Currently using 5 storage slots (token, claimAmount, hasClaimed, totalClaimers, totalClaimed)
+    /// @notice Reserving 45 slots for future use (total 50 slots)
+    uint256[45] private __gap;
+
     // ============ Events ============
 
     event TokensClaimed(address indexed user, uint256 amount);
@@ -65,7 +72,10 @@ contract TokenFaucet is
      * @param _token Address of the token contract
      * @param _claimAmount Amount of tokens each user can claim
      */
-    function initialize(address _token, uint256 _claimAmount) public initializer {
+    function initialize(
+        address _token,
+        uint256 _claimAmount
+    ) public initializer {
         if (_token == address(0)) revert InvalidTokenAddress();
         if (_claimAmount == 0) revert InvalidClaimAmount();
 
@@ -160,7 +170,9 @@ contract TokenFaucet is
      * @notice Reset claim status for multiple users
      * @param users Array of user addresses to reset
      */
-    function resetClaimStatusBatch(address[] calldata users) external onlyOwner {
+    function resetClaimStatusBatch(
+        address[] calldata users
+    ) external onlyOwner {
         for (uint256 i = 0; i < users.length; i++) {
             if (hasClaimed[users[i]]) {
                 hasClaimed[users[i]] = false;
@@ -212,11 +224,9 @@ contract TokenFaucet is
      * @return canClaim true if can claim
      * @return reason Reason why cannot claim (if applicable)
      */
-    function canUserClaim(address user)
-        external
-        view
-        returns (bool canClaim, string memory reason)
-    {
+    function canUserClaim(
+        address user
+    ) external view returns (bool canClaim, string memory reason) {
         if (paused()) {
             return (false, "Faucet is paused");
         }
@@ -257,7 +267,9 @@ contract TokenFaucet is
         _claimAmount = claimAmount;
         _totalClaimers = totalClaimers;
         _totalClaimed = totalClaimed;
-        remainingClaims = faucetBalance >= claimAmount ? faucetBalance / claimAmount : 0;
+        remainingClaims = faucetBalance >= claimAmount
+            ? faucetBalance / claimAmount
+            : 0;
         isPaused = paused();
     }
 }
