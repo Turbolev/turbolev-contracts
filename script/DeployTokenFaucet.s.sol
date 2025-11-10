@@ -9,10 +9,10 @@ import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 /**
  * @title DeployTokenFaucet
- * @dev Script để deploy TokenFaucet contract với proxy pattern
+ * @dev Script to deploy TokenFaucet contract with proxy pattern
  *
- * Cách sử dụng:
- * 1. Deploy implementation và proxy:
+ * Usage:
+ * 1. Deploy implementation and proxy:
  *    forge script script/DeployTokenFaucet.s.sol:DeployTokenFaucet --rpc-url <RPC_URL> --broadcast
  *
  * 2. Verify contract:
@@ -109,10 +109,10 @@ contract DeployFaucetWithMockETH is DeployHelper {
 
 contract DeployTokenFaucet is DeployHelper {
     function run() external {
-        // Đọc token address từ environment (hoặc hardcode nếu biết trước)
+        // Read token address from environment (or hardcode if known in advance)
         address tokenAddress = vm.envAddress("TOKEN_ADDRESS");
 
-        // Số lượng token mỗi lần claim (mặc định 100 tokens với 18 decimals)
+        // Token amount per claim (default 100 tokens with 18 decimals)
         uint256 claimAmount = vm.envOr("CLAIM_AMOUNT", uint256(100 * 10 ** 18));
 
         vm.startBroadcast(deployer);
@@ -144,14 +144,14 @@ contract DeployTokenFaucet is DeployHelper {
 
 /**
  * @title UpgradeTokenFaucet
- * @dev Script để upgrade TokenFaucet contract
+ * @dev Script to upgrade TokenFaucet contract
  *
- * Cách sử dụng:
+ * Usage:
  * forge script script/DeployTokenFaucet.s.sol:UpgradeTokenFaucet --rpc-url <RPC_URL> --broadcast
  */
 contract UpgradeTokenFaucet is DeployHelper {
     function run() external {
-        address proxyAddress = vm.envAddress("CUSTOM_TOKEN_FAUCET_ADDRESS");
+        address proxyAddress = vm.envAddress("FAUCET_ADDRESS");
 
         vm.startBroadcast(deployer);
 
@@ -160,13 +160,8 @@ contract UpgradeTokenFaucet is DeployHelper {
         console.log("New Implementation deployed at:", address(newImplementation));
 
         // Upgrade proxy to new implementation
-        TokenFaucet faucet = TokenFaucet(proxyAddress);
-
-        // Note: Cần có quyền owner để upgrade
-        // faucet.upgradeTo(address(newImplementation));
-
-        console.log("Proxy at:", proxyAddress);
-        console.log("Upgraded to new implementation:", address(newImplementation));
+        TokenFaucet(proxyAddress).upgradeToAndCall(address(newImplementation), "");
+        console.log("[SUCCESS] Upgraded TokenFaucet");
 
         vm.stopBroadcast();
     }
@@ -174,7 +169,7 @@ contract UpgradeTokenFaucet is DeployHelper {
 
 /**
  * @title InteractTokenFaucet
- * @dev Script để tương tác với TokenFaucet đã deploy
+ * @dev Script to interact with deployed TokenFaucet
  */
 contract InteractTokenFaucet is Script {
     function run() external {
@@ -196,7 +191,7 @@ contract InteractTokenFaucet is Script {
 
 /**
  * @title DepositToFaucet
- * @dev Script để owner deposit token vào faucet
+ * @dev Script for owner to deposit tokens into faucet
  */
 contract DepositToFaucet is Script {
     function run() external {
@@ -269,7 +264,7 @@ contract UpdateClaimAmount is Script {
 
 /**
  * @title GetFaucetInfo
- * @dev Script để xem thông tin faucet
+ * @dev Script to view faucet information
  */
 contract GetFaucetInfo is Script {
     function run() external view {

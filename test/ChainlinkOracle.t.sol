@@ -8,7 +8,7 @@ import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 /**
  * @title ChainlinkOracleTest
- * @notice Test suite cho ChainlinkOracle contract
+ * @notice Test suite for ChainlinkOracle contract
  */
 contract ChainlinkOracleTest is Test {
     ChainlinkOracle public chainlinkOracle;

@@ -13,11 +13,11 @@ import "../src/VaultManagerHelper.sol";
 
 /**
  * @title UpdateConnections
- * @notice Script để update connections giữa các contracts
- * @dev Sử dụng khi:
- *      - Deploy contract mới và cần connect với contracts cũ
- *      - Upgrade contract và cần reconnect
- *      - Fix connection issues
+ * @notice Script to update connections between contracts
+ * @dev Use when:
+ *      - Deploying new contract and need to connect with existing contracts
+ *      - Upgrading contract and need to reconnect
+ *      - Fixing connection issues
  *
  * Usage:
  * forge script script/UpdateConnections.s.sol:UpdateConnections \
