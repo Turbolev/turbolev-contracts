@@ -4,11 +4,11 @@ pragma solidity ^0.8.22;
 /**
  * @title IChainlinkOracle
  * @notice Interface for ChainlinkOracle contract
- * @dev Hybrid oracle với fallback mechanism từ Blocksense sang Chainlink
+ * @dev Hybrid oracle with fallback mechanism from Blocksense to Chainlink
  */
 interface IChainlinkOracle {
     /**
-     * @notice Get price với fallback mechanism
+     * @notice Get price with fallback mechanism
      * @param adapter CLAggregatorAdapter address (Blocksense primary source)
      * @return price Price in int256 format (scaled to 18 decimals)
      * @return updatedAt When price was last updated
@@ -20,7 +20,7 @@ interface IChainlinkOracle {
         returns (int256 price, uint256 updatedAt, bool usedFallback);
 
     /**
-     * @notice Get price với fallback và emit event khi dùng fallback
+     * @notice Get price with fallback and emit event when fallback is used
      * @param adapter CLAggregatorAdapter address
      * @return price Price in int256 format (scaled to 18 decimals)
      * @return updatedAt When price was last updated
@@ -30,7 +30,7 @@ interface IChainlinkOracle {
         returns (int256 price, uint256 updatedAt);
 
     /**
-     * @notice Get price từ cả 2 sources (for comparison/monitoring)
+     * @notice Get price from both sources (for comparison/monitoring)
      * @param adapter CLAggregatorAdapter address
      * @return blocksensePrice Price from Blocksense
      * @return blocksenseUpdatedAt Blocksense update time
@@ -52,7 +52,7 @@ interface IChainlinkOracle {
         );
 
     /**
-     * @notice Check nếu adapter có Chainlink fallback
+     * @notice Check if adapter has Chainlink fallback
      * @param adapter CLAggregatorAdapter address
      * @return hasFallback True if Chainlink fallback is configured
      * @return chainlinkFeed Chainlink feed address (or zero address)
@@ -63,7 +63,7 @@ interface IChainlinkOracle {
         returns (bool hasFallback, address chainlinkFeed);
 
     /**
-     * @notice Set Chainlink feed address cho một adapter (for fallback)
+     * @notice Set Chainlink feed address for an adapter (for fallback)
      * @param adapter CLAggregatorAdapter address (Blocksense)
      * @param chainlinkFeed Chainlink price feed address
      */

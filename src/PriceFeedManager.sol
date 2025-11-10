@@ -11,13 +11,13 @@ import "./ChainlinkOracle.sol";
 
 /**
  * @title PriceFeedManager
- * @notice Contract quản lý mapping project token address với các adapter/price feed address
- * @dev Contract upgradeable sử dụng UUPS pattern
+ * @notice Contract managing mapping of project token addresses with adapter/price feed addresses
+ * @dev Upgradeable contract using UUPS pattern
  *
  * Features:
- * - Mapping project token address với price feed configs (nhiều provider)
- * - Có thể update adapter/price feed address cho mỗi token
- * - Hỗ trợ nhiều provider: Blocksense, Chainlink
+ * - Map project token addresses with price feed configs (multiple providers)
+ * - Can update adapter/price feed address for each token
+ * - Support multiple providers: Blocksense, Chainlink
  * - UUPS Upgradeable pattern
  */
 contract PriceFeedManager is

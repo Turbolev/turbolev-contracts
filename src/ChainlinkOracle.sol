@@ -8,14 +8,14 @@ import "./interfaces/IChainlinkAggregatorV3.sol";
 
 /**
  * @title ChainlinkOracle
- * @notice Oracle contract để lấy giá từ Chainlink Price Feeds
- * @dev Lấy giá trực tiếp từ Chainlink feed address được truyền vào
+ * @notice Oracle contract to get prices from Chainlink Price Feeds
+ * @dev Gets prices directly from Chainlink feed address passed in
  *
  * Key Features:
- * - Lấy giá từ Chainlink Price Feed
- * - Scale tất cả giá về 18 decimals
+ * - Get prices from Chainlink Price Feed
+ * - Scale all prices to 18 decimals
  * - Configurable max price age
- * - Validate price freshness và validity
+ * - Validate price freshness and validity
  */
 contract ChainlinkOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgradeable {
     // ========================================================================
@@ -99,7 +99,7 @@ contract ChainlinkOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgrade
      * @param chainlinkFeed Chainlink price feed address
      * @return price Price in int256 format (scaled to 18 decimals)
      * @return updatedAt When price was last updated
-     * @dev Lấy giá trực tiếp từ Chainlink feed được truyền vào
+     * @dev Gets price directly from the provided Chainlink feed
      */
     function getPrice(address chainlinkFeed)
         external
@@ -120,11 +120,11 @@ contract ChainlinkOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgrade
     }
 
     /**
-     * @notice Get price from Chainlink feed (non-view version với event)
+     * @notice Get price from Chainlink feed (non-view version with event)
      * @param chainlinkFeed Chainlink price feed address
      * @return price Price in int256 format (scaled to 18 decimals)
      * @return updatedAt When price was last updated
-     * @dev Non-view version để có thể emit events
+     * @dev Non-view version to enable event emission
      */
     function getPriceWithEvent(address chainlinkFeed)
         external

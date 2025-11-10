@@ -7,7 +7,7 @@ import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 /**
  * @title TokenFaucet
  * @dev Token faucet contract with the following features:
@@ -19,11 +19,13 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
  * - Admin can deposit tokens
  * - Adjustable claim amount
  */
+
 contract TokenFaucet is
     Initializable,
     OwnableUpgradeable,
     ReentrancyGuardUpgradeable,
-    PausableUpgradeable
+    PausableUpgradeable,
+    UUPSUpgradeable
 {
     using SafeERC20 for IERC20;
 
@@ -43,6 +45,13 @@ contract TokenFaucet is
 
     /// @notice Total amount of tokens claimed
     uint256 public totalClaimed;
+
+    // ============ Storage Gap ============
+
+    /// @dev Storage gap to allow for new variables in future versions
+    /// @notice Currently using 5 storage slots (token, claimAmount, hasClaimed, totalClaimers, totalClaimed)
+    /// @notice Reserving 45 slots for future use (total 50 slots)
+    uint256[45] private __gap;
 
     // ============ Events ============
 
@@ -260,4 +269,9 @@ contract TokenFaucet is
         remainingClaims = faucetBalance >= claimAmount ? faucetBalance / claimAmount : 0;
         isPaused = paused();
     }
+
+    /**
+     * @notice Authorize upgrade (UUPS pattern)
+     */
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner { }
 }

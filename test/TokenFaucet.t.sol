@@ -8,11 +8,11 @@ import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 /**
  * @title MockToken
- * @dev Mock ERC20 token để test faucet
+ * @dev Mock ERC20 token for testing faucet
  */
 contract MockToken is ERC20 {
     constructor() ERC20("Mock Token", "MOCK") {
-        _mint(msg.sender, 1_000_000 * 10 ** 18); // Mint 1 triệu token
+        _mint(msg.sender, 1_000_000 * 10 ** 18); // Mint 1 million tokens
     }
 
     function mint(address to, uint256 amount) external {
@@ -22,7 +22,7 @@ contract MockToken is ERC20 {
 
 /**
  * @title TokenFaucetTest
- * @dev Test suite cho TokenFaucet contract
+ * @dev Test suite for TokenFaucet contract
  */
 contract TokenFaucetTest is Test {
     TokenFaucet public faucet;
@@ -53,13 +53,13 @@ contract TokenFaucetTest is Test {
         // Deploy implementation
         implementation = new TokenFaucet();
 
-        // Deploy proxy và initialize
+        // Deploy proxy and initialize
         bytes memory initData =
             abi.encodeWithSelector(TokenFaucet.initialize.selector, address(token), CLAIM_AMOUNT);
         proxy = new ERC1967Proxy(address(implementation), initData);
         faucet = TokenFaucet(address(proxy));
 
-        // Approve và deposit token vào faucet
+        // Approve and deposit tokens to faucet
         token.approve(address(faucet), INITIAL_DEPOSIT);
         faucet.deposit(INITIAL_DEPOSIT);
     }
@@ -141,7 +141,7 @@ contract TokenFaucetTest is Test {
     }
 
     function test_CannotClaimWhenInsufficientBalance() public {
-        // Withdraw hết token
+        // Withdraw all tokens
         faucet.withdraw(token.balanceOf(address(faucet)));
 
         vm.prank(user1);
@@ -293,14 +293,14 @@ contract TokenFaucetTest is Test {
     }
 
     function test_CanClaimAgainAfterReset() public {
-        // Claim lần đầu
+        // First claim
         vm.prank(user1);
         faucet.claim();
 
         // Reset
         faucet.resetClaimStatus(user1);
 
-        // Claim lại
+        // Claim again
         vm.prank(user1);
         faucet.claim();
 
@@ -318,7 +318,7 @@ contract TokenFaucetTest is Test {
     }
 
     function test_HasEnoughTokens_False() public {
-        // Withdraw hầu hết token
+        // Withdraw most tokens
         faucet.withdraw(INITIAL_DEPOSIT - CLAIM_AMOUNT + 1);
         assertFalse(faucet.hasEnoughTokens());
     }
@@ -422,7 +422,7 @@ contract TokenFaucetTest is Test {
         uint256 newAmount = 150 * 10 ** 18;
         faucet.setClaimAmount(newAmount);
 
-        // 3. User2 claim với amount mới
+        // 3. User2 claim with new amount
         vm.prank(user2);
         faucet.claim();
         assertEq(token.balanceOf(user2), newAmount);
@@ -430,7 +430,7 @@ contract TokenFaucetTest is Test {
         // 4. Pause faucet
         faucet.pause();
 
-        // 5. User không thể claim khi paused
+        // 5. User cannot claim when paused
         vm.prank(makeAddr("user3"));
         vm.expectRevert();
         faucet.claim();
@@ -438,7 +438,7 @@ contract TokenFaucetTest is Test {
         // 6. Unpause
         faucet.unpause();
 
-        // 7. User3 có thể claim
+        // 7. User3 can claim
         address user3 = makeAddr("user3");
         vm.prank(user3);
         faucet.claim();

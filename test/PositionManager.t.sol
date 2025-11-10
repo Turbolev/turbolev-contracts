@@ -18,7 +18,7 @@ contract PositionManagerTest is BaseTest {
         assertEq(positionManager.minLeverage(), 1, "Min leverage should be 1");
         assertEq(positionManager.maxLeverage(), 100, "Max leverage should be 100");
         assertEq(positionManager.minPositionHoldTime(), 60, "Min hold time should be 60");
-        // maxSlippageBps đã được bỏ, không cần test nữa
+        // maxSlippageBps has been removed, no need to test anymore
     }
 
     // ========================================================================
