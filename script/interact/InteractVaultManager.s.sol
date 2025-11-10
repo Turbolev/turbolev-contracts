@@ -93,23 +93,20 @@ contract InteractVaultManager is DeployHelper {
      */
     function createVault(
         address projectToken,
-        address oracleAdapter,
         uint256 minBetAmount,
         uint256 maxBetAmount,
         uint256 graduationThreshold
     ) public {
         console.log("\n=== Create Vault ===");
         console.log("Project Token:", projectToken);
-        console.log("Oracle Adapter:", oracleAdapter);
         console.log("Min Bet Amount:", minBetAmount);
         console.log("Max Bet Amount:", maxBetAmount);
         console.log("Graduation Threshold:", graduationThreshold);
 
         vm.startBroadcast(deployer);
 
-        address vaultAddr = vaultMgr.createVault(
-            projectToken, oracleAdapter, minBetAmount, maxBetAmount, graduationThreshold
-        );
+        address vaultAddr =
+            vaultMgr.createVault(projectToken, minBetAmount, maxBetAmount, graduationThreshold);
         console.log("Vault created at:", vaultAddr);
         vm.stopBroadcast();
     }
@@ -256,9 +253,9 @@ contract InteractVaultManager is DeployHelper {
         AssetVault vault = AssetVault(payable(vaultAddr));
 
         // Check pending rewards first
-        (uint256 pendingRewards, uint256 daysProcessed) = vault.calculatePendingRewards(deployer);
+        (uint256 pendingRewards, uint256 lastProcessedDay) = vault.calculatePendingRewards(deployer);
         console.log("Pending Rewards:", pendingRewards);
-        console.log("Days Processed:", daysProcessed);
+        console.log("Last Processed Day:", lastProcessedDay);
 
         if (pendingRewards == 0) {
             console.log("No rewards to claim");
@@ -566,38 +563,6 @@ contract InteractVaultManager is DeployHelper {
         vm.startBroadcast(deployer);
         vaultMgrHelper.unpauseVault(projectToken);
         console.log("Vault unpaused successfully");
-        vm.stopBroadcast();
-    }
-
-    /**
-     * @notice Set vault oracle adapter
-     * @param projectToken Project token address
-     * @param oracleAdapter Oracle adapter address
-     */
-    function setVaultOracleAdapter(address projectToken, address oracleAdapter) public {
-        console.log("\n=== Set Vault Oracle Adapter ===");
-        console.log("Project Token:", projectToken);
-        console.log("Oracle Adapter:", oracleAdapter);
-
-        vm.startBroadcast(deployer);
-        vaultMgrHelper.setVaultOracleAdapter(projectToken, oracleAdapter);
-        console.log("Oracle Adapter updated successfully");
-        vm.stopBroadcast();
-    }
-
-    /**
-     * @notice Set vault blocksense oracle
-     * @param projectToken Project token address
-     * @param blocksenseOracle Blocksense oracle address
-     */
-    function setVaultBlocksenseOracle(address projectToken, address blocksenseOracle) public {
-        console.log("\n=== Set Vault Blocksense Oracle ===");
-        console.log("Project Token:", projectToken);
-        console.log("Blocksense Oracle:", blocksenseOracle);
-
-        vm.startBroadcast(deployer);
-        vaultMgrHelper.setVaultBlocksenseOracle(projectToken, blocksenseOracle);
-        console.log("Blocksense Oracle updated successfully");
         vm.stopBroadcast();
     }
 

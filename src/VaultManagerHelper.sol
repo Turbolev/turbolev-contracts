@@ -3,7 +3,7 @@ pragma solidity ^0.8.22;
 
 import "./interfaces/IAssetVault.sol";
 import "./interfaces/IVaultManager.sol";
-import "./BlocksenseOracle.sol";
+import "./interfaces/IPriceFeedManager.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 
@@ -22,6 +22,12 @@ contract VaultManagerHelper {
 
     /// @notice Main VaultManager contract
     address public immutable vaultManager;
+
+    /// @notice PriceFeedManager contract address
+    address public priceFeedManager;
+
+    /// @notice Maximum price age for USD value calculation (1 hour)
+    uint256 public constant MAX_PRICE_AGE_FOR_USD_CALC = 3600;
 
     // ========================================================================
     // ERRORS
@@ -159,23 +165,25 @@ contract VaultManagerHelper {
      * @return totalUSD Total value in USD (18 decimals)
      */
     function getTotalValueUSD() external view returns (uint256 totalUSD) {
+        if (priceFeedManager == address(0)) {
+            return 0;
+        }
+
         address[] memory vaults = IVaultManager(vaultManager).getAllVaults();
 
         for (uint256 i = 0; i < vaults.length; i++) {
-            IAssetVault.VaultInfo memory info = IAssetVault(vaults[i]).getVaultInfo();
+            address vault = vaults[i];
+            IAssetVault.VaultInfo memory info = IAssetVault(vault).getVaultInfo();
+            // Get project token from VaultManager mapping
+            address projectToken = IVaultManager(vaultManager).vaultProjectToken(vault);
 
-            // Get price from vault's oracle
-            address adapter = IAssetVault(vaults[i]).oracleAdapter();
-            address payable oracle = payable(IAssetVault(vaults[i]).blocksenseOracle());
-
-            if (oracle == address(0) || adapter == address(0)) {
-                continue;
-            }
-
-            try BlocksenseOracle(oracle).getPriceUnsafe(adapter) returns (int256 price, uint256) {
+            // Get price from PriceFeedManager
+            try IPriceFeedManager(priceFeedManager).getPrice(
+                projectToken, MAX_PRICE_AGE_FOR_USD_CALC
+            ) returns (uint256 price, uint256) {
                 if (price > 0) {
                     // Calculate value: totalLiquidity * price / 1e18
-                    totalUSD += (info.totalLiquidity * uint256(price)) / 1e18;
+                    totalUSD += (info.totalLiquidity * price) / 1e18;
                 }
             } catch {
                 // Skip vault if price unavailable
@@ -326,32 +334,11 @@ contract VaultManagerHelper {
     }
 
     /**
-     * @notice Set oracle adapter for a vault
-     * @param tokenAddress Token address
-     * @param oracleAdapter Oracle adapter address
+     * @notice Set PriceFeedManager address
+     * @param _priceFeedManager PriceFeedManager contract address
      */
-    function setVaultOracleAdapter(address tokenAddress, address oracleAdapter)
-        external
-        onlyOwner
-    {
-        address vaultAddress = IVaultManager(vaultManager).getVault(tokenAddress);
-        if (vaultAddress == address(0)) revert VaultNotFound();
-
-        IAssetVault(vaultAddress).setOracleAdapter(oracleAdapter);
-    }
-
-    /**
-     * @notice Set Blocksense Oracle for a vault
-     * @param tokenAddress Token address
-     * @param blocksenseOracle BlocksenseOracle contract address
-     */
-    function setVaultBlocksenseOracle(address tokenAddress, address blocksenseOracle)
-        external
-        onlyOwner
-    {
-        address vaultAddress = IVaultManager(vaultManager).getVault(tokenAddress);
-        if (vaultAddress == address(0)) revert VaultNotFound();
-
-        IAssetVault(vaultAddress).setBlocksenseOracle(blocksenseOracle);
+    function setPriceFeedManager(address _priceFeedManager) external onlyOwner {
+        if (_priceFeedManager == address(0)) revert InvalidAddress();
+        priceFeedManager = _priceFeedManager;
     }
 }

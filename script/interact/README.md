@@ -300,8 +300,8 @@ forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
 ```bash
 # Create vault
 forge script script/interact/InteractVaultManager.s.sol:InteractVaultManager \
-  --sig "createVault(address,address,address,uint16,uint16,uint16,uint256,uint256,uint256)" \
-  0xPROJECT_TOKEN 0xBASE 0xQUOTE 500 1000 8000 1000000000000000 1000000000000000000000 10000000000000000000000 \
+  --sig "createVault(address,address,address,uint256,uint256,uint256)" \
+  0xPROJECT_TOKEN 0xBASE 1000000000000000 1000000000000000000000 10000000000000000000000 \
   --rpc-url $RPC_URL \
   --broadcast
 
@@ -691,7 +691,7 @@ forge script script/interact/InteractPositionManager.s.sol:InteractPositionManag
 ```bash
 # Process với detailed logging
 forge script script/interact/InteractPositionManager.s.sol:InteractPositionManager \
-  --sig "processPendingClosePositionsVerbose(uint256)" 10 \
+  --sig "processPendingClosePositions(uint256, uint256)" 10 \
   --rpc-url $RPC_URL --broadcast
 
 # Auto-retry processing (batchSize=10, maxIterations=5)

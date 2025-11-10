@@ -181,6 +181,19 @@ contract InteractSettlementEngine is DeployHelper {
     }
 
     /**
+     * @notice Set Chainlink Oracle address
+     */
+    function setChainlinkOracle(address newOracle) public {
+        console.log("\n=== Set Chainlink Oracle ===");
+        console.log("New Oracle:", newOracle);
+
+        vm.startBroadcast(deployer);
+        settlement.setChainlinkOracle(payable(newOracle));
+        console.log("Chainlink Oracle updated successfully");
+        vm.stopBroadcast();
+    }
+
+    /**
      * @notice Pause settlement engine
      */
     function pauseSettlement() public {

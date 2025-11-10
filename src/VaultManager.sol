@@ -168,30 +168,32 @@ contract VaultManager is
      * @param _graduationThreshold Token amount threshold for graduation
      * @return vaultAddress Address of created vault
      */
+    /**
+     * @notice Create a new vault for a project token
+     * @param _projectToken Project token address
+     * @param _minBetAmount Min bet amount
+     * @param _maxBetAmount Max bet amount
+     * @param _graduationThreshold Token amount threshold for graduation
+     * @return vaultAddress Address of the newly created vault
+     */
     function createVault(
         address _projectToken,
-        address _oracleAdapter,
         uint256 _minBetAmount,
         uint256 _maxBetAmount,
         uint256 _graduationThreshold
     ) external onlyOwner returns (address vaultAddress) {
-        if (
-            _projectToken == address(0) || _oracleAdapter == address(0)
-                || vaultManagerHelper == address(0)
-        ) revert InvalidAddress();
+        if (_projectToken == address(0) || vaultManagerHelper == address(0)) {
+            revert InvalidAddress();
+        }
         if (vaultsByProjectToken[_projectToken] != address(0)) {
             revert DuplicateProjectToken();
         }
 
-        // Note: oracleAdapter will be set separately after vault creation
-        // by calling setVaultOracleAdapter() with the appropriate adapter address
         AssetVault vault = new AssetVault(
             _projectToken,
             address(this),
             vaultManagerHelper,
             positionManager,
-            blocksenseOracle,
-            _oracleAdapter,
             _minBetAmount,
             _maxBetAmount,
             _graduationThreshold

@@ -83,4 +83,27 @@ interface ISettlementEngine {
         external
         view
         returns (uint256 closePrice, uint256 publishTime);
+
+    /**
+     * @notice Get settlement price with fallback and emit event (non-view version)
+     * @param projectToken Project token address
+     * @param maxAge Maximum acceptable price age in seconds
+     * @return closePrice Settlement price
+     * @return publishTime When price was last updated
+     */
+    function getSettlementPriceWithFallback(address projectToken, uint256 maxAge)
+        external
+        returns (uint256 closePrice, uint256 publishTime);
+
+    /**
+     * @notice Set ChainlinkOracle address (for fallback)
+     * @param chainlinkOracle ChainlinkOracle contract address
+     */
+    function setChainlinkOracle(address chainlinkOracle) external;
+
+    /**
+     * @notice Get ChainlinkOracle address
+     * @return oracle ChainlinkOracle contract address
+     */
+    function chainlinkOracle() external view returns (address oracle);
 }

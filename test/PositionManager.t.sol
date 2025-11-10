@@ -56,6 +56,17 @@ contract PositionManagerTest is BaseTest {
         positionManager.setVaultManager(address(0));
     }
 
+    function test_SetPriceFeedManager_Success() public {
+        address newPFM = makeAddr("newPriceFeedManager");
+        positionManager.setPriceFeedManager(newPFM);
+        assertEq(positionManager.priceFeedManager(), newPFM, "PriceFeedManager should be updated");
+    }
+
+    function test_SetPriceFeedManager_RevertsOnZeroAddress() public {
+        vm.expectRevert(abi.encodeWithSelector(PositionManager.InvalidAddress.selector));
+        positionManager.setPriceFeedManager(address(0));
+    }
+
     function test_SetMaintenanceMarginRatio_Success() public {
         positionManager.setMaintenanceMarginRatio(3000);
         assertEq(positionManager.maintenanceMarginRatio(), 3000, "MMR should be updated");

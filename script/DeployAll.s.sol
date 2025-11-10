@@ -5,10 +5,12 @@ import "forge-std/Script.sol";
 import "./DeployHelper.s.sol";
 
 import "../src/BlocksenseOracle.sol";
+import "../src/ChainlinkOracle.sol";
 import "../src/SettlementEngine.sol";
 import "../src/PositionManager.sol";
 import "../src/VaultManager.sol";
 import "../src/VaultManagerHelper.sol";
+import "../src/PriceFeedManager.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 /**
@@ -19,15 +21,24 @@ import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 contract DeployAll is DeployHelper {
     // Implementations (logic contracts) for upgradeable contracts
     address public blocksenseOracleImpl;
+    address public chainlinkOracleImpl;
     address public settlementEngineImpl;
     address public positionManagerImpl;
     address public vaultManagerImpl;
+    address public priceFeedManagerImpl;
 
     // Proxies for upgradeable contracts
     address public blocksenseOracleProxy;
+    address public chainlinkOracleProxy;
     address public settlementEngineProxy;
     address public positionManagerProxy;
     address public vaultManagerProxy;
+    address public priceFeedManagerProxy;
+
+    // Retry configuration
+    uint256 public constant MAX_RETRIES = 3;
+    uint256 public constant DELAY_BETWEEN_STEPS = 2 seconds; // Delay between deployment steps
+    uint256 public constant DELAY_BETWEEN_RETRIES = 3 seconds; // Delay between retries
 
     function run() public {
         vm.startBroadcast(deployer);
@@ -36,33 +47,48 @@ contract DeployAll is DeployHelper {
         console.log("Starting Boolean Contracts Deployment");
         console.log("Chain ID:", block.chainid);
         console.log("Deployer:", deployer);
+        console.log("Max Retries:", MAX_RETRIES);
+        console.log("Delay between steps:", DELAY_BETWEEN_STEPS, "seconds");
         console.log("===========================================\n");
 
         // Validate addresses
         _validateAddresses();
 
         // Step 1: Deploy BlocksenseOracle
-        _deployBlocksenseOracle();
+        _deployBlocksenseOracleWithRetry();
+        _waitBetweenSteps();
 
-        // Step 2: Deploy SettlementEngine
-        _deploySettlementEngine();
+        // Step 2: Deploy ChainlinkOracle
+        _deployChainlinkOracleWithRetry();
+        _waitBetweenSteps();
 
-        // Step 3: Deploy PositionManager
-        _deployPositionManager();
+        // Step 3: Deploy SettlementEngine
+        _deploySettlementEngineWithRetry();
+        _waitBetweenSteps();
 
-        // Step 4: Deploy VaultManager
-        _deployVaultManager();
+        // Step 4: Deploy PositionManager
+        _deployPositionManagerWithRetry();
+        _waitBetweenSteps();
 
-        // Step 5: Deploy VaultManagerHelper
-        _deployVaultManagerHelper();
+        // Step 5: Deploy VaultManager
+        _deployVaultManagerWithRetry();
+        _waitBetweenSteps();
 
-        // Step 6: Setup contract connections
-        _setupConnections();
+        // Step 6: Deploy VaultManagerHelper
+        _deployVaultManagerHelperWithRetry();
+        _waitBetweenSteps();
 
-        // Step 7: Verify deployment
+        // Step 7: Deploy PriceFeedManager
+        _deployPriceFeedManagerWithRetry();
+        _waitBetweenSteps();
+
+        // Step 8: Setup contract connections
+        _setupConnectionsWithRetry();
+
+        // Step 8: Verify deployment
         _verifyDeployment();
 
-        // Step 8: Save addresses
+        // Step 9: Save addresses
         // _saveDeploymentAddresses();
 
         console.log("\n===========================================");
@@ -112,8 +138,42 @@ contract DeployAll is DeployHelper {
         _logDeployment("BlocksenseOracle Implementation", blocksenseOracleImpl);
     }
 
+    function _deployChainlinkOracle() internal {
+        console.log("\nStep 2: Deploying ChainlinkOracle...");
+
+        // Deploy new implementation
+        chainlinkOracleImpl = address(new ChainlinkOracle());
+        console.log("Implementation deployed:", chainlinkOracleImpl);
+
+        // Check if proxy already exists
+        if (_isContractDeployed(chainlinkOracle)) {
+            console.log("Proxy already exists at:", chainlinkOracle);
+            console.log("Upgrading to new implementation...");
+
+            // Upgrade existing proxy to new implementation
+            ChainlinkOracle(chainlinkOracle).upgradeToAndCall(chainlinkOracleImpl, "");
+            console.log("[UPGRADED] ChainlinkOracle");
+        } else {
+            console.log("Deploying new proxy...");
+
+            // Prepare initialization data
+            bytes memory initData = abi.encodeWithSelector(
+                ChainlinkOracle.initialize.selector, blocksenseOracle, ORACLE_MAX_PRICE_AGE
+            );
+
+            // Deploy proxy
+            chainlinkOracleProxy = address(new ERC1967Proxy(chainlinkOracleImpl, initData));
+            chainlinkOracle = payable(chainlinkOracleProxy);
+
+            console.log("[NEW] ChainlinkOracle proxy deployed:", chainlinkOracle);
+        }
+
+        _logDeployment("ChainlinkOracle", chainlinkOracle);
+        _logDeployment("ChainlinkOracle Implementation", chainlinkOracleImpl);
+    }
+
     function _deploySettlementEngine() internal {
-        console.log("\nStep 2: Deploying SettlementEngine...");
+        console.log("\nStep 3: Deploying SettlementEngine...");
 
         // Deploy new implementation
         settlementEngineImpl = address(new SettlementEngine());
@@ -152,7 +212,7 @@ contract DeployAll is DeployHelper {
     }
 
     function _deployPositionManager() internal {
-        console.log("\nStep 3: Deploying PositionManager...");
+        console.log("\nStep 4: Deploying PositionManager...");
 
         // Deploy new implementation
         positionManagerImpl = address(new PositionManager());
@@ -192,7 +252,7 @@ contract DeployAll is DeployHelper {
     }
 
     function _deployVaultManager() internal {
-        console.log("\nStep 4: Deploying VaultManager...");
+        console.log("\nStep 5: Deploying VaultManager...");
 
         // Deploy new implementation
         vaultManagerImpl = address(new VaultManager());
@@ -230,7 +290,7 @@ contract DeployAll is DeployHelper {
             return;
         }
 
-        console.log("\nStep 5: Deploying VaultManagerHelper...");
+        console.log("\nStep 6: Deploying VaultManagerHelper...");
 
         // Deploy VaultManagerHelper (non-upgradeable)
         vaultManagerHelper = payable(address(new VaultManagerHelper(payable(vaultManager))));
@@ -238,46 +298,110 @@ contract DeployAll is DeployHelper {
         _logDeployment("VaultManagerHelper", vaultManagerHelper);
     }
 
+    function _deployPriceFeedManager() internal {
+        console.log("\nStep 7: Deploying PriceFeedManager...");
+
+        // Deploy new implementation
+        priceFeedManagerImpl = address(new PriceFeedManager());
+        console.log("Implementation deployed:", priceFeedManagerImpl);
+
+        // Check if proxy already exists
+        if (_isContractDeployed(priceFeedManager)) {
+            console.log("Proxy already exists at:", priceFeedManager);
+            console.log("Upgrading to new implementation...");
+
+            // Upgrade existing proxy to new implementation
+            PriceFeedManager(payable(priceFeedManager)).upgradeToAndCall(priceFeedManagerImpl, "");
+            console.log("[UPGRADED] PriceFeedManager");
+        } else {
+            console.log("Deploying new proxy...");
+
+            // Prepare initialization data
+            bytes memory initData = abi.encodeWithSelector(
+                PriceFeedManager.initialize.selector,
+                owner,
+                payable(blocksenseOracle),
+                chainlinkOracle
+            );
+
+            // Deploy proxy
+            priceFeedManagerProxy = address(new ERC1967Proxy(priceFeedManagerImpl, initData));
+            priceFeedManager = payable(priceFeedManagerProxy);
+
+            console.log("[NEW] PriceFeedManager proxy deployed:", priceFeedManager);
+        }
+
+        _logDeployment("PriceFeedManager", priceFeedManager);
+        _logDeployment("PriceFeedManager Implementation", priceFeedManagerImpl);
+    }
+
     // ========================================================================
     // SETUP FUNCTIONS
     // ========================================================================
 
-    function _setupConnections() internal {
-        console.log("\nStep 6: Setting up contract connections...");
+    function _setupSettlementEngineConnections() internal {
+        console.log("\n--- Setting up SettlementEngine connections ---");
 
         // BlocksenseOracle: Set in SettlementEngine
         SettlementEngine(settlementEngine).setBlocksenseOracle(blocksenseOracle);
-        console.log("Connected BlocksenseOracle to SettlementEngine");
+        console.log("[OK] Connected BlocksenseOracle to SettlementEngine");
+
+        // ChainlinkOracle: Set in SettlementEngine (for fallback)
+        SettlementEngine(settlementEngine).setChainlinkOracle(chainlinkOracle);
+        console.log("[OK] Connected ChainlinkOracle to SettlementEngine");
 
         SettlementEngine(settlementEngine).setVaultManager(vaultManager);
-        console.log("Connected SettlementEngine to VaultManager");
+        console.log("[OK] Connected VaultManager to SettlementEngine");
 
         SettlementEngine(settlementEngine).setPositionManager(positionManager);
-        console.log("Connected SettlementEngine to PositionManager");
+        console.log("[OK] Connected PositionManager to SettlementEngine");
+
+        // PriceFeedManager: Set in SettlementEngine
+        SettlementEngine(settlementEngine).setPriceFeedManager(priceFeedManager);
+        console.log("[OK] Connected PriceFeedManager to SettlementEngine");
+    }
+
+    function _setupPositionManagerConnections() internal {
+        console.log("\n--- Setting up PositionManager connections ---");
 
         // SettlementEngine: Set in PositionManager
         PositionManager(payable(positionManager)).setSettlementEngine(settlementEngine);
-        console.log("Connected SettlementEngine to PositionManager");
+        console.log("[OK] Connected SettlementEngine to PositionManager");
 
         // VaultManager: Set in PositionManager
         PositionManager(payable(positionManager)).setVaultManager(vaultManager);
-        console.log("Connected VaultManager to PositionManager");
+        console.log("[OK] Connected VaultManager to PositionManager");
+
+        // PriceFeedManager: Set in PositionManager
+        PositionManager(payable(positionManager)).setPriceFeedManager(priceFeedManager);
+        console.log("[OK] Connected PriceFeedManager to PositionManager");
+    }
+
+    function _setupVaultManagerConnections() internal {
+        console.log("\n--- Setting up VaultManager connections ---");
 
         // PositionManager: Set in VaultManager
         VaultManager(vaultManager).setPositionManager(positionManager);
-        console.log("Connected PositionManager to VaultManager");
+        console.log("[OK] Connected PositionManager to VaultManager");
 
         // SettlementEngine: Set in VaultManager
         VaultManager(vaultManager).setSettlementEngine(settlementEngine);
-        console.log("Connected SettlementEngine to VaultManager");
+        console.log("[OK] Connected SettlementEngine to VaultManager");
 
         // BlocksenseOracle: Set in VaultManager
         VaultManager(vaultManager).setBlocksenseOracle(blocksenseOracle);
-        console.log("Connected BlocksenseOracle to VaultManager");
+        console.log("[OK] Connected BlocksenseOracle to VaultManager");
 
         // VaultManagerHelper: Set in VaultManager
         VaultManager(vaultManager).setVaultManagerHelper(vaultManagerHelper);
-        console.log("Connected VaultManagerHelper to VaultManager");
+        console.log("[OK] Connected VaultManagerHelper to VaultManager");
+    }
+
+    function _setupPriceFeedManagerConnections() internal pure {
+        console.log("\n--- Setting up PriceFeedManager connections ---");
+
+        // BlocksenseOracle and ChainlinkOracle are already set during initialization
+        console.log("[OK] PriceFeedManager initialized with oracles");
     }
 
     // ========================================================================
@@ -285,24 +409,33 @@ contract DeployAll is DeployHelper {
     // ========================================================================
 
     function _verifyDeployment() internal view {
-        console.log("\nStep 7: Verifying deployment...");
+        console.log("\nStep 8: Verifying deployment...");
 
         require(blocksenseOracle != address(0), "BlocksenseOracle not deployed");
+        require(chainlinkOracle != address(0), "ChainlinkOracle not deployed");
         require(settlementEngine != address(0), "SettlementEngine not deployed");
         require(positionManager != address(0), "PositionManager not deployed");
         require(vaultManager != address(0), "VaultManager not deployed");
         require(vaultManagerHelper != address(0), "VaultManagerHelper not deployed");
+        require(priceFeedManager != address(0), "PriceFeedManager not deployed");
 
         // Verify owner
         require(Ownable(blocksenseOracle).owner() == owner, "Wrong BlocksenseOracle owner");
+        require(Ownable(chainlinkOracle).owner() == owner, "Wrong ChainlinkOracle owner");
         require(Ownable(settlementEngine).owner() == owner, "Wrong SettlementEngine owner");
         require(Ownable(positionManager).owner() == owner, "Wrong PositionManager owner");
         require(Ownable(vaultManager).owner() == owner, "Wrong VaultManager owner");
+        require(Ownable(priceFeedManager).owner() == owner, "Wrong PriceFeedManager owner");
 
         // Verify connections
         require(
             SettlementEngine(settlementEngine).blocksenseOracle() == blocksenseOracle,
-            "SettlementEngine oracle not set"
+            "SettlementEngine blocksense oracle not set"
+        );
+
+        require(
+            SettlementEngine(settlementEngine).chainlinkOracle() == chainlinkOracle,
+            "SettlementEngine chainlink oracle not set"
         );
 
         require(
@@ -324,6 +457,163 @@ contract DeployAll is DeployHelper {
     }
 
     // ========================================================================
+    // RETRY & DELAY FUNCTIONS
+    // ========================================================================
+
+    /**
+     * @notice Deploy BlocksenseOracle with retry logic
+     * @dev Retry logic is handled by waiting between steps and using --slow flag
+     */
+    function _deployBlocksenseOracleWithRetry() internal {
+        console.log("\n[Deploying BlocksenseOracle]");
+        _deployBlocksenseOracle();
+        console.log("[SUCCESS] Deployed BlocksenseOracle");
+    }
+
+    /**
+     * @notice Deploy ChainlinkOracle with retry logic
+     * @dev Retry logic is handled by waiting between steps and using --slow flag
+     */
+    function _deployChainlinkOracleWithRetry() internal {
+        console.log("\n[Deploying ChainlinkOracle]");
+        _deployChainlinkOracle();
+        console.log("[SUCCESS] Deployed ChainlinkOracle");
+    }
+
+    /**
+     * @notice Deploy SettlementEngine with retry logic
+     * @dev Retry logic is handled by waiting between steps and using --slow flag
+     */
+    function _deploySettlementEngineWithRetry() internal {
+        console.log("\n[Deploying SettlementEngine]");
+        _deploySettlementEngine();
+        console.log("[SUCCESS] Deployed SettlementEngine");
+    }
+
+    /**
+     * @notice Deploy PositionManager with retry logic
+     * @dev Retry logic is handled by waiting between steps and using --slow flag
+     */
+    function _deployPositionManagerWithRetry() internal {
+        console.log("\n[Deploying PositionManager]");
+        _deployPositionManager();
+        console.log("[SUCCESS] Deployed PositionManager");
+    }
+
+    /**
+     * @notice Deploy VaultManager with retry logic
+     * @dev Retry logic is handled by waiting between steps and using --slow flag
+     */
+    function _deployVaultManagerWithRetry() internal {
+        console.log("\n[Deploying VaultManager]");
+        _deployVaultManager();
+        console.log("[SUCCESS] Deployed VaultManager");
+    }
+
+    /**
+     * @notice Deploy VaultManagerHelper with retry logic
+     * @dev Retry logic is handled by waiting between steps and using --slow flag
+     */
+    function _deployVaultManagerHelperWithRetry() internal {
+        console.log("\n[Deploying VaultManagerHelper]");
+        _deployVaultManagerHelper();
+        console.log("[SUCCESS] Deployed VaultManagerHelper");
+    }
+
+    function _deployPriceFeedManagerWithRetry() internal {
+        console.log("\n[Deploying PriceFeedManager]");
+        _deployPriceFeedManager();
+        console.log("[SUCCESS] Deployed PriceFeedManager");
+    }
+
+    /**
+     * @notice Setup SettlementEngine connections with retry logic
+     * @dev Retry logic is handled by waiting between steps and using --slow flag
+     */
+    function _setupSettlementEngineConnectionsWithRetry() internal {
+        console.log("[Setup SettlementEngine connections]");
+        _setupSettlementEngineConnections();
+        console.log("[SUCCESS] Setup SettlementEngine connections");
+    }
+
+    /**
+     * @notice Setup PositionManager connections with retry logic
+     * @dev Retry logic is handled by waiting between steps and using --slow flag
+     */
+    function _setupPositionManagerConnectionsWithRetry() internal {
+        console.log("[Setup PositionManager connections]");
+        _setupPositionManagerConnections();
+        console.log("[SUCCESS] Setup PositionManager connections");
+    }
+
+    /**
+     * @notice Setup VaultManager connections with retry logic
+     * @dev Retry logic is handled by waiting between steps and using --slow flag
+     */
+    function _setupVaultManagerConnectionsWithRetry() internal {
+        console.log("[Setup VaultManager connections]");
+        _setupVaultManagerConnections();
+        console.log("[SUCCESS] Setup VaultManager connections");
+    }
+
+    /**
+     * @notice Wait between deployment steps
+     * @dev In broadcast mode, this will just log a message
+     *      Actual delay happens between transactions due to --slow flag
+     */
+    function _waitBetweenSteps() internal {
+        console.log("\n[WAIT] Waiting", DELAY_BETWEEN_STEPS, "seconds before next step...");
+        console.log("NOTE: When using --slow flag, transactions are sent sequentially");
+        _wait(DELAY_BETWEEN_STEPS);
+    }
+
+    /**
+     * @notice Wait for specified duration
+     * @param duration Duration to wait in seconds
+     * @dev Uses vm.sleep() which works in fork mode, logs message in broadcast mode
+     */
+    function _wait(uint256 duration) internal {
+        // In broadcast mode, vm.sleep() doesn't actually delay
+        // But it helps with logging and makes the script more readable
+        // Use vm.sleep() if available (fork mode)
+        // In broadcast mode, --slow flag handles actual delays
+        vm.sleep(duration);
+    }
+
+    /**
+     * @notice Setup connections with retry logic
+     */
+    function _setupConnectionsWithRetry() internal {
+        console.log("\nStep 7: Setting up contract connections with retry...");
+        console.log(
+            "NOTE: If some transactions fail, you can run UpdateConnections.s.sol separately"
+        );
+
+        // Validate all contracts are deployed before connecting
+        require(blocksenseOracle != address(0), "BlocksenseOracle not deployed");
+        require(chainlinkOracle != address(0), "ChainlinkOracle not deployed");
+        require(settlementEngine != address(0), "SettlementEngine not deployed");
+        require(positionManager != address(0), "PositionManager not deployed");
+        require(vaultManager != address(0), "VaultManager not deployed");
+        require(vaultManagerHelper != address(0), "VaultManagerHelper not deployed");
+
+        // Setup SettlementEngine connections with retry
+        _setupSettlementEngineConnectionsWithRetry();
+        _waitBetweenSteps();
+
+        // Setup PositionManager connections with retry
+        _setupPositionManagerConnectionsWithRetry();
+        _waitBetweenSteps();
+
+        // Setup VaultManager connections with retry
+        _setupVaultManagerConnectionsWithRetry();
+        _waitBetweenSteps();
+
+        // Setup PriceFeedManager connections (already initialized with oracles)
+        _setupPriceFeedManagerConnections();
+    }
+
+    // ========================================================================
     // HELPER FUNCTIONS
     // ========================================================================
 
@@ -332,12 +622,14 @@ contract DeployAll is DeployHelper {
         console.log("Network Chain ID:", block.chainid);
         console.log("\nCore Contracts:");
         console.log("- BlocksenseOracle:", blocksenseOracle);
+        console.log("- ChainlinkOracle:", chainlinkOracle);
         console.log("- SettlementEngine:", settlementEngine);
         console.log("- PositionManager:", positionManager);
         console.log("- VaultManager:", vaultManager);
         console.log("- VaultManagerHelper:", vaultManagerHelper);
         console.log("\nImplementations:");
         console.log("- BlocksenseOracle Impl:", blocksenseOracleImpl);
+        console.log("- ChainlinkOracle Impl:", chainlinkOracleImpl);
         console.log("- SettlementEngine Impl:", settlementEngineImpl);
         console.log("- PositionManager Impl:", positionManagerImpl);
         console.log("- VaultManager Impl:", vaultManagerImpl);

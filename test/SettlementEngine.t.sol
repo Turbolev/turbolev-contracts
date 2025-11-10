@@ -129,21 +129,17 @@ contract SettlementEngineTest is BaseTest {
         settlementEngine.setVaultManager(address(0));
     }
 
-    function test_SetBlocksenseOracle_Success() public {
-        BlocksenseOracle newOracle = new BlocksenseOracle();
-        bytes memory initData = abi.encodeWithSelector(
-            BlocksenseOracle.initialize.selector, owner, address(mockRegistry), 3600
-        );
-        ERC1967Proxy proxy = new ERC1967Proxy(address(newOracle), initData);
+    function test_SetPriceFeedManager_Success() public {
+        address newPFM = makeAddr("newPriceFeedManager");
 
-        settlementEngine.setBlocksenseOracle(payable(address(proxy)));
+        settlementEngine.setPriceFeedManager(newPFM);
 
-        assertEq(settlementEngine.blocksenseOracle(), address(proxy), "Oracle should be updated");
+        assertEq(settlementEngine.priceFeedManager(), newPFM, "PriceFeedManager should be updated");
     }
 
-    function test_SetBlocksenseOracle_RevertsOnZeroAddress() public {
+    function test_SetPriceFeedManager_RevertsOnZeroAddress() public {
         vm.expectRevert(abi.encodeWithSelector(SettlementEngine.InvalidAddress.selector));
-        settlementEngine.setBlocksenseOracle(payable(address(0)));
+        settlementEngine.setPriceFeedManager(address(0));
     }
 
     function test_Pause_Success() public {
@@ -182,6 +178,14 @@ contract SettlementEngineTest is BaseTest {
     // ========================================================================
 
     function test_GetSettlementPrice_Success() public {
+        // Set tokens for mock adapter
+        mockAdapter.setTokens(address(projectToken), address(usdc));
+
+        // Configure PriceFeedManager for projectToken
+        priceFeedManager.setPriceFeedConfig(
+            address(projectToken), address(mockAdapter), address(mockAdapter)
+        );
+
         _updatePrice(address(projectToken), address(usdc), 100e18);
 
         (uint256 price, uint256 publishTime) =
@@ -192,6 +196,14 @@ contract SettlementEngineTest is BaseTest {
     }
 
     function test_GetSettlementPrice_RevertsWhenPaused() public {
+        // Set tokens for mock adapter
+        mockAdapter.setTokens(address(projectToken), address(usdc));
+
+        // Configure PriceFeedManager for projectToken
+        priceFeedManager.setPriceFeedConfig(
+            address(projectToken), address(mockAdapter), address(mockAdapter)
+        );
+
         _updatePrice(address(projectToken), address(usdc), 100e18);
         settlementEngine.pause();
 
@@ -200,6 +212,14 @@ contract SettlementEngineTest is BaseTest {
     }
 
     function test_GetSettlementPrice_RevertsOnStalePrice() public {
+        // Set tokens for mock adapter
+        mockAdapter.setTokens(address(projectToken), address(usdc));
+
+        // Configure PriceFeedManager for projectToken
+        priceFeedManager.setPriceFeedConfig(
+            address(projectToken), address(mockAdapter), address(mockAdapter)
+        );
+
         _updatePrice(address(projectToken), address(usdc), 100e18);
 
         // Set old timestamp in mock adapter (1 hour ago)
@@ -208,8 +228,27 @@ contract SettlementEngineTest is BaseTest {
         // Warp to make sure current time is much later
         vm.warp(block.timestamp + 7200); // 2 hours later
 
-        // Oracle throws PriceStale for stale price
-        vm.expectRevert(abi.encodeWithSelector(BlocksenseOracle.PriceStale.selector));
+        // PriceFeedManager throws InvalidOraclePrice for stale price
+        vm.expectRevert(abi.encodeWithSelector(PriceFeedManager.InvalidOraclePrice.selector));
         settlementEngine.getSettlementPrice(address(projectToken), 3600);
+    }
+
+    function test_GetSettlementPrice_RevertNoPriceFeedManager() public {
+        // Cannot set PriceFeedManager to address(0) due to validation
+        // Instead, test that getSettlementPrice checks PriceFeedManager first
+        // by using a new SettlementEngine instance without PriceFeedManager set
+
+        // Deploy new SettlementEngine without PriceFeedManager
+        SettlementEngine newSEImpl = new SettlementEngine();
+        bytes memory newSEInitData =
+            abi.encodeWithSelector(SettlementEngine.initialize.selector, owner);
+        ERC1967Proxy newSEProxy = new ERC1967Proxy(address(newSEImpl), newSEInitData);
+        SettlementEngine newSE = SettlementEngine(payable(address(newSEProxy)));
+
+        // Don't set PriceFeedManager (it will be address(0))
+        _updatePrice(address(projectToken), address(usdc), 100e18);
+
+        vm.expectRevert(abi.encodeWithSelector(SettlementEngine.InvalidAddress.selector));
+        newSE.getSettlementPrice(address(projectToken), 3600);
     }
 }

@@ -251,28 +251,10 @@ interface IAssetVault {
     function setTradingEnabled(bool enabled) external;
 
     /**
-     * @notice Set Blocksense Oracle address
-     * @param blocksenseOracle Blocksense Oracle contract address
+     * @notice Get project token address
+     * @return token Project token address
      */
-    function setBlocksenseOracle(address blocksenseOracle) external;
-
-    /**
-     * @notice Set Oracle Adapter address
-     * @param oracleAdapter CLAggregatorAdapter contract address
-     */
-    function setOracleAdapter(address oracleAdapter) external;
-
-    /**
-     * @notice Get oracle adapter address for price feed
-     * @return adapter CLAggregatorAdapter address
-     */
-    function oracleAdapter() external view returns (address);
-
-    /**
-     * @notice Get blocksense oracle address
-     * @return oracle BlocksenseOracle address
-     */
-    function blocksenseOracle() external view returns (address);
+    function projectToken() external view returns (address);
 
     // ========================================================================
     // STAKER REWARD FUNCTIONS
@@ -281,24 +263,41 @@ interface IAssetVault {
     /**
      * @notice Finalize daily rewards and take snapshot
      * @dev Called by admin bot at end of each day
+     *      Pre-calculates and stores rewards for all LPs
      */
     function finalizeDailyReward() external;
+
+    /**
+     * @notice Finalize daily rewards for remaining LPs (if there are more than MAX_LPS_PER_FINALIZE)
+     * @dev Can be called multiple times to process remaining LPs
+     *      Automatically continues from last processed index
+     * @return isComplete True if all LPs have been processed
+     */
+    function finalizeDailyRewardRemaining() external returns (bool isComplete);
 
     /**
      * @notice Calculate pending rewards for a staker
      * @param user Address of staker
      * @return pendingRewards Total pending rewards
-     * @return processableDays Number of days that can be processed
+     * @return lastProcessedDay Last day that was processed in this calculation
      */
     function calculatePendingRewards(address user)
         external
         view
-        returns (uint256 pendingRewards, uint256 processableDays);
+        returns (uint256 pendingRewards, uint256 lastProcessedDay);
 
     /**
-     * @notice Claim pending rewards
+     * @notice Claim pending rewards (processes up to MAX_DAYS_PER_CALCULATION days per call)
+     * @dev Processes rewards in batches to prevent out of gas errors
      */
     function claimRewards() external;
+
+    /**
+     * @notice Claim pending rewards with custom batch size
+     * @param maxDays Maximum number of days to process (0 = use MAX_DAYS_PER_CALCULATION)
+     * @dev Processes rewards in batches to prevent out of gas errors
+     */
+    function claimRewardsBatch(uint256 maxDays) external;
 
     /**
      * @notice Add an admin bot address

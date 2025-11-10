@@ -10,6 +10,7 @@ broadcast/
 
 # Docs
 docs/
+guides/
 
 # Dotenv file
 .env
@@ -48,3 +49,6 @@ broadcast/
 deployments/
 
 .claude
+
+# Node scripts
+node_scripts/

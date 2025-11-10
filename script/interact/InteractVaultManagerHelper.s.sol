@@ -413,34 +413,16 @@ contract InteractVaultManagerHelper is DeployHelper {
     }
 
     /**
-     * @notice Set oracle adapter for a vault
-     * @param tokenAddress Token address
-     * @param oracleAdapter Oracle adapter address
+     * @notice Set PriceFeedManager address
+     * @param priceFeedManager PriceFeedManager contract address
      */
-    function setVaultOracleAdapter(address tokenAddress, address oracleAdapter) public {
-        console.log("\n=== Set Vault Oracle Adapter ===");
-        console.log("Token Address:", tokenAddress);
-        console.log("Oracle Adapter:", oracleAdapter);
+    function setPriceFeedManager(address priceFeedManager) public {
+        console.log("\n=== Set PriceFeedManager ===");
+        console.log("PriceFeedManager:", priceFeedManager);
 
         vm.startBroadcast(deployer);
-        vaultMgrHelper.setVaultOracleAdapter(tokenAddress, oracleAdapter);
-        console.log("Oracle adapter updated successfully");
-        vm.stopBroadcast();
-    }
-
-    /**
-     * @notice Set Blocksense Oracle for a vault
-     * @param tokenAddress Token address
-     * @param blocksenseOracle BlocksenseOracle contract address
-     */
-    function setVaultBlocksenseOracle(address tokenAddress, address blocksenseOracle) public {
-        console.log("\n=== Set Vault Blocksense Oracle ===");
-        console.log("Token Address:", tokenAddress);
-        console.log("Blocksense Oracle:", blocksenseOracle);
-
-        vm.startBroadcast(deployer);
-        vaultMgrHelper.setVaultBlocksenseOracle(tokenAddress, blocksenseOracle);
-        console.log("Blocksense Oracle updated successfully");
+        vaultMgrHelper.setPriceFeedManager(priceFeedManager);
+        console.log("PriceFeedManager updated successfully");
         vm.stopBroadcast();
     }
 
