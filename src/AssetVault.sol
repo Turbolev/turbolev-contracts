@@ -8,6 +8,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./libraries/AdminAccessControl.sol";
 import "./interfaces/IBlocksenseOracle.sol";
+import "./interfaces/IVaultManagerHelper.sol";
 
 /**
  * @title AssetVault
@@ -44,6 +45,9 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
 
     /// @notice PositionManager contract address
     address public positionManager;
+
+    /// @notice Treasury address for fee collection
+    address public treasury;
 
     /// @notice Project token address (the asset being bet on - must be on Monad)
     /// @dev This is the ONLY token vault accepts for staking and trading
@@ -187,7 +191,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
     /// @notice Minimum stake period before rewards (1 day)
     uint256 public constant REWARD_MIN_STAKE_PERIOD = 1 days;
 
-    uint256 public constant DEFAULT_MAX_STAKING_FEE_BPS = 2000; // 20%
+    uint256 public constant DEFAULT_MAX_STAKING_FEE_BPS = 200; // 2%
     uint256 public constant DEFAULT_EARLY_WITHDRAWAL_FEE_BPS = 1000; // 10%
     uint256 public constant DEFAULT_MAX_POSITION_SIZE_PERCENT_BPS = 3000; // 30%
 
@@ -202,6 +206,14 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
 
     /// @notice Maximum days to process per reward calculation (DoS protection)
     uint256 public constant MAX_DAYS_PER_CALCULATION = 365;
+
+    // ========================================================================
+    // WITHDRAWABLE FEES TRACKING
+    // ========================================================================
+
+    /// @notice Total fees available for admin withdrawal
+    /// @dev This tracks fees that can be withdrawn by admin without affecting LP shares
+    uint256 public withdrawableFees;
 
     // ========================================================================
     // ENUMS
@@ -333,6 +345,12 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         uint256 timestamp
     );
 
+    event FeesWithdrawn(
+        address indexed recipient, uint256 amount, uint256 remainingFees, uint256 timestamp
+    );
+
+    event TreasuryUpdated(address indexed oldTreasury, address indexed newTreasury);
+
     // ========================================================================
     // ERRORS
     // ========================================================================
@@ -357,6 +375,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
     error NoFailedPayout();
     error PayoutNotFailed();
     error DirectTransferNotAllowed();
+    error VaultManagerHelperNotSet();
 
     // ========================================================================
     // MODIFIERS
@@ -515,20 +534,26 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         vaultInfo.totalLiquidity += amount;
         vaultInfo.totalShares += shares;
 
-        // Track fees collected
+        // Track fees collected and make them withdrawable by admin
         vaultInfo.totalFeesCollected += stakingFee;
         vaultInfo.totalStakingFees += stakingFee;
+        withdrawableFees += stakingFee;
 
-        emit LiquidityAdded(
+        // Emit events via VaultManagerHelper
+        if (vaultManagerHelper == address(0)) revert VaultManagerHelperNotSet();
+
+        IVaultManagerHelper(vaultManagerHelper).emitLiquidityAdded(
             msg.sender,
             netAmount,
             shares,
             vaultInfo.totalLiquidity,
-            LiquidityOperationType.USER_DEPOSIT,
+            uint8(LiquidityOperationType.USER_DEPOSIT),
             block.timestamp
         );
 
-        emit StakingFeeCollected(msg.sender, stakingFee, netAmount, block.timestamp);
+        IVaultManagerHelper(vaultManagerHelper).emitStakingFeeCollected(
+            msg.sender, stakingFee, netAmount, block.timestamp
+        );
 
         // Check graduation after adding liquidity
         checkGraduation();
@@ -583,10 +608,11 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         vault.totalLiquidity -= netPayout;
         vault.totalShares -= shares;
 
-        // Update withdrawal fees if applicable
+        // Update withdrawal fees if applicable and make them withdrawable by admin
         if (withdrawalFee > 0) {
             vault.totalWithdrawalFees += withdrawalFee;
             vault.totalFeesCollected += withdrawalFee;
+            withdrawableFees += withdrawalFee;
         }
 
         // Emit events BEFORE external calls
@@ -596,12 +622,15 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
             );
         }
 
-        emit LiquidityRemoved(
+        // Emit LiquidityRemoved via VaultManagerHelper
+        if (vaultManagerHelper == address(0)) revert VaultManagerHelperNotSet();
+
+        IVaultManagerHelper(vaultManagerHelper).emitLiquidityRemoved(
             msg.sender,
             netPayout,
             shares,
             vault.totalLiquidity,
-            LiquidityOperationType.USER_WITHDRAW,
+            uint8(LiquidityOperationType.USER_WITHDRAW),
             block.timestamp
         );
 
@@ -715,12 +744,17 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         if (rewardsFromVault > 0) {
             vaultInfo.totalLiquidity -= rewardsFromVault;
 
-            emit LiquidityRemoved(
+            // Emit LiquidityRemoved via VaultManagerHelper
+            if (vaultManagerHelper == address(0)) {
+                revert VaultManagerHelperNotSet();
+            }
+
+            IVaultManagerHelper(vaultManagerHelper).emitLiquidityRemoved(
                 user,
                 rewardsFromVault,
                 0, // No shares burned for payouts
                 vaultInfo.totalLiquidity,
-                LiquidityOperationType.PAYOUT_EXECUTION,
+                uint8(LiquidityOperationType.PAYOUT_EXECUTION),
                 block.timestamp
             );
         }
@@ -774,13 +808,17 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
             uint256 lossAmount = uint256(vaultPnL);
             vaultInfo.totalLiquidity += lossAmount;
 
-            // Emit LiquidityAdded for the loss amount
-            emit LiquidityAdded(
+            // Emit LiquidityAdded via VaultManagerHelper for the loss amount
+            if (vaultManagerHelper == address(0)) {
+                revert VaultManagerHelperNotSet();
+            }
+
+            IVaultManagerHelper(vaultManagerHelper).emitLiquidityAdded(
                 address(this),
                 lossAmount,
                 0, // No shares issued
                 vaultInfo.totalLiquidity,
-                LiquidityOperationType.CLOSE_POSITION,
+                uint8(LiquidityOperationType.CLOSE_POSITION),
                 block.timestamp
             );
 
@@ -977,7 +1015,10 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         dailyNetPnL = 0;
         delete dailyPositionIds; // Clear position IDs array
 
-        emit DailyRewardFinalized(
+        // Emit DailyRewardFinalized via VaultManagerHelper
+        if (vaultManagerHelper == address(0)) revert VaultManagerHelperNotSet();
+
+        IVaultManagerHelper(vaultManagerHelper).emitDailyRewardFinalized(
             today, vaultInfo.totalLiquidity, vaultInfo.totalShares, finalizedPnL, block.timestamp
         );
 
@@ -1109,11 +1150,11 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
             IERC20(projectToken).safeTransfer(msg.sender, actualRewards);
         }
 
-        emit RewardsClaimed(
-            msg.sender,
-            actualRewards,
-            0, // daysProcessed not applicable with new design
-            block.timestamp
+        // Emit RewardsClaimed via VaultManagerHelper
+        if (vaultManagerHelper == address(0)) revert VaultManagerHelperNotSet();
+
+        IVaultManagerHelper(vaultManagerHelper).emitRewardsClaimed(
+            msg.sender, actualRewards, block.timestamp
         );
     }
 
@@ -1165,12 +1206,17 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
                     if (rewardsFromVault > 0) {
                         vaultInfo.totalLiquidity -= rewardsFromVault;
 
-                        emit LiquidityRemoved(
+                        // Emit LiquidityRemoved via VaultManagerHelper
+                        if (vaultManagerHelper == address(0)) {
+                            revert VaultManagerHelperNotSet();
+                        }
+
+                        IVaultManagerHelper(vaultManagerHelper).emitLiquidityRemoved(
                             user,
                             rewardsFromVault,
                             0, // No shares burned for payouts
                             vaultInfo.totalLiquidity,
-                            LiquidityOperationType.PAYOUT_EXECUTION,
+                            uint8(LiquidityOperationType.PAYOUT_EXECUTION),
                             block.timestamp
                         );
                     }
@@ -1361,6 +1407,43 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
     }
 
     /**
+     * @notice Withdraw collected fees (staking fees + early withdrawal fees)
+     * @param amount Amount to withdraw (0 = withdraw all)
+     * @dev Only owner can withdraw fees. Fees will be sent to treasury if set, otherwise to owner.
+     */
+    function withdrawFees(uint256 amount) external onlyOwner nonReentrant {
+        uint256 amountToWithdraw = amount;
+
+        // If amount is 0, withdraw all available fees
+        if (amountToWithdraw == 0) {
+            amountToWithdraw = withdrawableFees;
+        }
+
+        if (amountToWithdraw == 0) revert InvalidAmount();
+        if (amountToWithdraw > withdrawableFees) revert InsufficientLiquidity();
+
+        // Determine recipient: treasury if set, otherwise owner
+        address recipient = treasury != address(0) ? treasury : owner();
+
+        // Update state before external call
+        withdrawableFees -= amountToWithdraw;
+        vaultInfo.totalLiquidity -= amountToWithdraw;
+
+        // Emit event before transfer
+        emit FeesWithdrawn(recipient, amountToWithdraw, withdrawableFees, block.timestamp);
+
+        // Transfer fees to recipient
+        if (projectToken == address(0)) {
+            // Native token
+            (bool success,) = recipient.call{ value: amountToWithdraw }("");
+            if (!success) revert TransferFailed();
+        } else {
+            // ERC20 token
+            IERC20(projectToken).safeTransfer(recipient, amountToWithdraw);
+        }
+    }
+
+    /**
      * @notice Update vault parameters
      */
     function updateVaultParams(
@@ -1388,6 +1471,16 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
     function setPositionManager(address _positionManager) external onlyOwner {
         if (_positionManager == address(0)) revert InvalidAddress();
         positionManager = _positionManager;
+    }
+
+    /**
+     * @notice Set treasury address for fee collection
+     * @param _treasury Treasury address (can be address(0) to use owner as default)
+     */
+    function setTreasury(address _treasury) external onlyVaultManagerOrHelper {
+        address oldTreasury = treasury;
+        treasury = _treasury;
+        emit TreasuryUpdated(oldTreasury, _treasury);
     }
 
     /**
@@ -1465,6 +1558,14 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
      */
     function getAllLPs() external view returns (address[] memory) {
         return vaultLPs;
+    }
+
+    /**
+     * @notice Get treasury address
+     * @return Treasury address (address(0) if not set, fees go to owner)
+     */
+    function getTreasury() external view returns (address) {
+        return treasury;
     }
 
     /**
@@ -1588,6 +1689,14 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         return (
             vaultInfo.totalFeesCollected, vaultInfo.totalStakingFees, vaultInfo.totalWithdrawalFees
         );
+    }
+
+    /**
+     * @notice Get withdrawable fees available for admin
+     * @return amount Amount of fees that can be withdrawn by admin
+     */
+    function getWithdrawableFees() external view returns (uint256 amount) {
+        return withdrawableFees;
     }
 
     // ========================================================================

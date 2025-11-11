@@ -154,6 +154,35 @@ contract InteractAssetVault is DeployHelper {
         console.log("Min Lock Period (days):", minLockPeriod / 86_400);
     }
 
+    /**
+     * @notice View treasury address
+     */
+    function viewTreasury() public view {
+        console.log("\n=== Treasury Address ===");
+
+        address treasuryAddr = vault.getTreasury();
+        console.log("Treasury Address:", treasuryAddr);
+
+        if (treasuryAddr == address(0)) {
+            console.log("Note: Treasury not set, fees will go to owner");
+        }
+    }
+
+    /**
+     * @notice View withdrawable fees
+     */
+    function viewWithdrawableFees() public view {
+        console.log("\n=== Withdrawable Fees ===");
+
+        uint256 withdrawableFees = vault.getWithdrawableFees();
+        console.log("Withdrawable Fees:", withdrawableFees);
+
+        (uint256 total, uint256 staking, uint256 withdrawal) = vault.getFeesCollected();
+        console.log("Total Fees Collected:", total);
+        console.log("  - Staking Fees:", staking);
+        console.log("  - Withdrawal Fees:", withdrawal);
+    }
+
     // ========================================================================
     // USER FUNCTIONS
     // ========================================================================
@@ -361,5 +390,55 @@ contract InteractAssetVault is DeployHelper {
         vault.checkGraduation();
         console.log("Graduation check completed");
         vm.stopBroadcast();
+    }
+
+    /**
+     * @notice Set treasury address for fee collection
+     * @param treasuryAddress Treasury address (address(0) to use owner as default)
+     */
+    function setTreasury(address treasuryAddress) public {
+        console.log("\n=== Set Treasury ===");
+        console.log("Treasury Address:", treasuryAddress);
+
+        if (treasuryAddress == address(0)) {
+            console.log("Note: Setting to address(0) - fees will go to owner");
+        }
+
+        vm.startBroadcast(deployer);
+        vault.setTreasury(treasuryAddress);
+        console.log("Treasury address updated successfully");
+        vm.stopBroadcast();
+    }
+
+    /**
+     * @notice Withdraw collected fees
+     * @param amount Amount to withdraw (0 = withdraw all)
+     */
+    function withdrawFees(uint256 amount) public {
+        console.log("\n=== Withdraw Fees ===");
+
+        // Show current withdrawable fees
+        uint256 withdrawableFees = vault.getWithdrawableFees();
+        console.log("Current Withdrawable Fees:", withdrawableFees);
+
+        // Show treasury info
+        address treasuryAddr = vault.getTreasury();
+        address recipient = treasuryAddr != address(0) ? treasuryAddr : vault.owner();
+        console.log("Fees will be sent to:", recipient);
+
+        if (amount == 0) {
+            console.log("Amount: ALL (", withdrawableFees, ")");
+        } else {
+            console.log("Amount:", amount);
+        }
+
+        vm.startBroadcast(deployer);
+        vault.withdrawFees(amount);
+        console.log("Fees withdrawn successfully");
+        vm.stopBroadcast();
+
+        // Show remaining fees
+        uint256 remainingFees = vault.getWithdrawableFees();
+        console.log("Remaining Withdrawable Fees:", remainingFees);
     }
 }
