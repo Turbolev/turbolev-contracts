@@ -11,6 +11,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./libraries/PositionLib.sol";
 import "./libraries/AdminAccessControlUpgradeable.sol";
 import "./interfaces/IVaultManager.sol";
+import "./interfaces/IAssetVault.sol";
 import "./interfaces/ISettlementEngine.sol";
 import "./interfaces/IPriceFeedManager.sol";
 
@@ -365,10 +366,12 @@ contract PositionManager is
         // Calculate position size (for risk check)
         uint256 positionSize = amount * leverage;
 
-        // Check risk limits with VaultManager
+        // Check risk limits - get vault address and call AssetVault directly
         if (vaultManager != address(0)) {
-            (bool canOpen,) =
-                IVaultManager(vaultManager).checkPositionRisk(projectToken, positionSize, leverage);
+            address vaultAddress = IVaultManager(vaultManager).getVault(projectToken);
+            if (vaultAddress == address(0)) revert InvalidAddress();
+            (bool canOpen,) = IAssetVault(vaultAddress).checkPositionRisk(positionSize, leverage);
+
             if (!canOpen) revert RiskLimitExceeded();
         }
 

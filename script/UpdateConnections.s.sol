@@ -152,28 +152,6 @@ contract UpdateConnections is DeployHelper {
             console.log("[WARN] PositionManager not deployed, skipping");
         }
 
-        // Set SettlementEngine
-        if (_isContractDeployed(settlementEngine)) {
-            try VaultManager(vaultManager).setSettlementEngine(settlementEngine) {
-                console.log("[OK] Connected SettlementEngine to VaultManager");
-            } catch {
-                console.log("[SKIP] SettlementEngine already set or not authorized");
-            }
-        } else {
-            console.log("[WARN] SettlementEngine not deployed, skipping");
-        }
-
-        // Set BlocksenseOracle
-        if (_isContractDeployed(blocksenseOracle)) {
-            try VaultManager(vaultManager).setBlocksenseOracle(blocksenseOracle) {
-                console.log("[OK] Connected BlocksenseOracle to VaultManager");
-            } catch {
-                console.log("[SKIP] BlocksenseOracle already set or not authorized");
-            }
-        } else {
-            console.log("[WARN] BlocksenseOracle not deployed, skipping");
-        }
-
         // Set VaultManagerHelper
         if (_isContractDeployed(vaultManagerHelper)) {
             try VaultManager(vaultManager).setVaultManagerHelper(vaultManagerHelper) {
@@ -236,14 +214,10 @@ contract UpdateConnections is DeployHelper {
         // Verify VaultManager connections
         if (_isContractDeployed(vaultManager)) {
             address currentPosMgr = VaultManager(vaultManager).positionManager();
-            address currentSettlement = VaultManager(vaultManager).settlementEngine();
-            address currentBlocksense = VaultManager(vaultManager).blocksenseOracle();
             address currentHelper = VaultManager(vaultManager).vaultManagerHelper();
 
             console.log("\nVaultManager connections:");
             console.log("- PositionManager:", currentPosMgr);
-            console.log("- SettlementEngine:", currentSettlement);
-            console.log("- BlocksenseOracle:", currentBlocksense);
             console.log("- VaultManagerHelper:", currentHelper);
 
             if (currentPosMgr != positionManager && _isContractDeployed(positionManager)) {
@@ -283,8 +257,6 @@ contract UpdateConnections is DeployHelper {
         console.log("  - vaultManager: YES");
         console.log("\nVaultManager:");
         console.log("  - positionManager: YES");
-        console.log("  - settlementEngine: YES");
-        console.log("  - blocksenseOracle: YES");
         console.log("  - vaultManagerHelper: YES");
         console.log("===========================\n");
     }

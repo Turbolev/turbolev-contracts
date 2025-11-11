@@ -103,20 +103,6 @@ contract DeployVaultManager is DeployHelper {
             console.log("WARNING: PositionManager not set - skipping connection");
         }
 
-        if (_isContractDeployed(settlementEngine)) {
-            VaultManager(vaultManager).setSettlementEngine(settlementEngine);
-            console.log("Reconnected SettlementEngine to VaultManager");
-        } else {
-            console.log("WARNING: SettlementEngine not set - skipping connection");
-        }
-
-        if (_isContractDeployed(blocksenseOracle)) {
-            VaultManager(vaultManager).setBlocksenseOracle(blocksenseOracle);
-            console.log("Reconnected BlocksenseOracle to VaultManager");
-        } else {
-            console.log("WARNING: BlocksenseOracle not set - skipping connection");
-        }
-
         console.log("--- Contract Reconnection Complete ---\n");
     }
 }

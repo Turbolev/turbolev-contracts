@@ -45,7 +45,6 @@ contract InteractVaultManager is DeployHelper {
         console.log("\n=== Vault Manager Configuration ===");
         console.log("Owner:", vaultMgr.owner());
         console.log("Position Manager:", vaultMgr.positionManager());
-        console.log("Settlement Engine:", vaultMgr.settlementEngine());
         console.log("Paused:", vaultMgr.paused());
     }
 
@@ -66,23 +65,23 @@ contract InteractVaultManager is DeployHelper {
     /**
      * @notice Check position risk
      */
-    function checkPositionRisk(address projectToken, uint256 positionSize, uint8 leverage)
-        public
-        view
-    {
-        console.log("\n=== Check Position Risk ===");
-        console.log("Project Token:", projectToken);
-        console.log("Position Size:", positionSize);
-        console.log("Leverage:", leverage);
+    // function checkPositionRisk(address projectToken, uint256 positionSize, uint8 leverage)
+    //     public
+    //     view
+    // {
+    //     console.log("\n=== Check Position Risk ===");
+    //     console.log("Project Token:", projectToken);
+    //     console.log("Position Size:", positionSize);
+    //     console.log("Leverage:", leverage);
 
-        (bool canOpen, string memory reason) =
-            vaultMgr.checkPositionRisk(projectToken, positionSize, leverage);
+    //     (bool canOpen, string memory reason) =
+    //         vaultMgr.checkPositionRisk(projectToken, positionSize, leverage);
 
-        console.log("Can Open:", canOpen);
-        if (!canOpen) {
-            console.log("Reason:", reason);
-        }
-    }
+    //     console.log("Can Open:", canOpen);
+    //     if (!canOpen) {
+    //         console.log("Reason:", reason);
+    //     }
+    // }
 
     // ========================================================================
     // ADMIN FUNCTIONS
@@ -121,19 +120,6 @@ contract InteractVaultManager is DeployHelper {
         vm.startBroadcast(deployer);
         vaultMgr.setPositionManager(newPositionManager);
         console.log("Position Manager updated successfully");
-        vm.stopBroadcast();
-    }
-
-    /**
-     * @notice Set settlement engine address
-     */
-    function setSettlementEngine(address newSettlementEngine) public {
-        console.log("\n=== Set Settlement Engine ===");
-        console.log("New Settlement Engine:", newSettlementEngine);
-
-        vm.startBroadcast(deployer);
-        vaultMgr.setSettlementEngine(newSettlementEngine);
-        console.log("Settlement Engine updated successfully");
         vm.stopBroadcast();
     }
 

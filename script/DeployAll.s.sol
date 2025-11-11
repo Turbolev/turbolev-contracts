@@ -384,14 +384,6 @@ contract DeployAll is DeployHelper {
         VaultManager(vaultManager).setPositionManager(positionManager);
         console.log("[OK] Connected PositionManager to VaultManager");
 
-        // SettlementEngine: Set in VaultManager
-        VaultManager(vaultManager).setSettlementEngine(settlementEngine);
-        console.log("[OK] Connected SettlementEngine to VaultManager");
-
-        // BlocksenseOracle: Set in VaultManager
-        VaultManager(vaultManager).setBlocksenseOracle(blocksenseOracle);
-        console.log("[OK] Connected BlocksenseOracle to VaultManager");
-
         // VaultManagerHelper: Set in VaultManager
         VaultManager(vaultManager).setVaultManagerHelper(vaultManagerHelper);
         console.log("[OK] Connected VaultManagerHelper to VaultManager");
