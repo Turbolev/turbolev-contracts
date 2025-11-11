@@ -426,6 +426,110 @@ contract InteractVaultManagerHelper is DeployHelper {
         vm.stopBroadcast();
     }
 
+    /**
+     * @notice Set treasury address for a specific vault
+     * @param tokenAddress Token address
+     * @param treasury Treasury address (address(0) to use owner as default)
+     */
+    function setVaultTreasury(address tokenAddress, address treasury) public {
+        console.log("\n=== Set Vault Treasury ===");
+        console.log("Token Address:", tokenAddress);
+        console.log("Treasury Address:", treasury);
+
+        if (treasury == address(0)) {
+            console.log("Note: Setting to address(0) - fees will go to owner");
+        }
+
+        vm.startBroadcast(deployer);
+        vaultMgrHelper.setVaultTreasury(tokenAddress, treasury);
+        console.log("Treasury address updated successfully");
+        vm.stopBroadcast();
+    }
+
+    /**
+     * @notice Set treasury address for all vaults
+     * @param treasury Treasury address (address(0) to use owner as default)
+     */
+    function setTreasuryForAllVaults(address treasury) public {
+        console.log("\n=== Set Treasury For All Vaults ===");
+        console.log("Treasury Address:", treasury);
+
+        if (treasury == address(0)) {
+            console.log("Note: Setting to address(0) - fees will go to owner");
+        }
+
+        // Show how many vaults will be affected
+        address[] memory vaults = vaultMgrHelper.getAllVaults();
+        console.log("Number of vaults to update:", vaults.length);
+
+        vm.startBroadcast(deployer);
+        vaultMgrHelper.setTreasuryForAllVaults(treasury);
+        console.log("Treasury address updated for all vaults successfully");
+        vm.stopBroadcast();
+    }
+
+    /**
+     * @notice View withdrawable fees for a specific vault
+     * @param tokenAddress Token address
+     */
+    function viewVaultWithdrawableFees(address tokenAddress) public view {
+        console.log("\n=== View Vault Withdrawable Fees ===");
+        console.log("Token Address:", tokenAddress);
+
+        try vaultMgrHelper.getVault(tokenAddress) returns (address vaultAddr) {
+            if (vaultAddr == address(0)) {
+                console.log("Error: Vault not found");
+                return;
+            }
+
+            AssetVault vault = AssetVault(payable(vaultAddr));
+
+            uint256 withdrawableFees = vault.getWithdrawableFees();
+            console.log("Withdrawable Fees:", withdrawableFees);
+
+            (uint256 total, uint256 staking, uint256 withdrawal) = vault.getFeesCollected();
+            console.log("Total Fees Collected:", total);
+            console.log("  - Staking Fees:", staking);
+            console.log("  - Withdrawal Fees:", withdrawal);
+
+            address treasuryAddr = vault.getTreasury();
+            console.log("Treasury Address:", treasuryAddr);
+            if (treasuryAddr == address(0)) {
+                console.log("Note: Treasury not set, fees will go to owner");
+            }
+        } catch Error(string memory reason) {
+            console.log("Error:", reason);
+        }
+    }
+
+    /**
+     * @notice View withdrawable fees for all vaults
+     */
+    function viewAllVaultsWithdrawableFees() public view {
+        console.log("\n=== View All Vaults Withdrawable Fees ===");
+
+        address[] memory vaults = vaultMgrHelper.getAllVaults();
+        console.log("Total Vaults:", vaults.length);
+
+        uint256 totalWithdrawable = 0;
+
+        for (uint256 i = 0; i < vaults.length; i++) {
+            console.log("\nVault", i, ":", vaults[i]);
+
+            AssetVault vault = AssetVault(payable(vaults[i]));
+
+            uint256 withdrawableFees = vault.getWithdrawableFees();
+            console.log("  Withdrawable Fees:", withdrawableFees);
+            totalWithdrawable += withdrawableFees;
+
+            address treasuryAddr = vault.getTreasury();
+            console.log("  Treasury:", treasuryAddr);
+        }
+
+        console.log("\n=== Summary ===");
+        console.log("Total Withdrawable Fees Across All Vaults:", totalWithdrawable);
+    }
+
     // ========================================================================
     // BATCH OPERATIONS
     // ========================================================================

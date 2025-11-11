@@ -154,6 +154,18 @@ interface IAssetVault {
     function setPositionManager(address _positionManager) external;
 
     /**
+     * @notice Set treasury address for fee collection
+     * @param _treasury Treasury address (can be address(0) to use owner as default)
+     */
+    function setTreasury(address _treasury) external;
+
+    /**
+     * @notice Get treasury address
+     * @return Treasury address (address(0) if not set, fees go to owner)
+     */
+    function getTreasury() external view returns (address);
+
+    /**
      * @notice Pause vault
      */
     function pause() external;
@@ -209,6 +221,19 @@ interface IAssetVault {
         external
         view
         returns (uint256 total, uint256 staking, uint256 withdrawal);
+
+    /**
+     * @notice Get withdrawable fees available for admin
+     * @return amount Amount of fees that can be withdrawn by admin
+     */
+    function getWithdrawableFees() external view returns (uint256 amount);
+
+    /**
+     * @notice Withdraw collected fees (staking fees + early withdrawal fees)
+     * @param amount Amount to withdraw (0 = withdraw all)
+     * @dev Only owner can withdraw fees. Fees will be sent to treasury if set, otherwise to owner.
+     */
+    function withdrawFees(uint256 amount) external;
 
     /**
      * @notice Update staking fee

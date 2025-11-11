@@ -30,6 +30,51 @@ contract VaultManagerHelper {
     uint256 public constant MAX_PRICE_AGE_FOR_USD_CALC = 3600;
 
     // ========================================================================
+    // EVENTS
+    // ========================================================================
+
+    event LiquidityAdded(
+        address indexed vault,
+        address indexed user,
+        uint256 amount,
+        uint256 shares,
+        uint256 totalLiquidity,
+        uint8 operationType,
+        uint256 timestamp
+    );
+
+    event StakingFeeCollected(
+        address indexed vault,
+        address indexed user,
+        uint256 fee,
+        uint256 netAmount,
+        uint256 timestamp
+    );
+
+    event LiquidityRemoved(
+        address indexed vault,
+        address indexed user,
+        uint256 amount,
+        uint256 shares,
+        uint256 totalLiquidity,
+        uint8 operationType,
+        uint256 timestamp
+    );
+
+    event DailyRewardFinalized(
+        address indexed vault,
+        uint256 indexed day,
+        uint256 totalLiquidity,
+        uint256 totalShares,
+        int256 netPnL,
+        uint256 timestamp
+    );
+
+    event RewardsClaimed(
+        address indexed vault, address indexed user, uint256 amount, uint256 timestamp
+    );
+
+    // ========================================================================
     // ERRORS
     // ========================================================================
 
@@ -72,6 +117,13 @@ contract VaultManagerHelper {
     modifier onlyOwner() {
         address owner = OwnableUpgradeable(vaultManager).owner();
         if (msg.sender != owner) revert NotAuthorized();
+        _;
+    }
+
+    modifier onlyVault() {
+        // Check if msg.sender is a valid vault
+        address vault = IVaultManager(vaultManager).getVault(IAssetVault(msg.sender).projectToken());
+        if (vault != msg.sender) revert NotAuthorized();
         _;
     }
 
@@ -334,11 +386,130 @@ contract VaultManagerHelper {
     }
 
     /**
+     * @notice Set treasury address for a specific vault
+     * @param tokenAddress Token address
+     * @param treasury Treasury address (can be address(0) to use owner as default)
+     */
+    function setVaultTreasury(address tokenAddress, address treasury) external onlyOwner {
+        address vaultAddress = IVaultManager(vaultManager).getVault(tokenAddress);
+        if (vaultAddress == address(0)) revert VaultNotFound();
+        IAssetVault(vaultAddress).setTreasury(treasury);
+    }
+
+    /**
+     * @notice Set treasury address for all vaults
+     * @param treasury Treasury address (can be address(0) to use owner as default)
+     * @dev This function sets the same treasury for all existing vaults
+     */
+    function setTreasuryForAllVaults(address treasury) external onlyOwner {
+        address[] memory vaults = IVaultManager(vaultManager).getAllVaults();
+
+        for (uint256 i = 0; i < vaults.length; i++) {
+            IAssetVault(vaults[i]).setTreasury(treasury);
+        }
+    }
+
+    /**
      * @notice Set PriceFeedManager address
      * @param _priceFeedManager PriceFeedManager contract address
      */
     function setPriceFeedManager(address _priceFeedManager) external onlyOwner {
         if (_priceFeedManager == address(0)) revert InvalidAddress();
         priceFeedManager = _priceFeedManager;
+    }
+
+    // ========================================================================
+    // EVENT EMISSION FUNCTIONS (called by vaults)
+    // ========================================================================
+
+    /**
+     * @notice Emit LiquidityAdded event from vault
+     * @param user User address
+     * @param amount Amount of liquidity added
+     * @param shares Shares issued
+     * @param totalLiquidity Total liquidity after addition
+     * @param operationType Type of liquidity operation
+     * @param timestamp Timestamp of the operation
+     */
+    function emitLiquidityAdded(
+        address user,
+        uint256 amount,
+        uint256 shares,
+        uint256 totalLiquidity,
+        uint8 operationType,
+        uint256 timestamp
+    ) external onlyVault {
+        emit LiquidityAdded(
+            msg.sender, user, amount, shares, totalLiquidity, operationType, timestamp
+        );
+    }
+
+    /**
+     * @notice Emit StakingFeeCollected event from vault
+     * @param user User address
+     * @param fee Fee amount collected
+     * @param netAmount Net amount after fee
+     * @param timestamp Timestamp of the operation
+     */
+    function emitStakingFeeCollected(
+        address user,
+        uint256 fee,
+        uint256 netAmount,
+        uint256 timestamp
+    ) external onlyVault {
+        emit StakingFeeCollected(msg.sender, user, fee, netAmount, timestamp);
+    }
+
+    /**
+     * @notice Emit LiquidityRemoved event from vault
+     * @param user User address
+     * @param amount Amount of liquidity removed
+     * @param shares Shares burned
+     * @param totalLiquidity Total liquidity after removal
+     * @param operationType Type of liquidity operation
+     * @param timestamp Timestamp of the operation
+     */
+    function emitLiquidityRemoved(
+        address user,
+        uint256 amount,
+        uint256 shares,
+        uint256 totalLiquidity,
+        uint8 operationType,
+        uint256 timestamp
+    ) external onlyVault {
+        emit LiquidityRemoved(
+            msg.sender, user, amount, shares, totalLiquidity, operationType, timestamp
+        );
+    }
+
+    /**
+     * @notice Emit DailyRewardFinalized event from vault
+     * @param day Day number
+     * @param totalLiquidity Total liquidity at snapshot
+     * @param totalShares Total shares at snapshot
+     * @param netPnL Net P&L for the day
+     * @param timestamp Timestamp of the operation
+     */
+    function emitDailyRewardFinalized(
+        uint256 day,
+        uint256 totalLiquidity,
+        uint256 totalShares,
+        int256 netPnL,
+        uint256 timestamp
+    ) external onlyVault {
+        emit DailyRewardFinalized(msg.sender, day, totalLiquidity, totalShares, netPnL, timestamp);
+    }
+
+    /**
+     * @notice Emit RewardsClaimed event from vault
+     * @param user User address
+     * @param amount Reward amount claimed
+     * @param timestamp Timestamp of the operation
+     */
+    function emitRewardsClaimed(address user, uint256 amount, uint256 timestamp)
+        external
+        onlyVault
+    {
+        emit RewardsClaimed(msg.sender, user, amount, timestamp);
     }
 }
