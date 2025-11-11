@@ -2,8 +2,8 @@
 pragma solidity ^0.8.20;
 
 import "forge-std/Script.sol";
-import "../src/TokenFaucet.sol";
-import "../src/MockETH.sol";
+import "../src/mock/TokenFaucet.sol";
+import "../src/mock/MockETH.sol";
 import "./DeployHelper.s.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 

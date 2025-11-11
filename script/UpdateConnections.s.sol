@@ -10,6 +10,7 @@ import "../src/SettlementEngine.sol";
 import "../src/PositionManager.sol";
 import "../src/VaultManager.sol";
 import "../src/VaultManagerHelper.sol";
+import "../src/PriceFeedManager.sol";
 
 /**
  * @title UpdateConnections
@@ -110,6 +111,17 @@ contract UpdateConnections is DeployHelper {
         } else {
             console.log("[WARN] PositionManager not deployed, skipping");
         }
+
+        // Set PriceFeedManager
+        if (_isContractDeployed(priceFeedManager)) {
+            try SettlementEngine(settlementEngine).setPriceFeedManager(priceFeedManager) {
+                console.log("[OK] Connected PriceFeedManager to SettlementEngine");
+            } catch {
+                console.log("[SKIP] PriceFeedManager already set or not authorized");
+            }
+        } else {
+            console.log("[WARN] PriceFeedManager not deployed, skipping");
+        }
     }
 
     function _setupPositionManagerConnections() internal {
@@ -135,6 +147,17 @@ contract UpdateConnections is DeployHelper {
             }
         } else {
             console.log("[WARN] VaultManager not deployed, skipping");
+        }
+
+        // Set PriceFeedManager
+        if (_isContractDeployed(priceFeedManager)) {
+            try PositionManager(payable(positionManager)).setPriceFeedManager(priceFeedManager) {
+                console.log("[OK] Connected PriceFeedManager to PositionManager");
+            } catch {
+                console.log("[SKIP] PriceFeedManager already set or not authorized");
+            }
+        } else {
+            console.log("[WARN] PriceFeedManager not deployed, skipping");
         }
     }
 
@@ -179,12 +202,14 @@ contract UpdateConnections is DeployHelper {
             address currentChainlink = SettlementEngine(settlementEngine).chainlinkOracle();
             address currentVaultMgr = SettlementEngine(settlementEngine).vaultManager();
             address currentPosMgr = SettlementEngine(settlementEngine).positionManager();
+            address currentPriceFeedMgr = SettlementEngine(settlementEngine).priceFeedManager();
 
             console.log("\nSettlementEngine connections:");
             console.log("- BlocksenseOracle:", currentBlocksense);
             console.log("- ChainlinkOracle:", currentChainlink);
             console.log("- VaultManager:", currentVaultMgr);
             console.log("- PositionManager:", currentPosMgr);
+            console.log("- PriceFeedManager:", currentPriceFeedMgr);
 
             if (currentBlocksense != blocksenseOracle && _isContractDeployed(blocksenseOracle)) {
                 console.log("[WARN] BlocksenseOracle mismatch!");
@@ -200,10 +225,12 @@ contract UpdateConnections is DeployHelper {
         if (_isContractDeployed(positionManager)) {
             address currentSettlement = PositionManager(payable(positionManager)).settlementEngine();
             address currentVaultMgr = PositionManager(payable(positionManager)).vaultManager();
+            address currentPriceFeedMgr = PositionManager(payable(positionManager)).priceFeedManager();
 
             console.log("\nPositionManager connections:");
             console.log("- SettlementEngine:", currentSettlement);
             console.log("- VaultManager:", currentVaultMgr);
+            console.log("- PriceFeedManager:", currentPriceFeedMgr);
 
             if (currentSettlement != settlementEngine && _isContractDeployed(settlementEngine)) {
                 console.log("[WARN] SettlementEngine mismatch!");
@@ -246,15 +273,18 @@ contract UpdateConnections is DeployHelper {
         console.log("- PositionManager:", positionManager);
         console.log("- VaultManager:", vaultManager);
         console.log("- VaultManagerHelper:", vaultManagerHelper);
+        console.log("- PriceFeedManager:", priceFeedManager);
         console.log("\nConnection Flow:");
         console.log("SettlementEngine:");
         console.log("  - blocksenseOracle: YES");
         console.log("  - chainlinkOracle: YES (fallback)");
         console.log("  - vaultManager: YES");
         console.log("  - positionManager: YES");
+        console.log("  - priceFeedManager: YES");
         console.log("\nPositionManager:");
         console.log("  - settlementEngine: YES");
         console.log("  - vaultManager: YES");
+        console.log("  - priceFeedManager: YES");
         console.log("\nVaultManager:");
         console.log("  - positionManager: YES");
         console.log("  - vaultManagerHelper: YES");

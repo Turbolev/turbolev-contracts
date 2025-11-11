@@ -445,6 +445,21 @@ contract DeployAll is DeployHelper {
             "VaultManager position manager not set"
         );
 
+        require(
+            VaultManager(vaultManager).vaultManagerHelper() == vaultManagerHelper,
+            "VaultManager helper not set"
+        );
+
+        require(
+            SettlementEngine(settlementEngine).priceFeedManager() == priceFeedManager,
+            "SettlementEngine price feed manager not set"
+        );
+
+        require(
+            PositionManager(payable(positionManager)).priceFeedManager() == priceFeedManager,
+            "PositionManager price feed manager not set"
+        );
+
         console.log("[OK] All verifications passed");
     }
 
@@ -588,6 +603,7 @@ contract DeployAll is DeployHelper {
         require(positionManager != address(0), "PositionManager not deployed");
         require(vaultManager != address(0), "VaultManager not deployed");
         require(vaultManagerHelper != address(0), "VaultManagerHelper not deployed");
+        require(priceFeedManager != address(0), "PriceFeedManager not deployed");
 
         // Setup SettlementEngine connections with retry
         _setupSettlementEngineConnectionsWithRetry();
@@ -619,12 +635,14 @@ contract DeployAll is DeployHelper {
         console.log("- PositionManager:", positionManager);
         console.log("- VaultManager:", vaultManager);
         console.log("- VaultManagerHelper:", vaultManagerHelper);
+        console.log("- PriceFeedManager:", priceFeedManager);
         console.log("\nImplementations:");
         console.log("- BlocksenseOracle Impl:", blocksenseOracleImpl);
         console.log("- ChainlinkOracle Impl:", chainlinkOracleImpl);
         console.log("- SettlementEngine Impl:", settlementEngineImpl);
         console.log("- PositionManager Impl:", positionManagerImpl);
         console.log("- VaultManager Impl:", vaultManagerImpl);
+        console.log("- PriceFeedManager Impl:", priceFeedManagerImpl);
         console.log("\nInfrastructure:");
         console.log("- Backend:", backend);
         console.log("\nOwners:");
