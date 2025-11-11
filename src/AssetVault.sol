@@ -938,21 +938,10 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
     /**
      * @notice Finalize daily rewards and take snapshot
      * @dev Called by admin bot at end of each day (UTC midnight)
-     *      Only callable once per day
      *      Pre-calculates and stores rewards for all LPs to avoid recalculation on claim
      */
     function finalizeDailyReward() external onlyAdmin returns (bool isComplete) {
         uint256 today = block.timestamp / 1 days;
-
-        // Check if already processed today
-        if (dailySnapshots[today].isProcessed) {
-            revert DailySnapshotAlreadyProcessed();
-        }
-
-        // Check if we're actually in a new day
-        if (today <= lastSnapshotDay) {
-            revert TooEarlyForSnapshot();
-        }
 
         // Take snapshot with position IDs
         DailySnapshot storage snapshot = dailySnapshots[today];
@@ -1033,11 +1022,6 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
      */
     function finalizeDailyRewardRemaining() external onlyAdmin returns (bool isComplete) {
         uint256 today = block.timestamp / 1 days;
-
-        // Check if snapshot exists
-        if (!dailySnapshots[today].isProcessed) {
-            revert DailySnapshotAlreadyProcessed(); // Use same error for consistency
-        }
 
         DailySnapshot storage snapshot = dailySnapshots[today];
         int256 finalizedPnL = snapshot.netPnL;
