@@ -376,6 +376,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
     error PayoutNotFailed();
     error DirectTransferNotAllowed();
     error VaultManagerHelperNotSet();
+    error NativeTokenNotAllowed();
 
     // ========================================================================
     // MODIFIERS
@@ -498,8 +499,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
 
         // Handle token transfer - ONLY project token accepted
         if (projectToken == address(0)) {
-            // Native project token (rare case)
-            if (msg.value != amount) revert InvalidAmount();
+            revert NativeTokenNotAllowed();
         } else {
             // ERC20 project token (most common)
             if (msg.value != 0) revert InvalidAmount();
@@ -665,17 +665,8 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         uint256 amount,
         uint256 positionSize,
         bool isMarginAdd
-    ) external payable onlyPositionManager nonReentrant {
+    ) external payable onlyVaultManager() nonReentrant {
         if (amount == 0) revert InvalidAmount();
-
-        // Handle token transfer - ONLY project token accepted
-        if (projectToken == address(0)) {
-            // Native project token
-            if (msg.value != amount) revert InvalidAmount();
-        } else {
-            // ERC20 project token - already transferred by PositionManager
-            if (msg.value != 0) revert InvalidAmount();
-        }
 
         // Store bet collateral for this position (NOT added to vault liquidity yet)
         if (isMarginAdd) {

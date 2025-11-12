@@ -84,7 +84,6 @@ contract PositionManager is
         SETTLEMENT_ENGINE_NOT_SET, // 4 - Settlement engine address not set
         CANCELLED_BY_ADMIN, // 5 - Admin cancelled the pending close
         ORACLE_ERROR // 6 - Oracle call failed
-
     }
 
     enum PositionClosedBy {
@@ -94,7 +93,6 @@ contract PositionManager is
         STOP_LOSS, // 3 - Stop loss requested
         MAX_PROFIT_REACHED, // 4 - Max profit reached
         PENDING_CLOSE_REQUESTED // 5 - Pending close requested
-
     }
 
     /// @notice Pending close request data
@@ -164,9 +162,18 @@ contract PositionManager is
     event MaintenanceMarginRatioUpdated(uint256 oldRatio, uint256 newRatio);
     event LeverageLimitsUpdated(uint8 minLeverage, uint8 maxLeverage);
 
-    event SettlementEngineUpdated(address indexed oldAddress, address indexed newAddress);
-    event VaultManagerUpdated(address indexed oldAddress, address indexed newAddress);
-    event PriceFeedManagerUpdated(address indexed oldAddress, address indexed newAddress);
+    event SettlementEngineUpdated(
+        address indexed oldAddress,
+        address indexed newAddress
+    );
+    event VaultManagerUpdated(
+        address indexed oldAddress,
+        address indexed newAddress
+    );
+    event PriceFeedManagerUpdated(
+        address indexed oldAddress,
+        address indexed newAddress
+    );
 
     event MinPositionHoldTimeUpdated(uint256 oldTime, uint256 newTime);
 
@@ -190,7 +197,11 @@ contract PositionManager is
         PositionClosedBy closedBy
     );
 
-    event PendingCloseProcessed(uint64 indexed positionId, bool success, PendingCloseReason reason);
+    event PendingCloseProcessed(
+        uint64 indexed positionId,
+        bool success,
+        PendingCloseReason reason
+    );
 
     // ========================================================================
     // ERRORS
@@ -236,7 +247,10 @@ contract PositionManager is
      * @param initialOwner Owner address
      * @param _admin Admin address (initial admin to add)
      */
-    function initialize(address initialOwner, address _admin) public initializer {
+    function initialize(
+        address initialOwner,
+        address _admin
+    ) public initializer {
         if (initialOwner == address(0) || _admin == address(0)) {
             revert InvalidAddress();
         }
@@ -302,14 +316,17 @@ contract PositionManager is
             revert InvalidLeverage();
         }
         if (
-            direction != PositionLib.BET_DIRECTION_UP && direction != PositionLib.BET_DIRECTION_DOWN
+            direction != PositionLib.BET_DIRECTION_UP &&
+            direction != PositionLib.BET_DIRECTION_DOWN
         ) {
             revert InvalidDirection();
         }
-        if (projectToken == address(0)) revert InvalidAddress();
-
-        // Get price from oracle via SettlementEngine with price update
-        if (settlementEngine == address(0)) revert InvalidAddress();
+        if (
+            projectToken == address(0) ||
+            settlementEngine == address(0) ||
+            vaultManager == address(0) ||
+            priceFeedManager == address(0)
+        ) revert InvalidAddress();
 
         uint256 amount;
         uint256 openPrice;
@@ -331,10 +348,11 @@ contract PositionManager is
         // Get price from PriceFeedManager
         // Use deadline as maxAge for price validation
         if (priceFeedManager == address(0)) revert InvalidAddress();
-        uint256 maxAge =
-            deadline > block.timestamp ? deadline - block.timestamp : DEFAULT_PRICE_MAX_AGE;
-        (openPrice, pricePublishTime) =
-            IPriceFeedManager(priceFeedManager).getPrice(projectToken, maxAge);
+        uint256 maxAge = deadline > block.timestamp
+            ? deadline - block.timestamp
+            : DEFAULT_PRICE_MAX_AGE;
+        (openPrice, pricePublishTime) = IPriceFeedManager(priceFeedManager)
+            .getPrice(projectToken, maxAge);
 
         if (openPrice == 0) revert InvalidPrice();
 
@@ -356,39 +374,36 @@ contract PositionManager is
             }
         }
 
+        address vaultAddress = IVaultManager(vaultManager).getVault(
+            projectToken
+        );
+        if (vaultAddress == address(0)) revert InvalidAddress();
         // Validate vault exists for this project token
-        if (vaultManager != address(0)) {
-            if (!IVaultManager(vaultManager).isVaultSupported(projectToken)) {
-                revert InvalidAddress();
-            }
+        if (!IVaultManager(vaultManager).isVaultSupported(projectToken)) {
+            revert InvalidAddress();
         }
 
         // Calculate position size (for risk check)
         uint256 positionSize = amount * leverage;
 
         // Check risk limits - get vault address and call AssetVault directly
-        if (vaultManager != address(0)) {
-            address vaultAddress = IVaultManager(vaultManager).getVault(projectToken);
-            if (vaultAddress == address(0)) revert InvalidAddress();
-            (bool canOpen,) = IAssetVault(vaultAddress).checkPositionRisk(positionSize, leverage);
 
-            if (!canOpen) revert RiskLimitExceeded();
-        }
+        (bool canOpen, ) = IAssetVault(vaultAddress).checkPositionRisk(
+            positionSize,
+            leverage
+        );
+
+        if (!canOpen) revert RiskLimitExceeded();
 
         // Create position ID first
         positionId = nextPositionId++;
 
         // Transfer collateral to VaultManager
-        if (vaultManager != address(0)) {
-            if (projectToken != address(0)) {
-                // ERC20 project token - approve and transfer
-                IERC20(projectToken).approve(vaultManager, amount);
-            }
+        // ERC20 project token - approve and transfer
+        IERC20(projectToken).approve(vaultManager, amount);
 
-            IVaultManager(vaultManager).depositFromBet{
-                value: projectToken == address(0) ? amount : 0
-            }(projectToken, positionId, amount, positionSize, false); // false = opening new position
-        }
+        IVaultManager(vaultManager).depositFromBet(projectToken, positionId, amount, positionSize, false); // false = opening new position
+
         PositionLib.Position storage pos = positions[positionId];
 
         pos.positionId = positionId;
@@ -409,7 +424,10 @@ contract PositionManager is
 
         // Calculate liquidation price with leverage and maintenance margin
         pos.liquidationPrice = PositionLib.calculateLiquidationPrice(
-            openPrice, direction, leverage, maintenanceMarginRatio
+            openPrice,
+            direction,
+            leverage,
+            maintenanceMarginRatio
         );
 
         pos.maxProfitCap = amount * PositionLib.MAX_PROFIT_CAP_MULTIPLIER;
@@ -440,11 +458,11 @@ contract PositionManager is
      * @param deadline Deadline timestamp for transaction execution
      * @param maxAcceptablePrice Maximum acceptable close price (0 = no limit)
      */
-    function closePosition(uint64 positionId, uint256 deadline, uint256 maxAcceptablePrice)
-        external
-        nonReentrant
-        whenNotPaused
-    {
+    function closePosition(
+        uint64 positionId,
+        uint256 deadline,
+        uint256 maxAcceptablePrice
+    ) external nonReentrant whenNotPaused {
         PositionLib.Position storage pos = positions[positionId];
 
         if (block.timestamp > deadline) revert DeadlineExpired();
@@ -464,16 +482,20 @@ contract PositionManager is
         if (settlementEngine == address(0)) revert InvalidAddress();
 
         // Use deadline as maxAge for price validation
-        uint256 maxAge =
-            deadline > block.timestamp ? deadline - block.timestamp : DEFAULT_PRICE_MAX_AGE;
+        uint256 maxAge = deadline > block.timestamp
+            ? deadline - block.timestamp
+            : DEFAULT_PRICE_MAX_AGE;
 
         // Try to get price - if stale, move to pending instead of reverting
         if (priceFeedManager == address(0)) {
             revert InvalidAddress();
         }
-        try IPriceFeedManager(priceFeedManager).getPrice(pos.projectToken, maxAge) returns (
-            uint256 closePrice, uint256 pricePublishTime
-        ) {
+        try
+            IPriceFeedManager(priceFeedManager).getPrice(
+                pos.projectToken,
+                maxAge
+            )
+        returns (uint256 closePrice, uint256 pricePublishTime) {
             if (closePrice == 0) revert InvalidPrice();
 
             // Check maxAcceptablePrice if specified
@@ -498,12 +520,19 @@ contract PositionManager is
 
             // Process settlement immediately
             _processSettlement(
-                positionId, closePrice, false, pricePublishTime, PositionClosedBy.USER_REQUESTED
+                positionId,
+                closePrice,
+                false,
+                pricePublishTime,
+                PositionClosedBy.USER_REQUESTED
             );
         } catch {
             // Price is stale or unavailable - move to pending close
             _addPendingCloseRequest(
-                positionId, deadline, maxAcceptablePrice, PendingCloseReason.PRICE_STALE
+                positionId,
+                deadline,
+                maxAcceptablePrice,
+                PendingCloseReason.PRICE_STALE
             );
         }
     }
@@ -543,9 +572,13 @@ contract PositionManager is
         uint256 currentPrice;
         if (priceFeedManager != address(0)) {
             // Use deadline as maxAge for price validation
-            uint256 maxAge =
-                deadline > block.timestamp ? deadline - block.timestamp : DEFAULT_PRICE_MAX_AGE;
-            (currentPrice,) = IPriceFeedManager(priceFeedManager).getPrice(pos.projectToken, maxAge);
+            uint256 maxAge = deadline > block.timestamp
+                ? deadline - block.timestamp
+                : DEFAULT_PRICE_MAX_AGE;
+            (currentPrice, ) = IPriceFeedManager(priceFeedManager).getPrice(
+                pos.projectToken,
+                maxAge
+            );
 
             // Check maxAcceptablePrice if specified
             if (maxAcceptablePrice > 0) {
@@ -573,7 +606,11 @@ contract PositionManager is
             if (msg.value != marginAmount) revert InvalidAmount();
         } else {
             // ERC20 project token
-            IERC20(pos.tokenAddress).transferFrom(msg.sender, address(this), marginAmount);
+            IERC20(pos.tokenAddress).transferFrom(
+                msg.sender,
+                address(this),
+                marginAmount
+            );
         }
 
         // Update position margin (position size stays the same)
@@ -652,21 +689,38 @@ contract PositionManager is
         // Get close price from PriceFeedManager
         if (priceFeedManager == address(0)) revert InvalidAddress();
         // Use default maxAge for admin operations
-        uint256 maxAge =
-            deadline > block.timestamp ? deadline - block.timestamp : DEFAULT_PRICE_MAX_AGE;
-        (uint256 closePrice, uint256 pricePublishTime) =
-            IPriceFeedManager(priceFeedManager).getPrice(pos.projectToken, maxAge);
+        uint256 maxAge = deadline > block.timestamp
+            ? deadline - block.timestamp
+            : DEFAULT_PRICE_MAX_AGE;
+        (uint256 closePrice, uint256 pricePublishTime) = IPriceFeedManager(
+            priceFeedManager
+        ).getPrice(pos.projectToken, maxAge);
         if (closePrice == 0) revert InvalidPrice();
 
         if (isLiquidation) {
-            uint256 liquidationFeeBps = PositionLib.calculateLiquidationFee(pos.leverage);
-            uint256 liquidationFee = (pos.amount * liquidationFeeBps) / PositionLib.BASIS_POINTS;
+            uint256 liquidationFeeBps = PositionLib.calculateLiquidationFee(
+                pos.leverage
+            );
+            uint256 liquidationFee = (pos.amount * liquidationFeeBps) /
+                PositionLib.BASIS_POINTS;
 
-            emit BetLiquidated(positionId, pos.user, closePrice, liquidationFee, block.timestamp);
+            emit BetLiquidated(
+                positionId,
+                pos.user,
+                closePrice,
+                liquidationFee,
+                block.timestamp
+            );
         }
 
         // Process settlement
-        _processSettlement(positionId, closePrice, isLiquidation, pricePublishTime, closedBy);
+        _processSettlement(
+            positionId,
+            closePrice,
+            isLiquidation,
+            pricePublishTime,
+            closedBy
+        );
     }
 
     // ========================================================================
@@ -731,7 +785,9 @@ contract PositionManager is
         uint256 length = pendingClosePositionIds.length;
         for (uint256 i = 0; i < length; i++) {
             if (pendingClosePositionIds[i] == positionId) {
-                pendingClosePositionIds[i] = pendingClosePositionIds[length - 1];
+                pendingClosePositionIds[i] = pendingClosePositionIds[
+                    length - 1
+                ];
                 pendingClosePositionIds.pop();
                 break;
             }
@@ -743,11 +799,10 @@ contract PositionManager is
      * @param maxPositions Maximum number of positions to process in this batch
      * @dev Should be called by backend cron task
      */
-    function processPendingClosePositions(uint256 maxPositions, uint256 maxAge)
-        external
-        nonReentrant
-        onlyAdmin
-    {
+    function processPendingClosePositions(
+        uint256 maxPositions,
+        uint256 maxAge
+    ) external nonReentrant onlyAdmin {
         uint256 processed = 0;
         uint256 i = 0;
 
@@ -772,10 +827,10 @@ contract PositionManager is
      * @param positionId Position ID to process
      * @return success True if position was successfully closed
      */
-    function _processSinglePendingClose(uint64 positionId, uint256 maxAge)
-        internal
-        returns (bool success)
-    {
+    function _processSinglePendingClose(
+        uint64 positionId,
+        uint256 maxAge
+    ) internal returns (bool success) {
         PendingCloseRequest memory request = pendingCloseRequests[positionId];
         PositionLib.Position storage pos = positions[positionId];
 
@@ -788,14 +843,20 @@ contract PositionManager is
         // Check settlement engine is set
         if (settlementEngine == address(0)) {
             emit PendingCloseProcessed(
-                positionId, false, PendingCloseReason.SETTLEMENT_ENGINE_NOT_SET
+                positionId,
+                false,
+                PendingCloseReason.SETTLEMENT_ENGINE_NOT_SET
             );
             return false;
         }
 
         // Try to get price and close position
-        (bool closed, PendingCloseReason reason) =
-            _tryClosePendingPosition(positionId, request, pos, maxAge);
+        (bool closed, PendingCloseReason reason) = _tryClosePendingPosition(
+            positionId,
+            request,
+            pos,
+            maxAge
+        );
 
         emit PendingCloseProcessed(positionId, closed, reason);
         return closed;
@@ -819,16 +880,25 @@ contract PositionManager is
         if (priceFeedManager == address(0)) {
             return (false, PendingCloseReason.SETTLEMENT_ENGINE_NOT_SET);
         }
-        try IPriceFeedManager(priceFeedManager).getPrice(pos.projectToken, maxAge) returns (
-            uint256 closePrice, uint256 pricePublishTime
-        ) {
+        try
+            IPriceFeedManager(priceFeedManager).getPrice(
+                pos.projectToken,
+                maxAge
+            )
+        returns (uint256 closePrice, uint256 pricePublishTime) {
             // Validate price
             if (closePrice == 0) {
                 return (false, PendingCloseReason.INVALID_PRICE);
             }
 
             // Check if price is acceptable
-            if (!_isPriceAcceptable(closePrice, request.maxAcceptablePrice, pos.direction)) {
+            if (
+                !_isPriceAcceptable(
+                    closePrice,
+                    request.maxAcceptablePrice,
+                    pos.direction
+                )
+            ) {
                 return (false, PendingCloseReason.PRICE_NOT_ACCEPTABLE);
             }
 
@@ -856,11 +926,11 @@ contract PositionManager is
      * @param direction Position direction (LONG or SHORT)
      * @return acceptable True if price is acceptable
      */
-    function _isPriceAcceptable(uint256 price, uint256 maxAcceptablePrice, uint8 direction)
-        internal
-        pure
-        returns (bool acceptable)
-    {
+    function _isPriceAcceptable(
+        uint256 price,
+        uint256 maxAcceptablePrice,
+        uint8 direction
+    ) internal pure returns (bool acceptable) {
         // No limit specified
         if (maxAcceptablePrice == 0) {
             return true;
@@ -880,7 +950,9 @@ contract PositionManager is
      * @param positionId Position ID
      * @dev Reverts position back to OPEN state
      */
-    function cancelPendingClose(uint64 positionId) external nonReentrant onlyAdmin {
+    function cancelPendingClose(
+        uint64 positionId
+    ) external nonReentrant onlyAdmin {
         PositionLib.Position storage pos = positions[positionId];
 
         if (pos.user == address(0)) revert PositionNotFound();
@@ -895,7 +967,11 @@ contract PositionManager is
         // Remove from pending queue
         _removePendingCloseRequest(positionId);
 
-        emit PendingCloseProcessed(positionId, false, PendingCloseReason.CANCELLED_BY_ADMIN);
+        emit PendingCloseProcessed(
+            positionId,
+            false,
+            PendingCloseReason.CANCELLED_BY_ADMIN
+        );
     }
 
     // ========================================================================
@@ -919,8 +995,19 @@ contract PositionManager is
         if (settlementEngine == address(0)) revert InvalidAddress();
 
         // Process settlement and get result - direct call (no more low-level call)
-        (bool won, uint256 payout, uint256 fee, int256 pnl, int256 vaultPnL, uint8 finalState,) =
-            ISettlementEngine(settlementEngine).processSettlement(pos, closePrice, isLiquidation);
+        (
+            bool won,
+            uint256 payout,
+            uint256 fee,
+            int256 pnl,
+            int256 vaultPnL,
+            uint8 finalState,
+
+        ) = ISettlementEngine(settlementEngine).processSettlement(
+                pos,
+                closePrice,
+                isLiquidation
+            );
 
         // Update vault P&L
         if (vaultManager != address(0)) {
@@ -974,11 +1061,9 @@ contract PositionManager is
     /**
      * @notice Set settlement engine address
      */
-    function setSettlementEngine(address _settlementEngine)
-        external
-        onlyOwner
-        validAddress(_settlementEngine)
-    {
+    function setSettlementEngine(
+        address _settlementEngine
+    ) external onlyOwner validAddress(_settlementEngine) {
         address oldAddress = settlementEngine;
         settlementEngine = _settlementEngine;
         emit SettlementEngineUpdated(oldAddress, _settlementEngine);
@@ -987,11 +1072,9 @@ contract PositionManager is
     /**
      * @notice Set vault manager address
      */
-    function setVaultManager(address _vaultManager)
-        external
-        onlyOwner
-        validAddress(_vaultManager)
-    {
+    function setVaultManager(
+        address _vaultManager
+    ) external onlyOwner validAddress(_vaultManager) {
         address oldAddress = vaultManager;
         vaultManager = _vaultManager;
         emit VaultManagerUpdated(oldAddress, _vaultManager);
@@ -1000,11 +1083,9 @@ contract PositionManager is
     /**
      * @notice Set price feed manager address
      */
-    function setPriceFeedManager(address _priceFeedManager)
-        external
-        onlyOwner
-        validAddress(_priceFeedManager)
-    {
+    function setPriceFeedManager(
+        address _priceFeedManager
+    ) external onlyOwner validAddress(_priceFeedManager) {
         address oldAddress = priceFeedManager;
         priceFeedManager = _priceFeedManager;
         emit PriceFeedManagerUpdated(oldAddress, _priceFeedManager);
@@ -1022,7 +1103,9 @@ contract PositionManager is
      * @notice Remove an admin address
      * @param _admin Admin address to remove
      */
-    function removeAdmin(address _admin) external onlyOwner validAddress(_admin) {
+    function removeAdmin(
+        address _admin
+    ) external onlyOwner validAddress(_admin) {
         _removeAdmin(_admin);
     }
 
@@ -1056,8 +1139,15 @@ contract PositionManager is
      * @param _minLeverage Min leverage (e.g., 1)
      * @param _maxLeverage Max leverage (e.g., 100)
      */
-    function setLeverageLimits(uint8 _minLeverage, uint8 _maxLeverage) external onlyOwner {
-        if (_minLeverage < 1 || _maxLeverage > 100 || _minLeverage > _maxLeverage) {
+    function setLeverageLimits(
+        uint8 _minLeverage,
+        uint8 _maxLeverage
+    ) external onlyOwner {
+        if (
+            _minLeverage < 1 ||
+            _maxLeverage > 100 ||
+            _minLeverage > _maxLeverage
+        ) {
             revert InvalidLeverage();
         }
         minLeverage = _minLeverage;
@@ -1069,7 +1159,9 @@ contract PositionManager is
      * @notice Update minimum position hold time
      * @param _minPositionHoldTime New minimum hold time in seconds
      */
-    function setMinPositionHoldTime(uint256 _minPositionHoldTime) external onlyOwner {
+    function setMinPositionHoldTime(
+        uint256 _minPositionHoldTime
+    ) external onlyOwner {
         if (_minPositionHoldTime > MAX_MIN_POSITION_HOLD_TIME) {
             revert InvalidHoldTime();
         }
@@ -1082,7 +1174,9 @@ contract PositionManager is
     /**
      * @notice Authorize upgrade (UUPS pattern)
      */
-    function _authorizeUpgrade(address newImplementation) internal override onlyOwner { }
+    function _authorizeUpgrade(
+        address newImplementation
+    ) internal override onlyOwner {}
 
     // ========================================================================
     // VIEW FUNCTIONS
@@ -1091,18 +1185,19 @@ contract PositionManager is
     /**
      * @notice Get position details
      */
-    function getPosition(uint64 positionId) external view returns (PositionLib.Position memory) {
+    function getPosition(
+        uint64 positionId
+    ) external view returns (PositionLib.Position memory) {
         return positions[positionId];
     }
 
     /**
      * @notice Check if position can be liquidated
      */
-    function checkLiquidation(uint64 positionId, uint256 currentPrice)
-        external
-        view
-        returns (bool)
-    {
+    function checkLiquidation(
+        uint64 positionId,
+        uint256 currentPrice
+    ) external view returns (bool) {
         PositionLib.Position storage pos = positions[positionId];
         return PositionLib.isLiquidated(pos, currentPrice);
     }
@@ -1113,7 +1208,11 @@ contract PositionManager is
     function getLeverageConfig()
         external
         view
-        returns (uint8 _minLeverage, uint8 _maxLeverage, uint256 _maintenanceMarginRatio)
+        returns (
+            uint8 _minLeverage,
+            uint8 _maxLeverage,
+            uint256 _maintenanceMarginRatio
+        )
     {
         return (minLeverage, maxLeverage, maintenanceMarginRatio);
     }
@@ -1121,24 +1220,27 @@ contract PositionManager is
     /**
      * @notice Calculate potential liquidation price for a position
      */
-    function calculatePotentialLiquidationPrice(uint256 openPrice, uint8 direction, uint8 leverage)
-        external
-        view
-        returns (uint256)
-    {
-        return PositionLib.calculateLiquidationPrice(
-            openPrice, direction, leverage, maintenanceMarginRatio
-        );
+    function calculatePotentialLiquidationPrice(
+        uint256 openPrice,
+        uint8 direction,
+        uint8 leverage
+    ) external view returns (uint256) {
+        return
+            PositionLib.calculateLiquidationPrice(
+                openPrice,
+                direction,
+                leverage,
+                maintenanceMarginRatio
+            );
     }
 
     /**
      * @notice Get position P&L at current price
      */
-    function getPositionPnL(uint64 positionId, uint256 currentPrice)
-        external
-        view
-        returns (int256 pnl, int256 pnlPercentage)
-    {
+    function getPositionPnL(
+        uint64 positionId,
+        uint256 currentPrice
+    ) external view returns (int256 pnl, int256 pnlPercentage) {
         PositionLib.Position storage pos = positions[positionId];
         return PositionLib.calculateUnrealizedPnL(pos, currentPrice);
     }
@@ -1148,11 +1250,9 @@ contract PositionManager is
      * @param positionId Position ID
      * @return remainingTime Remaining time in seconds (0 if can close now)
      */
-    function getRemainingHoldTime(uint64 positionId)
-        external
-        view
-        returns (uint256 remainingTime)
-    {
+    function getRemainingHoldTime(
+        uint64 positionId
+    ) external view returns (uint256 remainingTime) {
         PositionLib.Position storage pos = positions[positionId];
         if (pos.user == address(0)) revert PositionNotFound();
 
@@ -1169,11 +1269,9 @@ contract PositionManager is
      * @return canClose Whether position can be closed
      * @return reason Reason if cannot close
      */
-    function canClosePosition(uint64 positionId)
-        external
-        view
-        returns (bool canClose, string memory reason)
-    {
+    function canClosePosition(
+        uint64 positionId
+    ) external view returns (bool canClose, string memory reason) {
         PositionLib.Position storage pos = positions[positionId];
 
         if (pos.user == address(0)) {
@@ -1202,7 +1300,11 @@ contract PositionManager is
      * @notice Get all pending close position IDs
      * @return Array of position IDs waiting to be closed
      */
-    function getPendingClosePositionIds() external view returns (uint64[] memory) {
+    function getPendingClosePositionIds()
+        external
+        view
+        returns (uint64[] memory)
+    {
         return pendingClosePositionIds;
     }
 
@@ -1211,11 +1313,9 @@ contract PositionManager is
      * @param positionId Position ID
      * @return request Pending close request data
      */
-    function getPendingCloseRequest(uint64 positionId)
-        external
-        view
-        returns (PendingCloseRequest memory)
-    {
+    function getPendingCloseRequest(
+        uint64 positionId
+    ) external view returns (PendingCloseRequest memory) {
         if (!isPendingClose[positionId]) revert NoPendingCloseRequest();
         return pendingCloseRequests[positionId];
     }
@@ -1233,7 +1333,9 @@ contract PositionManager is
      * @param positionId Position ID
      * @return hasPending True if position has pending close request
      */
-    function hasPendingCloseRequest(uint64 positionId) external view returns (bool) {
+    function hasPendingCloseRequest(
+        uint64 positionId
+    ) external view returns (bool) {
         return isPendingClose[positionId];
     }
 
@@ -1245,7 +1347,10 @@ contract PositionManager is
      * @return requests Array of pending requests
      * @return positionsData Array of position data
      */
-    function getPendingClosePositionsBatch(uint256 offset, uint256 limit)
+    function getPendingClosePositionsBatch(
+        uint256 offset,
+        uint256 limit
+    )
         external
         view
         returns (
@@ -1256,7 +1361,11 @@ contract PositionManager is
     {
         uint256 total = pendingClosePositionIds.length;
         if (offset >= total) {
-            return (new uint64[](0), new PendingCloseRequest[](0), new PositionLib.Position[](0));
+            return (
+                new uint64[](0),
+                new PendingCloseRequest[](0),
+                new PositionLib.Position[](0)
+            );
         }
 
         uint256 end = offset + limit;

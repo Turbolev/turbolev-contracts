@@ -219,7 +219,11 @@ contract VaultManager is
         bool isMarginAdd
     ) external payable onlyPositionManager {
         address vaultAddress = _getVault(_projectToken);
-        IAssetVault(vaultAddress).depositFromBet{ value: msg.value }(
+        if (vaultAddress == address(0)) revert InvalidAddress();
+        // ERC20 project token - approve and transfer
+        IERC20(_projectToken).transferFrom(positionManager, vaultAddress, amount);
+        
+        IAssetVault(vaultAddress).depositFromBet(
             positionId, amount, positionSize, isMarginAdd
         );
         emit CollateralDepositedFromBet(
