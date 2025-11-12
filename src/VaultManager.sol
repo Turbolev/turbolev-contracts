@@ -47,7 +47,7 @@ contract VaultManager is
     // ========================================================================
 
     /// @dev Storage gap to allow for new variables in future versions
-    /// @notice Currently using 5 storage slots, reserving 46 slots for future use
+    /// @notice Currently using 5 storage slots, reserving 45 slots for future use
     uint256[45] private __gap;
 
     // ========================================================================
