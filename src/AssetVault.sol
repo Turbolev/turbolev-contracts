@@ -796,6 +796,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         if (vaultPnL >= 0) {
             // Vault gained (trader lost)
             // Add the loss amount to vault liquidity
+            // This becomes part of the profit that will be distributed to LPs
             uint256 lossAmount = uint256(vaultPnL);
             vaultInfo.totalLiquidity += lossAmount;
 
@@ -844,6 +845,9 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         }
 
         // Track Daily P&L and Position IDs
+        // dailyNetPnL tracks vault's profit/loss for the day
+        // Positive value = vault profit (from losing positions + fees)
+        // This will be distributed to LPs during finalizeDailyReward
         dailyNetPnL += vaultPnL; // Accumulate for current day
         dailyPositionIds.push(positionId);
 
@@ -934,6 +938,15 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
     function finalizeDailyReward() external onlyAdmin returns (bool isComplete) {
         uint256 today = block.timestamp / 1 days;
 
+        // Check if already processed today - this is the primary protection
+        if (dailySnapshots[today].isProcessed) {
+            revert DailySnapshotAlreadyProcessed();
+        }
+
+        if (today <= lastSnapshotDay) {
+            revert TooEarlyForSnapshot();
+        }
+
         // Take snapshot with position IDs
         DailySnapshot storage snapshot = dailySnapshots[today];
         snapshot.day = today;
@@ -953,6 +966,9 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         finalizeLPIndex = 0;
 
         // Pre-calculate rewards for all LPs (only if netPnL > 0)
+        // Vault profit comes from:
+        // 1. Users losing their positions (collateral goes to vault)
+        // 2. House edge from winning positions
         int256 finalizedPnL = dailyNetPnL;
         if (finalizedPnL > 0 && snapshot.totalShares > 0) {
             uint256 dayStartTimestamp = today * 1 days;
@@ -1014,6 +1030,11 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
     function finalizeDailyRewardRemaining() external onlyAdmin returns (bool isComplete) {
         uint256 today = block.timestamp / 1 days;
 
+        // Check if snapshot exists
+        if (!dailySnapshots[today].isProcessed) {
+            revert DailySnapshotAlreadyProcessed(); // Use same error for consistency
+        }
+
         DailySnapshot storage snapshot = dailySnapshots[today];
         int256 finalizedPnL = snapshot.netPnL;
 
@@ -1073,14 +1094,10 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
     function claimRewards() external nonReentrant whenNotPaused {
         LPPosition storage lpPos = lpPositions[msg.sender];
 
-        if (lpPos.shares == 0) {
-            revert NoStakeFound();
-        }
-
         // Get claimable rewards (already accumulated from all days)
         uint256 rewards = claimableRewards[msg.sender];
 
-        if (rewards == 0) {
+        if (rewards == 0 || lpPos.shares == 0) {
             revert NoRewardsToClaim();
         }
 

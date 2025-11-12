@@ -6,6 +6,7 @@ import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol
 import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "./interfaces/IAssetVault.sol";
 import "./AssetVault.sol";
 
@@ -46,8 +47,8 @@ contract VaultManager is
     // ========================================================================
 
     /// @dev Storage gap to allow for new variables in future versions
-    /// @notice Currently using 4 storage slots, reserving 46 slots for future use
-    uint256[46] private __gap;
+    /// @notice Currently using 5 storage slots, reserving 46 slots for future use
+    uint256[45] private __gap;
 
     // ========================================================================
     // EVENTS
@@ -56,8 +57,6 @@ contract VaultManager is
     event VaultCreated(
         address indexed projectToken, address indexed vaultAddress, uint256 timestamp
     );
-
-    event PositionManagerUpdated(address indexed oldAddress, address indexed newAddress);
 
     event CollateralDepositedFromBet(
         address indexed vault,
@@ -185,24 +184,6 @@ contract VaultManager is
     // PROXY FUNCTIONS (Route to specific vaults)
     // ========================================================================
 
-    // /**
-    //  * @notice Check position risk for a vault
-    //  * @param _projectToken Project token address
-    //  * @param positionSize Position size
-    //  * @param leverage Leverage multiplier
-    //  * @return canOpen Whether position can be opened
-    //  * @return reason Reason if cannot open
-    //  */
-    // function checkPositionRisk(address _projectToken, uint256 positionSize, uint8 leverage)
-    //     external
-    //     view
-    //     returns (bool canOpen, string memory reason)
-    // {
-    //     address vaultAddress = vaultsByProjectToken[_projectToken];
-    //     if (vaultAddress == address(0)) return (false, "Vault not found");
-    //     return IAssetVault(vaultAddress).checkPositionRisk(positionSize, leverage);
-    // }
-
     /**
      * @notice Deposit collateral from bet (v1: project token only)
      * @param _projectToken Project token address
@@ -219,16 +200,9 @@ contract VaultManager is
         bool isMarginAdd
     ) external payable onlyPositionManager {
         address vaultAddress = _getVault(_projectToken);
-        if (vaultAddress == address(0)) revert InvalidAddress();
-        // ERC20 project token - approve and transfer
         IERC20(_projectToken).transferFrom(positionManager, vaultAddress, amount);
-        
-        IAssetVault(vaultAddress).depositFromBet(
-            positionId, amount, positionSize, isMarginAdd
-        );
-        emit CollateralDepositedFromBet(
-            vaultAddress, _projectToken, amount, positionSize, block.timestamp
-        );
+        IAssetVault(vaultAddress).depositFromBet(positionId, amount, positionSize, isMarginAdd);
+        emit CollateralDepositedFromBet(vaultAddress, _projectToken, amount, positionSize, block.timestamp);
     }
 
     /**
@@ -262,9 +236,7 @@ contract VaultManager is
         uint256 fee,
         uint256 positionSize
     ) external onlyPositionManager {
-        IAssetVault(_getVault(_projectToken)).updateVaultPnL(
-            positionId, collateral, vaultPnL, fee, positionSize
-        );
+        IAssetVault(_getVault(_projectToken)).updateVaultPnL(positionId, collateral, vaultPnL, fee, positionSize);
     }
 
     // ========================================================================
@@ -276,9 +248,7 @@ contract VaultManager is
      */
     function setPositionManager(address _positionManager) external onlyOwner {
         if (_positionManager == address(0)) revert InvalidAddress();
-        address oldAddress = positionManager;
         positionManager = _positionManager;
-        emit PositionManagerUpdated(oldAddress, _positionManager);
     }
 
     /**
