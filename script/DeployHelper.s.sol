@@ -186,7 +186,9 @@ contract DeployHelper is Script {
         json = string.concat(json, '  "settlementEngine": "', vm.toString(settlementEngine), '",\n');
         json = string.concat(json, '  "positionManager": "', vm.toString(positionManager), '",\n');
         json = string.concat(json, '  "vaultManager": "', vm.toString(vaultManager), '",\n');
-        json = string.concat(json, '  "vaultManagerHelper": "', vm.toString(vaultManagerHelper), '",\n');
+        json = string.concat(
+            json, '  "vaultManagerHelper": "', vm.toString(vaultManagerHelper), '",\n'
+        );
         json = string.concat(json, '  "priceFeedManager": "', vm.toString(priceFeedManager), '"\n');
         json = string.concat(json, "}");
 

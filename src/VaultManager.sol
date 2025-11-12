@@ -139,18 +139,22 @@ contract VaultManager is
         uint256 _maxBetAmount,
         uint256 _graduationThreshold
     ) external onlyOwner returns (address vaultAddress) {
-        if (_projectToken == address(0) || vaultManagerHelper == address(0)) revert InvalidAddress();
+        if (_projectToken == address(0) || vaultManagerHelper == address(0)) {
+            revert InvalidAddress();
+        }
         if (vaultsByProjectToken[_projectToken] != address(0)) revert DuplicateProjectToken();
 
-        vaultAddress = address(new AssetVault(
-            _projectToken,
-            address(this),
-            vaultManagerHelper,
-            positionManager,
-            _minBetAmount,
-            _maxBetAmount,
-            _graduationThreshold
-        ));
+        vaultAddress = address(
+            new AssetVault(
+                _projectToken,
+                address(this),
+                vaultManagerHelper,
+                positionManager,
+                _minBetAmount,
+                _maxBetAmount,
+                _graduationThreshold
+            )
+        );
 
         vaultsByProjectToken[_projectToken] = vaultAddress;
         allVaults.push(vaultAddress);
@@ -202,7 +206,9 @@ contract VaultManager is
         address vaultAddress = _getVault(_projectToken);
         IERC20(_projectToken).transferFrom(positionManager, vaultAddress, amount);
         IAssetVault(vaultAddress).depositFromBet(positionId, amount, positionSize, isMarginAdd);
-        emit CollateralDepositedFromBet(vaultAddress, _projectToken, amount, positionSize, block.timestamp);
+        emit CollateralDepositedFromBet(
+            vaultAddress, _projectToken, amount, positionSize, block.timestamp
+        );
     }
 
     /**
@@ -236,7 +242,9 @@ contract VaultManager is
         uint256 fee,
         uint256 positionSize
     ) external onlyPositionManager {
-        IAssetVault(_getVault(_projectToken)).updateVaultPnL(positionId, collateral, vaultPnL, fee, positionSize);
+        IAssetVault(_getVault(_projectToken)).updateVaultPnL(
+            positionId, collateral, vaultPnL, fee, positionSize
+        );
     }
 
     // ========================================================================
@@ -258,7 +266,7 @@ contract VaultManager is
         if (_vaultManagerHelper == address(0)) revert InvalidAddress();
         vaultManagerHelper = _vaultManagerHelper;
     }
-    
+
     /**
      * @notice Pause factory (prevents new vault creation)
      */

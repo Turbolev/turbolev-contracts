@@ -665,7 +665,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         uint256 amount,
         uint256 positionSize,
         bool isMarginAdd
-    ) external payable onlyVaultManager() nonReentrant {
+    ) external payable onlyVaultManager nonReentrant {
         if (amount == 0) revert InvalidAmount();
 
         // Store bet collateral for this position (NOT added to vault liquidity yet)

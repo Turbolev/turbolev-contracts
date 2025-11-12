@@ -225,7 +225,8 @@ contract UpdateConnections is DeployHelper {
         if (_isContractDeployed(positionManager)) {
             address currentSettlement = PositionManager(payable(positionManager)).settlementEngine();
             address currentVaultMgr = PositionManager(payable(positionManager)).vaultManager();
-            address currentPriceFeedMgr = PositionManager(payable(positionManager)).priceFeedManager();
+            address currentPriceFeedMgr =
+                PositionManager(payable(positionManager)).priceFeedManager();
 
             console.log("\nPositionManager connections:");
             console.log("- SettlementEngine:", currentSettlement);
