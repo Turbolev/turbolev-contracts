@@ -258,7 +258,7 @@ contract VaultManager is
         if (_vaultManagerHelper == address(0)) revert InvalidAddress();
         vaultManagerHelper = _vaultManagerHelper;
     }
-
+    
     /**
      * @notice Pause factory (prevents new vault creation)
      */

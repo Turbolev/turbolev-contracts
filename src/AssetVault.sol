@@ -1403,7 +1403,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
      * @param amount Amount to withdraw (0 = withdraw all)
      * @dev Only owner can withdraw fees. Fees will be sent to treasury if set, otherwise to owner.
      */
-    function withdrawFees(uint256 amount) external onlyOwner nonReentrant {
+    function withdrawFees(uint256 amount) external onlyVaultManagerOrHelper nonReentrant {
         uint256 amountToWithdraw = amount;
 
         // If amount is 0, withdraw all available fees
