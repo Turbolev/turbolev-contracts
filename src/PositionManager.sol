@@ -11,6 +11,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./libraries/PositionLib.sol";
 import "./libraries/AdminAccessControlUpgradeable.sol";
 import "./interfaces/IVaultManager.sol";
+import "./interfaces/IAssetVault.sol";
 import "./interfaces/ISettlementEngine.sol";
 import "./interfaces/IPriceFeedManager.sol";
 
@@ -305,10 +306,10 @@ contract PositionManager is
         ) {
             revert InvalidDirection();
         }
-        if (projectToken == address(0)) revert InvalidAddress();
-
-        // Get price from oracle via SettlementEngine with price update
-        if (settlementEngine == address(0)) revert InvalidAddress();
+        if (
+            projectToken == address(0) || settlementEngine == address(0)
+                || vaultManager == address(0) || priceFeedManager == address(0)
+        ) revert InvalidAddress();
 
         uint256 amount;
         uint256 openPrice;
@@ -355,37 +356,33 @@ contract PositionManager is
             }
         }
 
+        address vaultAddress = IVaultManager(vaultManager).getVault(projectToken);
+        if (vaultAddress == address(0)) revert InvalidAddress();
         // Validate vault exists for this project token
-        if (vaultManager != address(0)) {
-            if (!IVaultManager(vaultManager).isVaultSupported(projectToken)) {
-                revert InvalidAddress();
-            }
+        if (!IVaultManager(vaultManager).isVaultSupported(projectToken)) {
+            revert InvalidAddress();
         }
 
         // Calculate position size (for risk check)
         uint256 positionSize = amount * leverage;
 
-        // Check risk limits with VaultManager
-        if (vaultManager != address(0)) {
-            (bool canOpen,) =
-                IVaultManager(vaultManager).checkPositionRisk(projectToken, positionSize, leverage);
-            if (!canOpen) revert RiskLimitExceeded();
-        }
+        // Check risk limits - get vault address and call AssetVault directly
+
+        (bool canOpen,) = IAssetVault(vaultAddress).checkPositionRisk(positionSize, leverage);
+
+        if (!canOpen) revert RiskLimitExceeded();
 
         // Create position ID first
         positionId = nextPositionId++;
 
         // Transfer collateral to VaultManager
-        if (vaultManager != address(0)) {
-            if (projectToken != address(0)) {
-                // ERC20 project token - approve and transfer
-                IERC20(projectToken).approve(vaultManager, amount);
-            }
+        // ERC20 project token - approve and transfer
+        IERC20(projectToken).approve(vaultManager, amount);
 
-            IVaultManager(vaultManager).depositFromBet{
-                value: projectToken == address(0) ? amount : 0
-            }(projectToken, positionId, amount, positionSize, false); // false = opening new position
-        }
+        IVaultManager(vaultManager).depositFromBet(
+            projectToken, positionId, amount, positionSize, false
+        ); // false = opening new position
+
         PositionLib.Position storage pos = positions[positionId];
 
         pos.positionId = positionId;

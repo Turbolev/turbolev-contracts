@@ -89,8 +89,8 @@ contract DeployBlocksenseOracle is DeployHelper {
         }
 
         if (_isContractDeployed(vaultManager)) {
-            VaultManager(vaultManager).setBlocksenseOracle(blocksenseOracle);
-            console.log("Reconnected BlocksenseOracle to VaultManager");
+            // VaultManager no longer uses BlocksenseOracle
+            console.log("NOTE: VaultManager no longer uses BlocksenseOracle - skipping connection");
         } else {
             console.log("WARNING: VaultManager not set - skipping connection");
         }

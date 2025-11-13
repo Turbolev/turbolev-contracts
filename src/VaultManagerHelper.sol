@@ -336,6 +336,15 @@ contract VaultManagerHelper {
     }
 
     /**
+     * @notice Withdraw collected fees from a vault
+     * @param tokenAddress Token address
+     * @param amount Amount to withdraw (0 = withdraw all)
+     */
+    function withdrawFees(address tokenAddress, uint256 amount) external onlyOwner {
+        IAssetVault(IVaultManager(vaultManager).getVault(tokenAddress)).withdrawFees(amount);
+    }
+
+    /**
      * @notice Set staking fee BPS for a vault
      * @param tokenAddress Token address
      * @param stakingFeeBps Staking fee BPS

@@ -113,6 +113,7 @@ contract DeployHelper is Script {
         positionManager = payable(vm.envOr("POSITION_MANAGER_ADDRESS", address(0)));
         vaultManager = payable(vm.envOr("VAULT_MANAGER_ADDRESS", address(0)));
         vaultManagerHelper = payable(vm.envOr("VAULT_MANAGER_HELPER_ADDRESS", address(0)));
+        priceFeedManager = payable(vm.envOr("PRICE_FEED_MANAGER_ADDRESS", address(0)));
     }
 
     /**
@@ -184,7 +185,11 @@ contract DeployHelper is Script {
         json = string.concat(json, '  "chainlinkOracle": "', vm.toString(chainlinkOracle), '",\n');
         json = string.concat(json, '  "settlementEngine": "', vm.toString(settlementEngine), '",\n');
         json = string.concat(json, '  "positionManager": "', vm.toString(positionManager), '",\n');
-        json = string.concat(json, '  "vaultManager": "', vm.toString(vaultManager), '"\n');
+        json = string.concat(json, '  "vaultManager": "', vm.toString(vaultManager), '",\n');
+        json = string.concat(
+            json, '  "vaultManagerHelper": "', vm.toString(vaultManagerHelper), '",\n'
+        );
+        json = string.concat(json, '  "priceFeedManager": "', vm.toString(priceFeedManager), '"\n');
         json = string.concat(json, "}");
 
         vm.writeFile(file, json);
@@ -209,6 +214,8 @@ contract DeployHelper is Script {
         settlementEngine = payable(vm.parseJsonAddress(json, ".settlementEngine"));
         positionManager = payable(vm.parseJsonAddress(json, ".positionManager"));
         vaultManager = payable(vm.parseJsonAddress(json, ".vaultManager"));
+        vaultManagerHelper = payable(vm.parseJsonAddress(json, ".vaultManagerHelper"));
+        priceFeedManager = payable(vm.parseJsonAddress(json, ".priceFeedManager"));
 
         console.log("Deployment addresses loaded from:", file);
     }

@@ -376,6 +376,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
     error PayoutNotFailed();
     error DirectTransferNotAllowed();
     error VaultManagerHelperNotSet();
+    error NativeTokenNotAllowed();
 
     // ========================================================================
     // MODIFIERS
@@ -498,8 +499,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
 
         // Handle token transfer - ONLY project token accepted
         if (projectToken == address(0)) {
-            // Native project token (rare case)
-            if (msg.value != amount) revert InvalidAmount();
+            revert NativeTokenNotAllowed();
         } else {
             // ERC20 project token (most common)
             if (msg.value != 0) revert InvalidAmount();
@@ -665,17 +665,8 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         uint256 amount,
         uint256 positionSize,
         bool isMarginAdd
-    ) external payable onlyPositionManager nonReentrant {
+    ) external payable onlyVaultManager nonReentrant {
         if (amount == 0) revert InvalidAmount();
-
-        // Handle token transfer - ONLY project token accepted
-        if (projectToken == address(0)) {
-            // Native project token
-            if (msg.value != amount) revert InvalidAmount();
-        } else {
-            // ERC20 project token - already transferred by PositionManager
-            if (msg.value != 0) revert InvalidAmount();
-        }
 
         // Store bet collateral for this position (NOT added to vault liquidity yet)
         if (isMarginAdd) {
@@ -805,6 +796,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         if (vaultPnL >= 0) {
             // Vault gained (trader lost)
             // Add the loss amount to vault liquidity
+            // This becomes part of the profit that will be distributed to LPs
             uint256 lossAmount = uint256(vaultPnL);
             vaultInfo.totalLiquidity += lossAmount;
 
@@ -853,6 +845,9 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         }
 
         // Track Daily P&L and Position IDs
+        // dailyNetPnL tracks vault's profit/loss for the day
+        // Positive value = vault profit (from losing positions + fees)
+        // This will be distributed to LPs during finalizeDailyReward
         dailyNetPnL += vaultPnL; // Accumulate for current day
         dailyPositionIds.push(positionId);
 
@@ -938,18 +933,16 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
     /**
      * @notice Finalize daily rewards and take snapshot
      * @dev Called by admin bot at end of each day (UTC midnight)
-     *      Only callable once per day
      *      Pre-calculates and stores rewards for all LPs to avoid recalculation on claim
      */
     function finalizeDailyReward() external onlyAdmin returns (bool isComplete) {
         uint256 today = block.timestamp / 1 days;
 
-        // Check if already processed today
+        // Check if already processed today - this is the primary protection
         if (dailySnapshots[today].isProcessed) {
             revert DailySnapshotAlreadyProcessed();
         }
 
-        // Check if we're actually in a new day
         if (today <= lastSnapshotDay) {
             revert TooEarlyForSnapshot();
         }
@@ -973,6 +966,9 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         finalizeLPIndex = 0;
 
         // Pre-calculate rewards for all LPs (only if netPnL > 0)
+        // Vault profit comes from:
+        // 1. Users losing their positions (collateral goes to vault)
+        // 2. House edge from winning positions
         int256 finalizedPnL = dailyNetPnL;
         if (finalizedPnL > 0 && snapshot.totalShares > 0) {
             uint256 dayStartTimestamp = today * 1 days;
@@ -1098,14 +1094,10 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
     function claimRewards() external nonReentrant whenNotPaused {
         LPPosition storage lpPos = lpPositions[msg.sender];
 
-        if (lpPos.shares == 0) {
-            revert NoStakeFound();
-        }
-
         // Get claimable rewards (already accumulated from all days)
         uint256 rewards = claimableRewards[msg.sender];
 
-        if (rewards == 0) {
+        if (rewards == 0 || lpPos.shares == 0) {
             revert NoRewardsToClaim();
         }
 
@@ -1411,7 +1403,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
      * @param amount Amount to withdraw (0 = withdraw all)
      * @dev Only owner can withdraw fees. Fees will be sent to treasury if set, otherwise to owner.
      */
-    function withdrawFees(uint256 amount) external onlyOwner nonReentrant {
+    function withdrawFees(uint256 amount) external onlyVaultManagerOrHelper nonReentrant {
         uint256 amountToWithdraw = amount;
 
         // If amount is 0, withdraw all available fees

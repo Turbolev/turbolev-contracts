@@ -20,18 +20,18 @@ interface IVaultManager {
      */
     function isVaultSupported(address _projectToken) external view returns (bool supported);
 
-    /**
-     * @notice Check position risk
-     * @param _projectToken Project token address
-     * @param positionSize Position size (collateral * leverage)
-     * @param leverage Leverage multiplier
-     * @return canOpen Whether position can be opened
-     * @return reason Reason if cannot open
-     */
-    function checkPositionRisk(address _projectToken, uint256 positionSize, uint8 leverage)
-        external
-        view
-        returns (bool canOpen, string memory reason);
+    // /**
+    //  * @notice Check position risk
+    //  * @param _projectToken Project token address
+    //  * @param positionSize Position size (collateral * leverage)
+    //  * @param leverage Leverage multiplier
+    //  * @return canOpen Whether position can be opened
+    //  * @return reason Reason if cannot open
+    //  */
+    // function checkPositionRisk(address _projectToken, uint256 positionSize, uint8 leverage)
+    //     external
+    //     view
+    //     returns (bool canOpen, string memory reason);
 
     /**
      * @notice Deposit collateral from bet (v1: project token only)

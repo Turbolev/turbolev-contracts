@@ -13,15 +13,7 @@ import "./AssetVault.sol";
 /**
  * @title VaultManager
  * @notice Factory contract to create and manage multiple AssetVault instances
- * @dev Manages vaults for individual project tokens with Blocksense Oracle - UUPS Upgradeable
- *
- * NEW FEATURES:
- * - Create vaults for individual project tokens (one vault per project token)
- * - Each vault accepts both MON and project token
- * - Traders can use either MON or project token to bet
- * - Multiple positions allowed per user per project token
- * - Partial liquidity system support
- * - Blocksense Oracle integration
+ * @dev Manages vaults for individual project tokens - UUPS Upgradeable
  */
 contract VaultManager is
     Initializable,
@@ -37,12 +29,6 @@ contract VaultManager is
     /// @notice PositionManager contract address
     address public positionManager;
 
-    /// @notice SettlementEngine contract address
-    address public settlementEngine;
-
-    /// @notice BlocksenseOracle contract address
-    address public blocksenseOracle;
-
     /// @notice VaultManagerHelper contract address
     address public vaultManagerHelper;
 
@@ -53,9 +39,6 @@ contract VaultManager is
     /// @notice Array of all vault addresses
     address[] public allVaults;
 
-    /// @notice Mapping: vault address => is valid vault
-    mapping(address => bool) public isValidVault;
-
     /// @notice Mapping: vault address => project token
     mapping(address => address) public vaultProjectToken;
 
@@ -64,8 +47,8 @@ contract VaultManager is
     // ========================================================================
 
     /// @dev Storage gap to allow for new variables in future versions
-    /// @notice Currently using 7 storage slots (added blocksenseOracle), reserving 43 slots for future use
-    uint256[43] private __gap;
+    /// @notice Currently using 5 storage slots, reserving 45 slots for future use
+    uint256[45] private __gap;
 
     // ========================================================================
     // EVENTS
@@ -74,12 +57,6 @@ contract VaultManager is
     event VaultCreated(
         address indexed projectToken, address indexed vaultAddress, uint256 timestamp
     );
-
-    event PositionManagerUpdated(address indexed oldAddress, address indexed newAddress);
-
-    event SettlementEngineUpdated(address indexed oldAddress, address indexed newAddress);
-
-    event BlocksenseOracleUpdated(address indexed oldAddress, address indexed newAddress);
 
     event CollateralDepositedFromBet(
         address indexed vault,
@@ -94,16 +71,9 @@ contract VaultManager is
     // ========================================================================
 
     error InvalidAddress();
-    error VaultAlreadyExists();
     error VaultNotFound();
-    error NotAuthorized();
     error NotPositionManager();
-    error NotSettlementEngine();
-    error DuplicatePriceFeedId();
     error DuplicateProjectToken();
-    error InvalidAmount();
-    error InvalidPriceFeedId();
-    error TransferFailed();
     error DirectTransferNotAllowed();
 
     // ========================================================================
@@ -112,11 +82,6 @@ contract VaultManager is
 
     modifier onlyPositionManager() {
         if (msg.sender != positionManager) revert NotPositionManager();
-        _;
-    }
-
-    modifier onlySettlementEngine() {
-        if (msg.sender != settlementEngine) revert NotSettlementEngine();
         _;
     }
 
@@ -161,14 +126,6 @@ contract VaultManager is
     // ========================================================================
 
     /**
-     * @notice Create new vault for a project token
-     * @param _projectToken Project token address
-     * @param _minBetAmount Min bet amount
-     * @param _maxBetAmount Max bet amount
-     * @param _graduationThreshold Token amount threshold for graduation
-     * @return vaultAddress Address of created vault
-     */
-    /**
      * @notice Create a new vault for a project token
      * @param _projectToken Project token address
      * @param _minBetAmount Min bet amount
@@ -185,87 +142,51 @@ contract VaultManager is
         if (_projectToken == address(0) || vaultManagerHelper == address(0)) {
             revert InvalidAddress();
         }
-        if (vaultsByProjectToken[_projectToken] != address(0)) {
-            revert DuplicateProjectToken();
-        }
+        if (vaultsByProjectToken[_projectToken] != address(0)) revert DuplicateProjectToken();
 
-        AssetVault vault = new AssetVault(
-            _projectToken,
-            address(this),
-            vaultManagerHelper,
-            positionManager,
-            _minBetAmount,
-            _maxBetAmount,
-            _graduationThreshold
+        vaultAddress = address(
+            new AssetVault(
+                _projectToken,
+                address(this),
+                vaultManagerHelper,
+                positionManager,
+                _minBetAmount,
+                _maxBetAmount,
+                _graduationThreshold
+            )
         );
 
-        vaultAddress = address(vault);
-
-        // Register vault
         vaultsByProjectToken[_projectToken] = vaultAddress;
         allVaults.push(vaultAddress);
-        isValidVault[vaultAddress] = true;
         vaultProjectToken[vaultAddress] = _projectToken;
-
         emit VaultCreated(_projectToken, vaultAddress, block.timestamp);
-
-        return vaultAddress;
     }
 
     // ========================================================================
     // VIEW FUNCTIONS
     // ========================================================================
 
-    /**
-     * @notice Get vault address for a project token
-     * @param _projectToken Project token address
-     * @return vaultAddress Vault address (address(0) if not found)
-     */
-    function getVault(address _projectToken) external view returns (address vaultAddress) {
+    function getVault(address _projectToken) external view returns (address) {
         return vaultsByProjectToken[_projectToken];
     }
 
-    /**
-     * @notice Check if a vault is supported for a project token
-     * @param _projectToken Project token address
-     * @return supported True if vault exists
-     */
-    function isVaultSupported(address _projectToken) external view returns (bool supported) {
+    function isVaultSupported(address _projectToken) external view returns (bool) {
         return vaultsByProjectToken[_projectToken] != address(0);
     }
 
-    /**
-     * @notice Get all vault addresses
-     * @return Array of vault addresses
-     */
     function getAllVaults() external view returns (address[] memory) {
         return allVaults;
+    }
+
+    function _getVault(address _projectToken) internal view returns (address) {
+        address vault = vaultsByProjectToken[_projectToken];
+        if (vault == address(0) || vault.code.length == 0) revert VaultNotFound();
+        return vault;
     }
 
     // ========================================================================
     // PROXY FUNCTIONS (Route to specific vaults)
     // ========================================================================
-
-    /**
-     * @notice Check position risk for a vault
-     * @param _projectToken Project token address
-     * @param positionSize Position size
-     * @param leverage Leverage multiplier
-     * @return canOpen Whether position can be opened
-     * @return reason Reason if cannot open
-     */
-    function checkPositionRisk(address _projectToken, uint256 positionSize, uint8 leverage)
-        external
-        view
-        returns (bool canOpen, string memory reason)
-    {
-        address vaultAddress = vaultsByProjectToken[_projectToken];
-        if (vaultAddress == address(0)) {
-            return (false, "Vault not found");
-        }
-
-        return IAssetVault(vaultAddress).checkPositionRisk(positionSize, leverage);
-    }
 
     /**
      * @notice Deposit collateral from bet (v1: project token only)
@@ -282,15 +203,9 @@ contract VaultManager is
         uint256 positionSize,
         bool isMarginAdd
     ) external payable onlyPositionManager {
-        address vaultAddress = vaultsByProjectToken[_projectToken];
-        if (vaultAddress == address(0)) revert VaultNotFound();
-
-        if (vaultAddress.code.length == 0) revert VaultNotFound();
-
-        IAssetVault(vaultAddress).depositFromBet{ value: msg.value }(
-            positionId, amount, positionSize, isMarginAdd
-        );
-
+        address vaultAddress = _getVault(_projectToken);
+        IERC20(_projectToken).transferFrom(positionManager, vaultAddress, amount);
+        IAssetVault(vaultAddress).depositFromBet(positionId, amount, positionSize, isMarginAdd);
         emit CollateralDepositedFromBet(
             vaultAddress, _projectToken, amount, positionSize, block.timestamp
         );
@@ -307,10 +222,7 @@ contract VaultManager is
         external
         onlyPositionManager
     {
-        address vaultAddress = vaultsByProjectToken[_projectToken];
-        if (vaultAddress == address(0)) revert VaultNotFound();
-
-        IAssetVault(vaultAddress).executePayout(user, amount, positionId);
+        IAssetVault(_getVault(_projectToken)).executePayout(user, amount, positionId);
     }
 
     /**
@@ -330,10 +242,7 @@ contract VaultManager is
         uint256 fee,
         uint256 positionSize
     ) external onlyPositionManager {
-        address vaultAddress = vaultsByProjectToken[_projectToken];
-        if (vaultAddress == address(0)) revert VaultNotFound();
-
-        IAssetVault(vaultAddress).updateVaultPnL(
+        IAssetVault(_getVault(_projectToken)).updateVaultPnL(
             positionId, collateral, vaultPnL, fee, positionSize
         );
     }
@@ -347,29 +256,7 @@ contract VaultManager is
      */
     function setPositionManager(address _positionManager) external onlyOwner {
         if (_positionManager == address(0)) revert InvalidAddress();
-        address oldAddress = positionManager;
         positionManager = _positionManager;
-        emit PositionManagerUpdated(oldAddress, _positionManager);
-    }
-
-    /**
-     * @notice Set SettlementEngine contract address
-     */
-    function setSettlementEngine(address _settlementEngine) external onlyOwner {
-        if (_settlementEngine == address(0)) revert InvalidAddress();
-        address oldAddress = settlementEngine;
-        settlementEngine = _settlementEngine;
-        emit SettlementEngineUpdated(oldAddress, _settlementEngine);
-    }
-
-    /**
-     * @notice Set BlocksenseOracle contract address
-     */
-    function setBlocksenseOracle(address _blocksenseOracle) external onlyOwner {
-        if (_blocksenseOracle == address(0)) revert InvalidAddress();
-        address oldAddress = blocksenseOracle;
-        blocksenseOracle = _blocksenseOracle;
-        emit BlocksenseOracleUpdated(oldAddress, _blocksenseOracle);
     }
 
     /**
@@ -399,9 +286,6 @@ contract VaultManager is
      */
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner { }
 
-    /**
-     * @notice Get contract version
-     */
     function version() external pure returns (string memory) {
         return "1.0.0-vault-manager";
     }
