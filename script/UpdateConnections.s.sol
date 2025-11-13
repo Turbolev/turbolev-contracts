@@ -4,8 +4,8 @@ pragma solidity ^0.8.22;
 import "forge-std/Script.sol";
 import "./DeployHelper.s.sol";
 
-import "../src/BlocksenseOracle.sol";
-import "../src/ChainlinkOracle.sol";
+import "../src/oracles/BlocksenseOracle.sol";
+import "../src/oracles/ChainlinkOracle.sol";
 import "../src/SettlementEngine.sol";
 import "../src/PositionManager.sol";
 import "../src/VaultManager.sol";
@@ -68,27 +68,26 @@ contract UpdateConnections is DeployHelper {
     function _setupSettlementEngineConnections() internal {
         console.log("\nStep 1: Setting up SettlementEngine connections...");
 
-        // Set BlocksenseOracle
-        if (_isContractDeployed(blocksenseOracle)) {
-            try SettlementEngine(settlementEngine).setBlocksenseOracle(blocksenseOracle) {
-                console.log("[OK] Connected BlocksenseOracle to SettlementEngine");
-            } catch {
-                console.log("[SKIP] BlocksenseOracle already set or not authorized");
-            }
-        } else {
-            console.log("[WARN] BlocksenseOracle not deployed, skipping");
-        }
+        // NOTE: Direct oracle connections deprecated - now handled via PriceFeedManager
+        // if (_isContractDeployed(blocksenseOracle)) {
+        //     try SettlementEngine(settlementEngine).setBlocksenseOracle(blocksenseOracle) {
+        //         console.log("[OK] Connected BlocksenseOracle to SettlementEngine");
+        //     } catch {
+        //         console.log("[SKIP] BlocksenseOracle already set or not authorized");
+        //     }
+        // } else {
+        //     console.log("[WARN] BlocksenseOracle not deployed, skipping");
+        // }
 
-        // Set ChainlinkOracle
-        if (_isContractDeployed(chainlinkOracle)) {
-            try SettlementEngine(settlementEngine).setChainlinkOracle(chainlinkOracle) {
-                console.log("[OK] Connected ChainlinkOracle to SettlementEngine");
-            } catch {
-                console.log("[SKIP] ChainlinkOracle already set or not authorized");
-            }
-        } else {
-            console.log("[WARN] ChainlinkOracle not deployed, skipping");
-        }
+        // if (_isContractDeployed(chainlinkOracle)) {
+        //     try SettlementEngine(settlementEngine).setChainlinkOracle(chainlinkOracle) {
+        //         console.log("[OK] Connected ChainlinkOracle to SettlementEngine");
+        //     } catch {
+        //         console.log("[SKIP] ChainlinkOracle already set or not authorized");
+        //     }
+        // } else {
+        //     console.log("[WARN] ChainlinkOracle not deployed, skipping");
+        // }
 
         // Set VaultManager
         if (_isContractDeployed(vaultManager)) {
@@ -198,27 +197,27 @@ contract UpdateConnections is DeployHelper {
 
         // Verify SettlementEngine connections
         if (_isContractDeployed(settlementEngine)) {
-            address currentBlocksense = SettlementEngine(settlementEngine).blocksenseOracle();
-            address currentChainlink = SettlementEngine(settlementEngine).chainlinkOracle();
+            // DEPRECATED: address currentBlocksense = SettlementEngine(settlementEngine).blocksenseOracle();
+            // DEPRECATED: address currentChainlink = SettlementEngine(settlementEngine).chainlinkOracle();
             address currentVaultMgr = SettlementEngine(settlementEngine).vaultManager();
             address currentPosMgr = SettlementEngine(settlementEngine).positionManager();
             address currentPriceFeedMgr = SettlementEngine(settlementEngine).priceFeedManager();
 
             console.log("\nSettlementEngine connections:");
-            console.log("- BlocksenseOracle:", currentBlocksense);
-            console.log("- ChainlinkOracle:", currentChainlink);
+            // DEPRECATED: console.log("- BlocksenseOracle:", currentBlocksense);
+            // DEPRECATED: console.log("- ChainlinkOracle:", currentChainlink);
             console.log("- VaultManager:", currentVaultMgr);
             console.log("- PositionManager:", currentPosMgr);
             console.log("- PriceFeedManager:", currentPriceFeedMgr);
 
-            if (currentBlocksense != blocksenseOracle && _isContractDeployed(blocksenseOracle)) {
-                console.log("[WARN] BlocksenseOracle mismatch!");
-                allOk = false;
-            }
-            if (currentChainlink != chainlinkOracle && _isContractDeployed(chainlinkOracle)) {
-                console.log("[WARN] ChainlinkOracle mismatch!");
-                allOk = false;
-            }
+            // DEPRECATED: if (currentBlocksense != blocksenseOracle && _isContractDeployed(blocksenseOracle)) {
+            //     console.log("[WARN] BlocksenseOracle mismatch!");
+            //     allOk = false;
+            // }
+            // DEPRECATED: if (currentChainlink != chainlinkOracle && _isContractDeployed(chainlinkOracle)) {
+            //     console.log("[WARN] ChainlinkOracle mismatch!");
+            //     allOk = false;
+            // }
         }
 
         // Verify PositionManager connections

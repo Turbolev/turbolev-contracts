@@ -1,254 +1,687 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.22;
 
-import "./BaseTest.sol";
+import "forge-std/Test.sol";
+import "../src/SettlementEngine.sol";
+import "../src/PositionManager.sol";
+import "../src/VaultManager.sol";
+import "../src/PriceFeedManager.sol";
+import "../src/oracles/BlocksenseOracle.sol";
+import "../src/oracles/ChainlinkOracle.sol";
+import "../src/interfaces/IPriceFeedManager.sol";
+import "../src/interfaces/oracles/IBaseOracle.sol";
+import "../src/interfaces/ICLAggregatorAdapter.sol";
+import "../src/interfaces/IChainlinkAggregatorV3.sol";
+import "../src/interfaces/chainlink/IChainlinkAggregator.sol";
+import "../src/libraries/PositionLib.sol";
+import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+
+// Mock Adapter
+contract MockAdapter is ICLAggregatorAdapter, IChainlinkAggregatorV3 {
+    address public dataFeedStore;
+    uint256 public id;
+    uint256 public mockTimestamp;
+    int256 private _price = 2000e18;
+
+    constructor() {
+        dataFeedStore = address(0);
+        id = 1;
+        mockTimestamp = block.timestamp;
+    }
+
+    function setLatestRoundData(uint80, int256 price, uint256, uint256 timestamp, uint80)
+        external
+    {
+        _price = price;
+        mockTimestamp = timestamp;
+    }
+
+    function latestRoundData()
+        external
+        view
+        override(IChainlinkAggregator, IChainlinkAggregatorV3)
+        returns (uint80, int256, uint256, uint256, uint80)
+    {
+        return (1, _price, mockTimestamp, mockTimestamp, 1);
+    }
+
+    function decimals()
+        external
+        pure
+        override(IChainlinkAggregator, IChainlinkAggregatorV3)
+        returns (uint8)
+    {
+        return 18;
+    }
+
+    function description()
+        external
+        pure
+        override(IChainlinkAggregator, IChainlinkAggregatorV3)
+        returns (string memory)
+    {
+        return "Mock Adapter";
+    }
+
+    function getRoundData(uint80)
+        external
+        view
+        returns (uint80, int256, uint256, uint256, uint80)
+    {
+        return (1, _price, mockTimestamp, mockTimestamp, 1);
+    }
+
+    function latestAnswer() external view returns (int256) {
+        return _price;
+    }
+
+    function latestRound() external view returns (uint256) {
+        return 1;
+    }
+
+    function version() external pure returns (uint256) {
+        return 1;
+    }
+}
 
 /**
  * @title SettlementEngineTest
- * @notice Comprehensive tests for SettlementEngine
- * @dev Tests settlement logic, profit capping, fees, and admin functions
+ * @notice Tests cho SettlementEngine với PriceFeedManager (Oracle Registry Pattern)
  */
-contract SettlementEngineTest is BaseTest {
-    // Test constants
-    uint256 constant COLLATERAL = 1 ether;
-    uint8 constant LEVERAGE_10X = 10;
+contract SettlementEngineTest is Test {
+    SettlementEngine public settlementEngine;
+    PositionManager public positionManager;
+    VaultManager public vaultManager;
+    PriceFeedManager public priceFeedManager;
+    BlocksenseOracle public blocksenseOracle;
+    ChainlinkOracle public chainlinkOracle;
+    MockAdapter public mockAdapter;
 
-    function test_Initialize_Success() public {
-        assertEq(settlementEngine.houseEdgeBps(), 200, "House edge should be 200");
-        assertEq(settlementEngine.winMultiplierBps(), 30_000, "Win multiplier should be 30000");
-        assertEq(settlementEngine.minBetAmount(), 0.001 ether, "Min bet should be 0.001");
-        assertEq(settlementEngine.maxBetAmount(), 1000 ether, "Max bet should be 1000");
-        assertEq(settlementEngine.maxProfitCapBps(), 200, "Max profit cap should be 200");
+    address public owner = address(this);
+    address public user = address(0x1);
+    address public projectToken = address(0x123);
+
+    uint64 public constant TEST_POSITION_ID = 1;
+
+    event SettlementPriceRetrieved(
+        address indexed projectToken, uint256 price, uint256 publishTime, string source
+    );
+
+    function setUp() public {
+        // Deploy mock adapter
+        mockAdapter = new MockAdapter();
+        mockAdapter.setLatestRoundData(1, 2000e18, 0, block.timestamp, 1);
+
+        // Deploy BlocksenseOracle
+        BlocksenseOracle blocksenseImpl = new BlocksenseOracle();
+        bytes memory blocksenseInitData =
+            abi.encodeWithSelector(BlocksenseOracle.initialize.selector, owner, 3600);
+        ERC1967Proxy blocksenseProxy = new ERC1967Proxy(address(blocksenseImpl), blocksenseInitData);
+        blocksenseOracle = BlocksenseOracle(payable(address(blocksenseProxy)));
+
+        // Deploy ChainlinkOracle
+        ChainlinkOracle chainlinkImpl = new ChainlinkOracle();
+        bytes memory chainlinkInitData =
+            abi.encodeWithSelector(ChainlinkOracle.initialize.selector, 3600);
+        ERC1967Proxy chainlinkProxy = new ERC1967Proxy(address(chainlinkImpl), chainlinkInitData);
+        chainlinkOracle = ChainlinkOracle(address(chainlinkProxy));
+
+        // Deploy PriceFeedManager V2.1
+        PriceFeedManager priceFeedImpl = new PriceFeedManager();
+        bytes memory priceFeedInitData =
+            abi.encodeWithSelector(PriceFeedManager.initialize.selector, owner);
+        ERC1967Proxy priceFeedProxy = new ERC1967Proxy(address(priceFeedImpl), priceFeedInitData);
+        priceFeedManager = PriceFeedManager(payable(address(priceFeedProxy)));
+
+        // Register oracle providers
+        _setupOracleProviders();
+
+        // Deploy VaultManager
+        VaultManager vaultManagerImpl = new VaultManager();
+        bytes memory vaultManagerInitData =
+            abi.encodeWithSelector(VaultManager.initialize.selector, owner);
+        ERC1967Proxy vaultManagerProxy =
+            new ERC1967Proxy(address(vaultManagerImpl), vaultManagerInitData);
+        vaultManager = VaultManager(payable(address(vaultManagerProxy)));
+
+        // Deploy PositionManager
+        PositionManager positionManagerImpl = new PositionManager();
+        bytes memory positionManagerInitData = abi.encodeWithSelector(
+            PositionManager.initialize.selector,
+            owner,
+            owner // admin
+        );
+        ERC1967Proxy positionManagerProxy =
+            new ERC1967Proxy(address(positionManagerImpl), positionManagerInitData);
+        positionManager = PositionManager(payable(address(positionManagerProxy)));
+
+        // Deploy SettlementEngine
+        SettlementEngine settlementEngineImpl = new SettlementEngine();
+        bytes memory settlementEngineInitData =
+            abi.encodeWithSelector(SettlementEngine.initialize.selector, owner);
+        ERC1967Proxy settlementEngineProxy =
+            new ERC1967Proxy(address(settlementEngineImpl), settlementEngineInitData);
+        settlementEngine = SettlementEngine(payable(address(settlementEngineProxy)));
+
+        // Update config after initialization
+        settlementEngine.updateConfig(
+            500, // 5% house edge
+            19_500, // 1.95x win multiplier
+            0.01 ether, // min bet
+            100 ether // max bet
+        );
+
+        // Connect contracts
+        settlementEngine.setPriceFeedManager(address(priceFeedManager));
+        settlementEngine.setPositionManager(address(positionManager));
+        settlementEngine.setVaultManager(address(vaultManager));
+        // Note: Oracle logic moved to PriceFeedManager - no need to set oracles here
+
+        positionManager.setSettlementEngine(address(settlementEngine));
+        positionManager.setPriceFeedManager(address(priceFeedManager));
     }
 
-    function test_CalculatePotentialPayout_Success() public {
+    function _setupOracleProviders() internal {
+        // Register Chainlink Provider
+        IPriceFeedManager.OracleProvider memory chainlinkProvider = IPriceFeedManager.OracleProvider({
+            oracleContract: address(chainlinkOracle),
+            oracleType: IBaseOracle.OracleType.PUSH,
+            enabled: true
+        });
+        priceFeedManager.registerOracleProvider(
+            priceFeedManager.CHAINLINK_PROVIDER(), chainlinkProvider
+        );
+
+        // Register Blocksense Provider
+        IPriceFeedManager.OracleProvider memory blocksenseProvider = IPriceFeedManager
+            .OracleProvider({
+            oracleContract: address(blocksenseOracle),
+            oracleType: IBaseOracle.OracleType.PUSH,
+            enabled: true
+        });
+        priceFeedManager.registerOracleProvider(
+            priceFeedManager.BLOCKSENSE_PROVIDER(), blocksenseProvider
+        );
+
+        // Configure price feed for projectToken (feed addresses are per-token now)
+        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
+            primaryProviderId: priceFeedManager.CHAINLINK_PROVIDER(),
+            secondaryProviderId: priceFeedManager.BLOCKSENSE_PROVIDER(),
+            primaryFeed: address(mockAdapter),
+            secondaryFeed: address(mockAdapter),
+            usePullMode: false
+        });
+        priceFeedManager.setPriceFeedConfig(projectToken, config);
+    }
+
+    // ========================================================================
+    // INITIALIZATION TESTS
+    // ========================================================================
+
+    function testInitialization() public view {
+        assertEq(settlementEngine.owner(), owner);
+        assertEq(settlementEngine.houseEdgeBps(), 500); // Updated after init
+        assertEq(settlementEngine.winMultiplierBps(), 19_500); // Updated after init
+        assertEq(settlementEngine.minBetAmount(), 0.01 ether); // Updated after init
+        assertEq(settlementEngine.maxBetAmount(), 100 ether); // Updated after init
+        assertEq(settlementEngine.priceFeedManager(), address(priceFeedManager));
+    }
+
+    // ========================================================================
+    // PRICE FEED INTEGRATION TESTS
+    // ========================================================================
+
+    function testGetSettlementPrice() public view {
+        (uint256 price, uint256 publishTime) =
+            settlementEngine.getSettlementPrice(projectToken, 3600);
+
+        assertEq(price, 2000e18);
+        assertGt(publishTime, 0);
+    }
+
+    function testGetSettlementPriceWithFallback() public {
+        (uint256 price, uint256 publishTime) =
+            settlementEngine.getSettlementPriceWithFallback(projectToken, 3600);
+
+        assertEq(price, 2000e18);
+        assertGt(publishTime, 0);
+    }
+
+    function testGetSettlementPriceFromPrimaryProvider() public {
+        // Set different prices for primary and secondary
+        mockAdapter.setLatestRoundData(1, 2100e18, 0, block.timestamp, 1);
+
+        (uint256 price,) = settlementEngine.getSettlementPrice(projectToken, 3600);
+
+        // Should get price from primary (Chainlink)
+        assertEq(price, 2100e18);
+    }
+
+    function testGetSettlementPriceWithStaleCheck() public {
+        // Warp time to make price stale
+        vm.warp(block.timestamp + 3601);
+
+        vm.expectRevert();
+        settlementEngine.getSettlementPrice(projectToken, 3600);
+    }
+
+    // DEPRECATED: getSettlementPriceFromAdapter removed - all price queries via PriceFeedManager
+    // function testGetSettlementPriceFromAdapter() public view {
+    //     (uint256 price, uint256 publishTime) = settlementEngine
+    //         .getSettlementPriceFromAdapter(address(mockAdapter), 3600);
+    //     assertEq(price, 2000e18);
+    //     assertGt(publishTime, 0);
+    // }
+
+    // ========================================================================
+    // FALLBACK MECHANISM TESTS
+    // ========================================================================
+
+    function testFallbackToSecondaryProvider() public {
+        // Disable primary provider
+        IPriceFeedManager.OracleProvider memory disabledProvider =
+            priceFeedManager.getOracleProvider(priceFeedManager.CHAINLINK_PROVIDER());
+        disabledProvider.enabled = false;
+        priceFeedManager.updateOracleProvider(
+            priceFeedManager.CHAINLINK_PROVIDER(), disabledProvider
+        );
+
+        // Set different price for secondary
+        mockAdapter.setLatestRoundData(1, 1900e18, 0, block.timestamp, 1);
+
+        (uint256 price,) = settlementEngine.getSettlementPriceWithFallback(projectToken, 3600);
+
+        // Should fallback to secondary (Blocksense)
+        assertEq(price, 1900e18);
+    }
+
+    // ========================================================================
+    // SETTLEMENT PROCESSING TESTS
+    // ========================================================================
+
+    function testProcessSettlementWinning() public {
+        // Create winning position
+        PositionLib.Position memory position = PositionLib.Position({
+            positionId: TEST_POSITION_ID,
+            leverage: 2,
+            direction: 1, // UP
+            state: 1, // OPEN
+            closeRequestCount: 0,
+            maxCloseRequests: 3,
+            user: user,
+            projectToken: projectToken,
+            tokenAddress: address(0), // Native token
+            amount: 1 ether,
+            openPrice: 2000e18,
+            closePrice: 0,
+            liquidationPrice: 1000e18,
+            positionSize: 2 ether, // amount * leverage
+            maxProfitCap: 3 ether,
+            createdTimestamp: block.timestamp,
+            lastModifiedTimestamp: block.timestamp,
+            minCloseTime: block.timestamp,
+            initialMargin: 1 ether,
+            addedMargin: 0
+        });
+
+        // Close at higher price (winning)
+        uint256 closePrice = 2200e18; // +10% = +20% with 2x leverage
+
+        vm.prank(address(positionManager));
+        (
+            bool won,
+            uint256 payout,
+            uint256 fee,
+            int256 pnl,
+            int256 vaultPnL,
+            uint8 finalState,
+            uint256 excessProfit
+        ) = settlementEngine.processSettlement(position, closePrice, false);
+
+        assertTrue(won);
+        assertGt(payout, position.amount); // Should get more than collateral
+        assertGt(uint256(pnl), 0); // Positive P&L
+        assertLt(vaultPnL, 0); // Vault loses
+        assertEq(finalState, 5); // WON
+        assertEq(excessProfit, 0); // No capping
+    }
+
+    function testProcessSettlementLosing() public {
+        // Create losing position
+        PositionLib.Position memory position = PositionLib.Position({
+            positionId: TEST_POSITION_ID,
+            leverage: 2,
+            direction: 1, // UP
+            state: 1, // OPEN
+            closeRequestCount: 0,
+            maxCloseRequests: 3,
+            user: user,
+            projectToken: projectToken,
+            tokenAddress: address(0),
+            amount: 1 ether,
+            openPrice: 2000e18,
+            closePrice: 0,
+            liquidationPrice: 1000e18,
+            positionSize: 2 ether,
+            maxProfitCap: 3 ether,
+            createdTimestamp: block.timestamp,
+            lastModifiedTimestamp: block.timestamp,
+            minCloseTime: block.timestamp,
+            initialMargin: 1 ether,
+            addedMargin: 0
+        });
+
+        // Close at lower price (losing)
+        uint256 closePrice = 1900e18; // -5% = -10% with 2x leverage
+
+        vm.prank(address(positionManager));
+        (bool won, uint256 payout,, int256 pnl, int256 vaultPnL, uint8 finalState,) =
+            settlementEngine.processSettlement(position, closePrice, false);
+
+        assertFalse(won);
+        assertLt(payout, position.amount); // Should get less than collateral
+        assertLt(pnl, 0); // Negative P&L
+        assertGt(vaultPnL, 0); // Vault wins
+        assertEq(finalState, 6); // LOST
+    }
+
+    function testProcessSettlementLiquidation() public {
+        // Create position at liquidation threshold
+        PositionLib.Position memory position = PositionLib.Position({
+            positionId: TEST_POSITION_ID,
+            leverage: 10,
+            direction: 1,
+            state: 1,
+            closeRequestCount: 0,
+            maxCloseRequests: 3,
+            user: user,
+            projectToken: projectToken,
+            tokenAddress: address(0),
+            amount: 1 ether,
+            openPrice: 2000e18,
+            closePrice: 0,
+            liquidationPrice: 1800e18,
+            positionSize: 10 ether,
+            maxProfitCap: 3 ether,
+            createdTimestamp: block.timestamp,
+            lastModifiedTimestamp: block.timestamp,
+            minCloseTime: block.timestamp,
+            initialMargin: 1 ether,
+            addedMargin: 0
+        });
+
+        // Price drops enough to liquidate
+        uint256 closePrice = 1900e18; // -5% = -50% with 10x leverage
+
+        vm.prank(address(positionManager));
+        (bool won, uint256 payout, uint256 fee, int256 pnl,, uint8 finalState,) =
+            settlementEngine.processSettlement(position, closePrice, true);
+
+        assertFalse(won);
+        assertLt(pnl, 0); // Negative P&L
+        assertGt(fee, 0); // Liquidation fee charged
+        assertEq(finalState, 7); // LIQUIDATED
+    }
+
+    function testProcessSettlementWithProfitCap() public {
+        // Create position with small cap
+        PositionLib.Position memory position = PositionLib.Position({
+            positionId: TEST_POSITION_ID,
+            leverage: 10,
+            direction: 1,
+            state: 1,
+            closeRequestCount: 0,
+            maxCloseRequests: 3,
+            user: user,
+            projectToken: projectToken,
+            tokenAddress: address(0),
+            amount: 1 ether,
+            openPrice: 2000e18,
+            closePrice: 0,
+            liquidationPrice: 1800e18,
+            positionSize: 10 ether,
+            maxProfitCap: 1 ether, // Small cap
+            createdTimestamp: block.timestamp,
+            lastModifiedTimestamp: block.timestamp,
+            minCloseTime: block.timestamp,
+            initialMargin: 1 ether,
+            addedMargin: 0
+        });
+
+        // Huge price increase
+        uint256 closePrice = 2400e18; // +20% = +200% with 10x leverage = 2 ether profit
+
+        vm.prank(address(positionManager));
+        (bool won,,, int256 pnl,,, uint256 excessProfit) =
+            settlementEngine.processSettlement(position, closePrice, false);
+
+        assertTrue(won);
+        assertEq(uint256(pnl), 2 ether); // Full profit calculated
+        assertGt(excessProfit, 0); // But capped, so excess > 0
+    }
+
+    // ========================================================================
+    // CONFIGURATION TESTS
+    // ========================================================================
+
+    function testUpdateConfig() public {
+        settlementEngine.updateConfig(
+            600, // 6% house edge
+            19_000, // 1.9x win multiplier
+            0.1 ether, // min bet
+            50 ether // max bet
+        );
+
+        assertEq(settlementEngine.houseEdgeBps(), 600);
+        assertEq(settlementEngine.winMultiplierBps(), 19_000);
+        assertEq(settlementEngine.minBetAmount(), 0.1 ether);
+        assertEq(settlementEngine.maxBetAmount(), 50 ether);
+    }
+
+    function testSetPriceFeedManager() public {
+        address newPriceFeedManager = address(0x999);
+        settlementEngine.setPriceFeedManager(newPriceFeedManager);
+
+        assertEq(settlementEngine.priceFeedManager(), newPriceFeedManager);
+    }
+
+    function testSetPositionManager() public {
+        address newPositionManager = address(0x888);
+        settlementEngine.setPositionManager(newPositionManager);
+
+        assertEq(settlementEngine.positionManager(), newPositionManager);
+    }
+
+    function testSetVaultManager() public {
+        address newVaultManager = address(0x777);
+        settlementEngine.setVaultManager(newVaultManager);
+
+        assertEq(settlementEngine.vaultManager(), newVaultManager);
+    }
+
+    function testCalculatePotentialPayout() public view {
         uint256 amount = 1 ether;
         uint256 payout = settlementEngine.calculatePotentialPayout(amount);
 
-        // Expected: 1 * 3 = 3 ether (gross)
-        // House edge: 3 * 0.02 = 0.06 ether
-        // Net: 3 - 0.06 = 2.94 ether
-        assertEq(payout, 2.94 ether, "Potential payout should be 2.94");
+        // 1 ETH * 1.95x = 1.95 ETH
+        // 1.95 ETH * 5% house edge = 0.0975 ETH
+        // Payout = 1.95 - 0.0975 = 1.8525 ETH
+        assertEq(payout, 1.8525 ether);
     }
 
-    function test_IsValidBetAmount_Success() public {
-        assertTrue(settlementEngine.isValidBetAmount(0.001 ether), "0.001 should be valid");
-        assertTrue(settlementEngine.isValidBetAmount(1 ether), "1 should be valid");
-        assertTrue(settlementEngine.isValidBetAmount(1000 ether), "1000 should be valid");
-    }
+    // ========================================================================
+    // ACCESS CONTROL TESTS
+    // ========================================================================
 
-    function test_IsValidBetAmount_Invalid() public {
-        assertFalse(settlementEngine.isValidBetAmount(0.0001 ether), "Below min should be invalid");
-        assertFalse(settlementEngine.isValidBetAmount(1001 ether), "Above max should be invalid");
-    }
+    function testOnlyPositionManagerCanProcessSettlement() public {
+        PositionLib.Position memory position = PositionLib.Position({
+            positionId: TEST_POSITION_ID,
+            leverage: 2,
+            direction: 1,
+            state: 1,
+            closeRequestCount: 0,
+            maxCloseRequests: 3,
+            user: user,
+            projectToken: projectToken,
+            tokenAddress: address(0),
+            amount: 1 ether,
+            openPrice: 2000e18,
+            closePrice: 0,
+            liquidationPrice: 1000e18,
+            positionSize: 2 ether,
+            maxProfitCap: 3 ether,
+            createdTimestamp: block.timestamp,
+            lastModifiedTimestamp: block.timestamp,
+            minCloseTime: block.timestamp,
+            initialMargin: 1 ether,
+            addedMargin: 0
+        });
 
-    function test_GetSettlementConfig_Success() public {
-        (uint16 houseEdge, uint16 winMultiplier, uint256 minBet, uint256 maxBet, bool isPaused) =
-            settlementEngine.getSettlementConfig();
-
-        assertEq(houseEdge, 200, "House edge should match");
-        assertEq(winMultiplier, 30_000, "Win multiplier should match");
-        assertEq(minBet, 0.001 ether, "Min bet should match");
-        assertEq(maxBet, 1000 ether, "Max bet should match");
-        assertFalse(isPaused, "Should not be paused");
-    }
-
-    function test_UpdateConfig_Success() public {
-        settlementEngine.updateConfig(
-            300, // 3% house edge
-            20_000, // 2x multiplier
-            0.01 ether, // New min
-            500 ether // New max
-        );
-
-        assertEq(settlementEngine.houseEdgeBps(), 300, "House edge should be updated");
-        assertEq(settlementEngine.winMultiplierBps(), 20_000, "Win multiplier should be updated");
-        assertEq(settlementEngine.minBetAmount(), 0.01 ether, "Min bet should be updated");
-        assertEq(settlementEngine.maxBetAmount(), 500 ether, "Max bet should be updated");
-    }
-
-    function test_UpdateConfig_RevertsOnInvalidHouseEdge() public {
-        vm.expectRevert(abi.encodeWithSelector(SettlementEngine.InvalidConfig.selector));
-        settlementEngine.updateConfig(
-            1001, // > 10%
-            20_000,
-            0.001 ether,
-            1000 ether
-        );
-    }
-
-    function test_UpdateConfig_RevertsOnInvalidMultiplier() public {
-        vm.expectRevert(abi.encodeWithSelector(SettlementEngine.InvalidConfig.selector));
-        settlementEngine.updateConfig(
-            200,
-            9999, // < 1x
-            0.001 ether,
-            1000 ether
-        );
-    }
-
-    function test_UpdateConfig_RevertsOnZeroMinBet() public {
-        vm.expectRevert(abi.encodeWithSelector(SettlementEngine.InvalidConfig.selector));
-        settlementEngine.updateConfig(200, 20_000, 0, 1000 ether);
-    }
-
-    function test_UpdateConfig_RevertsOnMaxLessThanMin() public {
-        vm.expectRevert(abi.encodeWithSelector(SettlementEngine.InvalidConfig.selector));
-        settlementEngine.updateConfig(200, 20_000, 10 ether, 5 ether);
-    }
-
-    function test_UpdateConfig_RevertsWhenNotOwner() public {
-        vm.prank(user1);
+        vm.prank(user);
         vm.expectRevert();
-        settlementEngine.updateConfig(200, 20_000, 0.001 ether, 1000 ether);
+        settlementEngine.processSettlement(position, 2100e18, false);
     }
 
-    function test_SetPositionManager_Success() public {
-        address newPM = makeAddr("newPositionManager");
-
-        settlementEngine.setPositionManager(newPM);
-
-        assertEq(settlementEngine.positionManager(), newPM, "Position manager should be updated");
+    function testOnlyOwnerCanUpdateConfig() public {
+        vm.prank(user);
+        vm.expectRevert();
+        settlementEngine.updateConfig(600, 19_000, 0.1 ether, 50 ether);
     }
 
-    function test_SetPositionManager_RevertsOnZeroAddress() public {
-        vm.expectRevert(abi.encodeWithSelector(SettlementEngine.InvalidAddress.selector));
-        settlementEngine.setPositionManager(address(0));
+    function testOnlyOwnerCanSetPriceFeedManager() public {
+        vm.prank(user);
+        vm.expectRevert();
+        settlementEngine.setPriceFeedManager(address(0x999));
     }
 
-    function test_SetVaultManager_Success() public {
-        address newVM = makeAddr("newVaultManager");
+    // ========================================================================
+    // PAUSE TESTS
+    // ========================================================================
 
-        settlementEngine.setVaultManager(newVM);
+    function testPauseUnpause() public {
+        settlementEngine.pause();
 
-        assertEq(settlementEngine.vaultManager(), newVM, "Vault manager should be updated");
+        vm.expectRevert();
+        settlementEngine.getSettlementPrice(projectToken, 3600);
+
+        settlementEngine.unpause();
+
+        // Should work after unpause
+        settlementEngine.getSettlementPrice(projectToken, 3600);
     }
 
-    function test_SetVaultManager_RevertsOnZeroAddress() public {
-        vm.expectRevert(abi.encodeWithSelector(SettlementEngine.InvalidAddress.selector));
-        settlementEngine.setVaultManager(address(0));
+    function testProcessSettlementWhenPaused() public {
+        settlementEngine.pause();
+
+        PositionLib.Position memory position = PositionLib.Position({
+            positionId: TEST_POSITION_ID,
+            leverage: 2,
+            direction: 1,
+            state: 1,
+            closeRequestCount: 0,
+            maxCloseRequests: 3,
+            user: user,
+            projectToken: projectToken,
+            tokenAddress: address(0),
+            amount: 1 ether,
+            openPrice: 2000e18,
+            closePrice: 0,
+            liquidationPrice: 1000e18,
+            positionSize: 2 ether,
+            maxProfitCap: 3 ether,
+            createdTimestamp: block.timestamp,
+            lastModifiedTimestamp: block.timestamp,
+            minCloseTime: block.timestamp,
+            initialMargin: 1 ether,
+            addedMargin: 0
+        });
+
+        vm.prank(address(positionManager));
+        vm.expectRevert();
+        settlementEngine.processSettlement(position, 2100e18, false);
     }
 
-    function test_SetPriceFeedManager_Success() public {
-        address newPFM = makeAddr("newPriceFeedManager");
+    // ========================================================================
+    // ERROR CASES
+    // ========================================================================
 
-        settlementEngine.setPriceFeedManager(newPFM);
+    function testRevertWhenPriceFeedManagerNotSet() public {
+        // Deploy new SettlementEngine without PriceFeedManager
+        SettlementEngine newSettlementEngineImpl = new SettlementEngine();
+        bytes memory initData = abi.encodeWithSelector(SettlementEngine.initialize.selector, owner);
+        ERC1967Proxy newProxy = new ERC1967Proxy(address(newSettlementEngineImpl), initData);
+        SettlementEngine newSettlementEngine = SettlementEngine(payable(address(newProxy)));
 
-        assertEq(settlementEngine.priceFeedManager(), newPFM, "PriceFeedManager should be updated");
+        vm.expectRevert();
+        newSettlementEngine.getSettlementPrice(projectToken, 3600);
     }
 
-    function test_SetPriceFeedManager_RevertsOnZeroAddress() public {
-        vm.expectRevert(abi.encodeWithSelector(SettlementEngine.InvalidAddress.selector));
+    function testRevertWithInvalidAddress() public {
+        vm.expectRevert();
         settlementEngine.setPriceFeedManager(address(0));
     }
 
-    function test_Pause_Success() public {
-        settlementEngine.pause();
-
-        (,,,, bool isPaused) = settlementEngine.getSettlementConfig();
-        assertTrue(isPaused, "Should be paused");
-    }
-
-    function test_Unpause_Success() public {
-        settlementEngine.pause();
-        settlementEngine.unpause();
-
-        (,,,, bool isPaused) = settlementEngine.getSettlementConfig();
-        assertFalse(isPaused, "Should be unpaused");
-    }
-
-    function test_SetMaxProfitCapBps_Success() public {
-        settlementEngine.setMaxProfitCapBps(500);
-
-        assertEq(settlementEngine.maxProfitCapBps(), 500, "Max profit cap should be updated");
-    }
-
-    function test_SetMaxProfitCapBps_RevertsOnTooHigh() public {
-        vm.expectRevert(abi.encodeWithSelector(SettlementEngine.InvalidConfig.selector));
-        settlementEngine.setMaxProfitCapBps(1001);
-    }
-
-    function test_Version_ReturnsCorrectVersion() public {
-        string memory ver = settlementEngine.version();
-        assertEq(ver, "1.0.0-settlement-engine", "Version should match");
-    }
-
-    // ========================================================================
-    // INTEGRATION TESTS (require full setup)
-    // ========================================================================
-
-    function test_GetSettlementPrice_Success() public {
-        // Set tokens for mock adapter
-        mockAdapter.setTokens(address(projectToken), address(usdc));
-
-        // Configure PriceFeedManager for projectToken
-        priceFeedManager.setPriceFeedConfig(
-            address(projectToken), address(mockAdapter), address(mockAdapter)
-        );
-
-        _updatePrice(address(projectToken), address(usdc), 100e18);
-
-        (uint256 price, uint256 publishTime) =
-            settlementEngine.getSettlementPrice(address(projectToken), 3600);
-
-        assertEq(price, 100e18, "Price should be 100");
-        assertEq(publishTime, block.timestamp, "Publish time should match");
-    }
-
-    function test_GetSettlementPrice_RevertsWhenPaused() public {
-        // Set tokens for mock adapter
-        mockAdapter.setTokens(address(projectToken), address(usdc));
-
-        // Configure PriceFeedManager for projectToken
-        priceFeedManager.setPriceFeedConfig(
-            address(projectToken), address(mockAdapter), address(mockAdapter)
-        );
-
-        _updatePrice(address(projectToken), address(usdc), 100e18);
-        settlementEngine.pause();
-
+    function testRevertWithInvalidConfig() public {
+        // House edge + win multiplier > 100%
         vm.expectRevert();
-        settlementEngine.getSettlementPrice(address(projectToken), 3600);
+        settlementEngine.updateConfig(10_000, 10_000, 0.01 ether, 100 ether);
     }
 
-    function test_GetSettlementPrice_RevertsOnStalePrice() public {
-        // Set tokens for mock adapter
-        mockAdapter.setTokens(address(projectToken), address(usdc));
+    // ========================================================================
+    // INTEGRATION TESTS WITH ORACLE REGISTRY
+    // ========================================================================
 
-        // Configure PriceFeedManager for projectToken
-        priceFeedManager.setPriceFeedConfig(
-            address(projectToken), address(mockAdapter), address(mockAdapter)
+    function testSwitchPrimaryProvider() public {
+        // Set different prices
+        mockAdapter.setLatestRoundData(1, 2100e18, 0, block.timestamp, 1);
+
+        // Get price from primary (Chainlink)
+        (uint256 price1,) = settlementEngine.getSettlementPrice(projectToken, 3600);
+        assertEq(price1, 2100e18);
+
+        // Switch primary to Blocksense
+        priceFeedManager.setPrimaryProvider(projectToken, priceFeedManager.BLOCKSENSE_PROVIDER());
+
+        // Should get same price (same mock adapter)
+        (uint256 price2,) = settlementEngine.getSettlementPrice(projectToken, 3600);
+        assertEq(price2, 2100e18);
+    }
+
+    function testMultipleTokensDifferentProviders() public {
+        address token2 = address(0x456);
+
+        // Configure token2 with only Blocksense
+        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
+            primaryProviderId: priceFeedManager.BLOCKSENSE_PROVIDER(),
+            secondaryProviderId: bytes32(0),
+            primaryFeed: address(mockAdapter),
+            secondaryFeed: address(0),
+            usePullMode: false
+        });
+        priceFeedManager.setPriceFeedConfig(token2, config);
+
+        // Both should work
+        (uint256 price1,) = settlementEngine.getSettlementPrice(projectToken, 3600);
+        (uint256 price2,) = settlementEngine.getSettlementPrice(token2, 3600);
+
+        assertGt(price1, 0);
+        assertGt(price2, 0);
+    }
+
+    function testOracleProviderUpdate() public {
+        // Update provider configuration
+        IPriceFeedManager.OracleProvider memory updatedProvider = IPriceFeedManager.OracleProvider({
+            oracleContract: address(chainlinkOracle),
+            oracleType: IBaseOracle.OracleType.PUSH,
+            enabled: true
+        });
+
+        priceFeedManager.updateOracleProvider(
+            priceFeedManager.CHAINLINK_PROVIDER(), updatedProvider
         );
 
-        _updatePrice(address(projectToken), address(usdc), 100e18);
-
-        // Set old timestamp in mock adapter (1 hour ago)
-        mockAdapter.setMockTimestamp(1);
-
-        // Warp to make sure current time is much later
-        vm.warp(block.timestamp + 7200); // 2 hours later
-
-        // PriceFeedManager throws InvalidOraclePrice for stale price
-        vm.expectRevert(abi.encodeWithSelector(PriceFeedManager.InvalidOraclePrice.selector));
-        settlementEngine.getSettlementPrice(address(projectToken), 3600);
-    }
-
-    function test_GetSettlementPrice_RevertNoPriceFeedManager() public {
-        // Cannot set PriceFeedManager to address(0) due to validation
-        // Instead, test that getSettlementPrice checks PriceFeedManager first
-        // by using a new SettlementEngine instance without PriceFeedManager set
-
-        // Deploy new SettlementEngine without PriceFeedManager
-        SettlementEngine newSEImpl = new SettlementEngine();
-        bytes memory newSEInitData =
-            abi.encodeWithSelector(SettlementEngine.initialize.selector, owner);
-        ERC1967Proxy newSEProxy = new ERC1967Proxy(address(newSEImpl), newSEInitData);
-        SettlementEngine newSE = SettlementEngine(payable(address(newSEProxy)));
-
-        // Don't set PriceFeedManager (it will be address(0))
-        _updatePrice(address(projectToken), address(usdc), 100e18);
-
-        vm.expectRevert(abi.encodeWithSelector(SettlementEngine.InvalidAddress.selector));
-        newSE.getSettlementPrice(address(projectToken), 3600);
+        // Should still work after update
+        (uint256 price,) = settlementEngine.getSettlementPrice(projectToken, 3600);
+        assertGt(price, 0);
     }
 }

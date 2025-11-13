@@ -43,7 +43,8 @@ contract IntegrationTest is BaseTest {
             LEVERAGE_5X,
             1, // LONG
             0, // no price limit
-            block.timestamp + 3600 // deadline = 1 hour
+            block.timestamp + 3600,
+            "" // deadline, "" = 1 hour
         );
         vm.stopPrank();
 
@@ -68,7 +69,8 @@ contract IntegrationTest is BaseTest {
         positionManager.closePosition(
             positionId,
             block.timestamp + 3600, // deadline
-            0 // no price limit
+            0, // no price limit
+            "" // no price update data
         );
 
         // Verify position was closed
@@ -89,7 +91,8 @@ contract IntegrationTest is BaseTest {
             LEVERAGE_5X,
             2, // SHORT
             0, // no price limit
-            block.timestamp + 3600 // deadline = 1 hour
+            block.timestamp + 3600,
+            "" // deadline, "" = 1 hour
         );
         vm.stopPrank();
 
@@ -109,7 +112,8 @@ contract IntegrationTest is BaseTest {
         positionManager.closePosition(
             positionId,
             block.timestamp + 3600, // deadline
-            0 // no price limit
+            0, // no price limit
+            "" // no price update data
         );
 
         // Verify position was closed with profit
@@ -134,7 +138,8 @@ contract IntegrationTest is BaseTest {
             LEVERAGE_5X,
             1, // LONG
             INITIAL_PRICE, // max acceptable price = current price
-            block.timestamp + 3600 // deadline = 1 hour
+            block.timestamp + 3600,
+            "" // deadline, "" = 1 hour
         );
         vm.stopPrank();
 
@@ -156,7 +161,8 @@ contract IntegrationTest is BaseTest {
             LEVERAGE_5X,
             1, // LONG
             INITIAL_PRICE - 1e18, // max acceptable price lower than current
-            block.timestamp + 3600 // deadline = 1 hour
+            block.timestamp + 3600,
+            "" // deadline, "" = 1 hour
         );
         vm.stopPrank();
     }
@@ -173,7 +179,8 @@ contract IntegrationTest is BaseTest {
             LEVERAGE_5X,
             1, // LONG
             0, // no price limit
-            block.timestamp + 3600 // deadline = 1 hour
+            block.timestamp + 3600,
+            "" // deadline, "" = 1 hour
         );
         vm.stopPrank();
 
@@ -189,7 +196,8 @@ contract IntegrationTest is BaseTest {
         positionManager.closePosition(
             positionId,
             block.timestamp + 3600, // deadline
-            HIGHER_PRICE - 1e18 // min acceptable price for LONG
+            HIGHER_PRICE - 1e18, // min acceptable price for LONG
+            "" // no price update data
         );
 
         // Verify position was closed
@@ -209,7 +217,8 @@ contract IntegrationTest is BaseTest {
             LEVERAGE_5X,
             1, // LONG
             0, // no price limit
-            block.timestamp + 3600 // deadline = 1 hour
+            block.timestamp + 3600,
+            "" // deadline, "" = 1 hour
         );
         vm.stopPrank();
 
@@ -226,7 +235,8 @@ contract IntegrationTest is BaseTest {
         positionManager.closePosition(
             positionId,
             block.timestamp + 3600, // deadline
-            HIGHER_PRICE + 1e18 // min acceptable price too high
+            HIGHER_PRICE + 1e18, // min acceptable price too high
+            "" // no price update data
         );
     }
 
@@ -246,7 +256,8 @@ contract IntegrationTest is BaseTest {
             LEVERAGE_10X,
             1, // LONG
             0, // no price limit
-            block.timestamp + 3600 // deadline = 1 hour
+            block.timestamp + 3600,
+            "" // deadline, "" = 1 hour
         );
 
         // Add margin
@@ -277,7 +288,8 @@ contract IntegrationTest is BaseTest {
             LEVERAGE_10X,
             1, // LONG
             0, // no price limit
-            block.timestamp + 3600 // deadline = 1 hour
+            block.timestamp + 3600,
+            "" // deadline, "" = 1 hour
         );
 
         // Price increases significantly
@@ -310,7 +322,8 @@ contract IntegrationTest is BaseTest {
             50, // Very high leverage
             1, // LONG
             0, // no price limit
-            block.timestamp + 3600 // deadline = 1 hour
+            block.timestamp + 3600,
+            "" // deadline, "" = 1 hour
         );
         vm.stopPrank();
 
@@ -324,7 +337,7 @@ contract IntegrationTest is BaseTest {
 
         // User closes their own position (in liquidation scenario, they realize loss)
         vm.prank(user1);
-        positionManager.closePosition(positionId, block.timestamp + 3600, 0);
+        positionManager.closePosition(positionId, block.timestamp + 3600, 0, "");
 
         // Verify position was closed with loss
         PositionLib.Position memory pos = positionManager.getPosition(positionId);
@@ -351,7 +364,8 @@ contract IntegrationTest is BaseTest {
             LEVERAGE_5X,
             1, // LONG
             0, // no price limit
-            block.timestamp + 3600 // deadline = 1 hour
+            block.timestamp + 3600,
+            "" // deadline, "" = 1 hour
         );
         vm.stopPrank();
 
@@ -366,7 +380,8 @@ contract IntegrationTest is BaseTest {
             LEVERAGE_5X,
             2, // SHORT
             0, // no price limit
-            block.timestamp + 3600 // deadline = 1 hour
+            block.timestamp + 3600,
+            "" // deadline, "" = 1 hour
         );
         vm.stopPrank();
 
@@ -379,10 +394,10 @@ contract IntegrationTest is BaseTest {
 
         // Close both positions
         vm.prank(user1);
-        positionManager.closePosition(longPos, block.timestamp + 3600, 0);
+        positionManager.closePosition(longPos, block.timestamp + 3600, 0, "");
 
         vm.prank(user2);
-        positionManager.closePosition(shortPos, block.timestamp + 3600, 0);
+        positionManager.closePosition(shortPos, block.timestamp + 3600, 0, "");
 
         // Verify results
         PositionLib.Position memory longPosition = positionManager.getPosition(longPos);
@@ -460,7 +475,8 @@ contract IntegrationTest is BaseTest {
             LEVERAGE_5X,
             1, // LONG
             0, // no price limit
-            block.timestamp + 3600 // deadline = 1 hour
+            block.timestamp + 3600,
+            "" // deadline, "" = 1 hour
         );
         vm.stopPrank();
     }
@@ -476,7 +492,8 @@ contract IntegrationTest is BaseTest {
             LEVERAGE_5X,
             1, // LONG
             0, // no price limit
-            block.timestamp + 3600 // deadline = 1 hour
+            block.timestamp + 3600,
+            "" // deadline, "" = 1 hour
         );
         vm.stopPrank();
     }

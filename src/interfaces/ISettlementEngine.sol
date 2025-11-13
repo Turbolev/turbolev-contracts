@@ -72,17 +72,7 @@ interface ISettlementEngine {
         view
         returns (uint256 closePrice, uint256 publishTime);
 
-    /**
-     * @notice Get settlement price from CLAggregatorAdapter
-     * @param adapter CLAggregatorAdapter address for price feed
-     * @param maxAge Maximum acceptable price age
-     * @return closePrice Price from oracle (converted to uint256)
-     * @return publishTime When price was published
-     */
-    function getSettlementPriceFromAdapter(address adapter, uint256 maxAge)
-        external
-        view
-        returns (uint256 closePrice, uint256 publishTime);
+    // NOTE: getSettlementPriceFromAdapter deprecated - use PriceFeedManager.getPrice() instead
 
     /**
      * @notice Get settlement price with fallback and emit event (non-view version)

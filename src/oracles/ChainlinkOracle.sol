@@ -4,7 +4,8 @@ pragma solidity ^0.8.22;
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import "./interfaces/IChainlinkAggregatorV3.sol";
+import "../interfaces/IChainlinkAggregatorV3.sol";
+import "../interfaces/oracles/IPushOracle.sol";
 
 /**
  * @title ChainlinkOracle
@@ -16,8 +17,14 @@ import "./interfaces/IChainlinkAggregatorV3.sol";
  * - Scale all prices to 18 decimals
  * - Configurable max price age
  * - Validate price freshness and validity
+ * - Implements IPushOracle interface (push-based oracle)
  */
-contract ChainlinkOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgradeable {
+contract ChainlinkOracle is
+    OwnableUpgradeable,
+    PausableUpgradeable,
+    UUPSUpgradeable,
+    IPushOracle
+{
     // ========================================================================
     // STATE VARIABLES
     // ========================================================================
@@ -210,4 +217,126 @@ contract ChainlinkOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgrade
      * @param newImplementation Address of new implementation
      */
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner { }
+
+    // ========================================================================
+    // IBASE ORACLE INTERFACE
+    // ========================================================================
+
+    /**
+     * @notice Get oracle type
+     * @return oracleType Always PUSH for Chainlink
+     */
+    function getOracleType() external pure override returns (OracleType) {
+        return OracleType.PUSH;
+    }
+
+    /**
+     * @notice Check if oracle supports hybrid mode
+     * @return supported Always false for Chainlink (push-only)
+     */
+    function supportsHybridMode() external pure override returns (bool) {
+        return false;
+    }
+
+    /**
+     * @notice Get contract version
+     */
+    function version() external pure override returns (string memory) {
+        return "1.0.0-chainlink";
+    }
+
+    // ========================================================================
+    // IPUSH ORACLE INTERFACE
+    // ========================================================================
+    // getPrice() - already implemented
+    // getPriceNoOlderThan() - needs to be added
+    // isPriceStale() - needs to be added
+
+    /**
+     * @notice Get price with staleness check
+     * @param chainlinkFeed Chainlink price feed address
+     * @param maxAge Maximum acceptable age in seconds
+     * @return price Latest price (scaled to 18 decimals)
+     * @return updatedAt Timestamp when price was updated
+     */
+    function getPriceNoOlderThan(address chainlinkFeed, uint256 maxAge)
+        external
+        view
+        override
+        whenNotPaused
+        returns (int256 price, uint256 updatedAt)
+    {
+        if (chainlinkFeed == address(0)) revert InvalidAddress();
+
+        (bool success, int256 chainlinkPrice, uint256 chainlinkUpdatedAt) =
+            _tryGetChainlinkPriceWithAge(chainlinkFeed, maxAge);
+
+        if (!success) {
+            revert ChainlinkCallFailed();
+        }
+
+        return (chainlinkPrice, chainlinkUpdatedAt);
+    }
+
+    /**
+     * @notice Check if price is stale
+     * @param feed Chainlink feed address
+     * @param maxAge Maximum acceptable age in seconds
+     * @return isStale True if price is stale
+     */
+    function isPriceStale(address feed, uint256 maxAge) external view override returns (bool) {
+        if (feed == address(0)) return true;
+
+        try IChainlinkAggregatorV3(feed).latestRoundData() returns (
+            uint80 roundId, int256 answer, uint256, uint256 _updatedAt, uint80 answeredInRound
+        ) {
+            if (answeredInRound < roundId) return true;
+            if (answer <= 0) return true;
+            if (_updatedAt == 0) return true;
+            return (block.timestamp - _updatedAt) > maxAge;
+        } catch {
+            return true;
+        }
+    }
+
+    /**
+     * @notice Try to get price from Chainlink with custom max age
+     * @param chainlinkFeed Chainlink price feed address
+     * @param maxAge Maximum acceptable age in seconds
+     * @return success Whether the call succeeded and price is valid
+     * @return price Price (scaled to 18 decimals)
+     * @return updatedAt Update timestamp
+     */
+    function _tryGetChainlinkPriceWithAge(address chainlinkFeed, uint256 maxAge)
+        internal
+        view
+        returns (bool success, int256 price, uint256 updatedAt)
+    {
+        try IChainlinkAggregatorV3(chainlinkFeed).latestRoundData() returns (
+            uint80 roundId, int256 answer, uint256, uint256 _updatedAt, uint80 answeredInRound
+        ) {
+            // Check round consistency
+            if (answeredInRound < roundId) {
+                return (false, 0, 0);
+            }
+
+            // Check price validity
+            if (answer <= 0) {
+                return (false, 0, 0);
+            }
+
+            // Check price age
+            if (block.timestamp - _updatedAt > maxAge) {
+                return (false, 0, 0);
+            }
+
+            // Get decimals and scale price to 18 decimals
+            uint8 decimals = IChainlinkAggregatorV3(chainlinkFeed).decimals();
+            int256 scaledPrice = _scalePrice(answer, decimals);
+
+            return (true, scaledPrice, _updatedAt);
+        } catch {
+            return (false, 0, 0);
+        }
+    }
 }

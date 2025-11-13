@@ -3,527 +3,558 @@ pragma solidity ^0.8.22;
 
 import "forge-std/Test.sol";
 import "../src/PriceFeedManager.sol";
-import "../src/BlocksenseOracle.sol";
-import "../src/ChainlinkOracle.sol";
+import "../src/oracles/BlocksenseOracle.sol";
+import "../src/oracles/ChainlinkOracle.sol";
+import "../src/interfaces/IPriceFeedManager.sol";
+import "../src/interfaces/oracles/IBaseOracle.sol";
 import "../src/interfaces/ICLAggregatorAdapter.sol";
 import "../src/interfaces/IChainlinkAggregatorV3.sol";
+import "../src/interfaces/chainlink/IChainlinkAggregator.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
-contract MockCLAggregatorAdapter is ICLAggregatorAdapter {
-    int256 private _answer;
-    uint256 private _timestamp;
-    uint8 private _decimals;
+// Mock Adapter (inline)
+contract MockAdapter is ICLAggregatorAdapter, IChainlinkAggregatorV3 {
+    address public dataFeedStore;
+    uint256 public id;
+    uint256 public mockTimestamp;
+    int256 private _price = 2000e18;
 
-    constructor(int256 answer, uint8 decimals_) {
-        _answer = answer;
-        _timestamp = block.timestamp;
-        _decimals = decimals_;
+    constructor() {
+        dataFeedStore = address(0);
+        id = 1;
+        mockTimestamp = block.timestamp;
     }
 
-    function decimals() external view returns (uint8) {
-        return _decimals;
-    }
-
-    function description() external pure returns (string memory) {
-        return "Mock Adapter";
-    }
-
-    function latestAnswer() external view returns (int256) {
-        return _answer;
-    }
-
-    function latestRound() external pure returns (uint256) {
-        return 1;
-    }
-
-    function getRoundData(uint80)
-        external
-        view
-        returns (uint80, int256, uint256, uint256, uint80)
-    {
-        return (1, _answer, _timestamp, _timestamp, 1);
-    }
-
-    function latestRoundData() external view returns (uint80, int256, uint256, uint256, uint80) {
-        return (1, _answer, _timestamp, _timestamp, 1);
-    }
-
-    function id() external pure returns (uint256) {
-        return 1;
-    }
-
-    function dataFeedStore() external pure returns (address) {
-        return address(0);
-    }
-
-    function setAnswer(int256 newAnswer) external {
-        _answer = newAnswer;
-        _timestamp = block.timestamp;
-    }
-
-    function setTimestamp(uint256 newTimestamp) external {
-        _timestamp = newTimestamp;
-    }
-}
-
-contract MockChainlinkFeed is IChainlinkAggregatorV3 {
-    int256 private _answer;
-    uint256 private _updatedAt;
-    uint8 private _decimals;
-
-    constructor(int256 answer, uint8 decimals_) {
-        _answer = answer;
-        _updatedAt = block.timestamp;
-        _decimals = decimals_;
-    }
-
-    function decimals() external view returns (uint8) {
-        return _decimals;
-    }
-
-    function description() external pure returns (string memory) {
-        return "Mock Chainlink Feed";
-    }
-
-    function version() external pure returns (uint256) {
-        return 1;
+    function setLatestRoundData(
+        uint80,
+        int256 price,
+        uint256,
+        uint256 timestamp,
+        uint80
+    ) external {
+        _price = price;
+        mockTimestamp = timestamp;
     }
 
     function latestRoundData()
         external
         view
-        returns (
-            uint80 roundId,
-            int256 answer,
-            uint256 startedAt,
-            uint256 updatedAt,
-            uint80 answeredInRound
-        )
+        override(IChainlinkAggregator, IChainlinkAggregatorV3)
+        returns (uint80, int256, uint256, uint256, uint80)
     {
-        return (1, _answer, _updatedAt, _updatedAt, 1);
+        return (1, _price, mockTimestamp, mockTimestamp, 1);
     }
 
-    function getRoundData(uint80)
+    function decimals()
         external
-        view
-        returns (
-            uint80 roundId,
-            int256 answer,
-            uint256 startedAt,
-            uint256 updatedAt,
-            uint80 answeredInRound
-        )
+        pure
+        override(IChainlinkAggregator, IChainlinkAggregatorV3)
+        returns (uint8)
     {
-        return (1, _answer, _updatedAt, _updatedAt, 1);
+        return 18;
     }
 
-    function setAnswer(int256 newAnswer) external {
-        _answer = newAnswer;
-        _updatedAt = block.timestamp;
+    function description()
+        external
+        pure
+        override(IChainlinkAggregator, IChainlinkAggregatorV3)
+        returns (string memory)
+    {
+        return "Mock Adapter";
     }
 
-    function setUpdatedAt(uint256 newUpdatedAt) external {
-        _updatedAt = newUpdatedAt;
+    function getRoundData(
+        uint80
+    ) external view returns (uint80, int256, uint256, uint256, uint80) {
+        return (1, _price, mockTimestamp, mockTimestamp, 1);
+    }
+
+    function latestAnswer() external view returns (int256) {
+        return _price;
+    }
+
+    function latestRound() external view returns (uint256) {
+        return 1;
+    }
+
+    function version() external pure returns (uint256) {
+        return 1;
     }
 }
 
+/**
+ * @title PriceFeedManagerTest
+ * @notice Tests cho PriceFeedManager với Oracle Registry Pattern
+ */
 contract PriceFeedManagerTest is Test {
     PriceFeedManager public priceFeedManager;
     BlocksenseOracle public blocksenseOracle;
     ChainlinkOracle public chainlinkOracle;
-    MockCLAggregatorAdapter public mockBlocksenseAdapter;
-    MockChainlinkFeed public mockChainlinkFeed;
+    MockAdapter public mockAdapter;
 
-    address public owner;
-    address public user;
-    address public projectToken;
+    address public owner = address(this);
+    address public token = address(0x123);
 
-    uint256 public constant MAX_PRICE_AGE = 3600; // 1 hour
-    uint256 public constant TEST_PRICE = 100e18;
-
+    event OracleProviderRegistered(
+        bytes32 indexed providerId,
+        address indexed oracleContract,
+        IBaseOracle.OracleType oracleType
+    );
+    event OracleProviderUpdated(
+        bytes32 indexed providerId,
+        address indexed oracleContract
+    );
     event PriceFeedConfigUpdated(
         address indexed projectToken,
-        address indexed blocksenseAdapter,
-        address indexed chainlinkFeed
-    );
-    event BlocksenseAdapterUpdated(
-        address indexed projectToken, address indexed oldAdapter, address indexed newAdapter
-    );
-    event ChainlinkFeedUpdated(
-        address indexed projectToken, address indexed oldFeed, address indexed newFeed
-    );
-    event BlocksenseOracleUpdated(address indexed oldAddress, address indexed newAddress);
-    event ChainlinkOracleUpdated(address indexed oldAddress, address indexed newAddress);
-    event PriceFallbackUsed(
-        address indexed projectToken,
-        address indexed chainlinkFeed,
-        address indexed blocksenseAdapter,
-        string reason
+        bytes32 indexed primaryProviderId,
+        bytes32 indexed secondaryProviderId
     );
 
     function setUp() public {
-        owner = address(this);
-        user = makeAddr("user");
-        projectToken = makeAddr("projectToken");
+        // Deploy mock adapter
+        mockAdapter = new MockAdapter();
+        mockAdapter.setLatestRoundData(1, 2000e18, 0, block.timestamp, 1);
 
         // Deploy BlocksenseOracle
         BlocksenseOracle blocksenseImpl = new BlocksenseOracle();
-        bytes memory blocksenseInitData =
-            abi.encodeWithSelector(BlocksenseOracle.initialize.selector, owner, MAX_PRICE_AGE);
-        ERC1967Proxy blocksenseProxy = new ERC1967Proxy(address(blocksenseImpl), blocksenseInitData);
+        bytes memory blocksenseInitData = abi.encodeWithSelector(
+            BlocksenseOracle.initialize.selector,
+            owner,
+            3600 // max price age
+        );
+        ERC1967Proxy blocksenseProxy = new ERC1967Proxy(
+            address(blocksenseImpl),
+            blocksenseInitData
+        );
         blocksenseOracle = BlocksenseOracle(payable(address(blocksenseProxy)));
 
         // Deploy ChainlinkOracle
         ChainlinkOracle chainlinkImpl = new ChainlinkOracle();
-        bytes memory chainlinkInitData =
-            abi.encodeWithSelector(ChainlinkOracle.initialize.selector, MAX_PRICE_AGE);
-        ERC1967Proxy chainlinkProxy = new ERC1967Proxy(address(chainlinkImpl), chainlinkInitData);
+        bytes memory chainlinkInitData = abi.encodeWithSelector(
+            ChainlinkOracle.initialize.selector,
+            3600 // max price age
+        );
+        ERC1967Proxy chainlinkProxy = new ERC1967Proxy(
+            address(chainlinkImpl),
+            chainlinkInitData
+        );
         chainlinkOracle = ChainlinkOracle(address(chainlinkProxy));
 
-        // Deploy PriceFeedManager
-        PriceFeedManager impl = new PriceFeedManager();
-        bytes memory initData = abi.encodeWithSelector(
+        // Deploy PriceFeedManager V2.1
+        PriceFeedManager priceFeedImpl = new PriceFeedManager();
+        bytes memory priceFeedInitData = abi.encodeWithSelector(
             PriceFeedManager.initialize.selector,
-            owner,
-            payable(address(blocksenseOracle)),
-            address(chainlinkOracle)
+            owner
         );
-        ERC1967Proxy proxy = new ERC1967Proxy(address(impl), initData);
-        priceFeedManager = PriceFeedManager(address(proxy));
-
-        // Deploy mock adapters/feeds
-        mockBlocksenseAdapter = new MockCLAggregatorAdapter(int256(TEST_PRICE), 18);
-        mockChainlinkFeed = new MockChainlinkFeed(int256(TEST_PRICE), 18);
+        ERC1967Proxy priceFeedProxy = new ERC1967Proxy(
+            address(priceFeedImpl),
+            priceFeedInitData
+        );
+        priceFeedManager = PriceFeedManager(payable(address(priceFeedProxy)));
     }
 
     // ========================================================================
-    // INITIALIZATION TESTS
+    // PROVIDER REGISTRY TESTS
     // ========================================================================
 
-    function test_Initialize_Success() public view {
-        assertEq(priceFeedManager.owner(), owner);
-        assertEq(priceFeedManager.blocksenseOracle(), address(blocksenseOracle));
-        assertEq(priceFeedManager.chainlinkOracle(), address(chainlinkOracle));
-    }
+    function testRegisterProvider() public {
+        IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager
+            .OracleProvider({
+                oracleContract: address(chainlinkOracle),
+                oracleType: IBaseOracle.OracleType.PUSH,
+                enabled: true
+            });
 
-    function test_Initialize_RevertInvalidOwner() public {
-        PriceFeedManager impl = new PriceFeedManager();
-        bytes memory initData = abi.encodeWithSelector(
-            PriceFeedManager.initialize.selector,
-            address(0), // invalid owner
-            payable(address(blocksenseOracle)),
-            address(chainlinkOracle)
-        );
+        bytes32 providerId = priceFeedManager.CHAINLINK_PROVIDER();
 
-        vm.expectRevert(PriceFeedManager.InvalidAddress.selector);
-        new ERC1967Proxy(address(impl), initData);
-    }
-
-    // ========================================================================
-    // CONFIGURATION TESTS
-    // ========================================================================
-
-    function test_SetPriceFeedConfig_Success() public {
-        vm.expectEmit(true, true, true, true);
-        emit PriceFeedConfigUpdated(
-            projectToken, address(mockBlocksenseAdapter), address(mockChainlinkFeed)
-        );
-
-        priceFeedManager.setPriceFeedConfig(
-            projectToken, address(mockBlocksenseAdapter), address(mockChainlinkFeed)
-        );
-
-        IPriceFeedManager.PriceFeedConfig memory config =
-            priceFeedManager.getPriceFeedConfig(projectToken);
-        assertEq(config.blocksenseAdapter, address(mockBlocksenseAdapter));
-        assertEq(config.chainlinkFeed, address(mockChainlinkFeed));
-    }
-
-    function test_SetPriceFeedConfig_RevertInvalidToken() public {
-        vm.expectRevert(PriceFeedManager.InvalidAddress.selector);
-        priceFeedManager.setPriceFeedConfig(
-            address(0), address(mockBlocksenseAdapter), address(mockChainlinkFeed)
-        );
-    }
-
-    function test_SetPriceFeedConfig_RevertBothZero() public {
-        vm.expectRevert(PriceFeedManager.InvalidConfig.selector);
-        priceFeedManager.setPriceFeedConfig(projectToken, address(0), address(0));
-    }
-
-    function test_SetPriceFeedConfig_OnlyBlocksense() public {
-        priceFeedManager.setPriceFeedConfig(
-            projectToken, address(mockBlocksenseAdapter), address(0)
-        );
-
-        IPriceFeedManager.PriceFeedConfig memory config =
-            priceFeedManager.getPriceFeedConfig(projectToken);
-        assertEq(config.blocksenseAdapter, address(mockBlocksenseAdapter));
-        assertEq(config.chainlinkFeed, address(0));
-    }
-
-    function test_SetPriceFeedConfig_OnlyChainlink() public {
-        priceFeedManager.setPriceFeedConfig(projectToken, address(0), address(mockChainlinkFeed));
-
-        IPriceFeedManager.PriceFeedConfig memory config =
-            priceFeedManager.getPriceFeedConfig(projectToken);
-        assertEq(config.blocksenseAdapter, address(0));
-        assertEq(config.chainlinkFeed, address(mockChainlinkFeed));
-    }
-
-    function test_SetBlocksenseAdapter_Success() public {
-        // First set both
-        priceFeedManager.setPriceFeedConfig(
-            projectToken, address(mockBlocksenseAdapter), address(mockChainlinkFeed)
-        );
-
-        // Then update only Blocksense
-        address newAdapter = makeAddr("newAdapter");
-        vm.expectEmit(true, true, true, true);
-        emit BlocksenseAdapterUpdated(projectToken, address(mockBlocksenseAdapter), newAdapter);
-
-        priceFeedManager.setBlocksenseAdapter(projectToken, newAdapter);
-
-        assertEq(priceFeedManager.getBlocksenseAdapter(projectToken), newAdapter);
-        assertEq(priceFeedManager.getChainlinkFeed(projectToken), address(mockChainlinkFeed));
-    }
-
-    function test_SetBlocksenseAdapter_RevertBothZero() public {
-        // Set both feeds first
-        priceFeedManager.setPriceFeedConfig(
-            projectToken, address(mockBlocksenseAdapter), address(mockChainlinkFeed)
-        );
-
-        // Remove Chainlink first
-        priceFeedManager.setChainlinkFeed(projectToken, address(0));
-
-        // Now try to set Blocksense to zero (would make both zero)
-        vm.expectRevert(PriceFeedManager.InvalidConfig.selector);
-        priceFeedManager.setBlocksenseAdapter(projectToken, address(0));
-    }
-
-    function test_SetChainlinkFeed_Success() public {
-        // First set both
-        priceFeedManager.setPriceFeedConfig(
-            projectToken, address(mockBlocksenseAdapter), address(mockChainlinkFeed)
-        );
-
-        // Then update only Chainlink
-        address newFeed = makeAddr("newFeed");
-        vm.expectEmit(true, true, true, true);
-        emit ChainlinkFeedUpdated(projectToken, address(mockChainlinkFeed), newFeed);
-
-        priceFeedManager.setChainlinkFeed(projectToken, newFeed);
-
-        assertEq(
-            priceFeedManager.getBlocksenseAdapter(projectToken), address(mockBlocksenseAdapter)
-        );
-        assertEq(priceFeedManager.getChainlinkFeed(projectToken), newFeed);
-    }
-
-    function test_SetChainlinkFeed_RevertBothZero() public {
-        // Set both feeds first
-        priceFeedManager.setPriceFeedConfig(
-            projectToken, address(mockBlocksenseAdapter), address(mockChainlinkFeed)
-        );
-
-        // Remove Blocksense first
-        priceFeedManager.setBlocksenseAdapter(projectToken, address(0));
-
-        // Now try to set Chainlink to zero (would make both zero)
-        vm.expectRevert(PriceFeedManager.InvalidConfig.selector);
-        priceFeedManager.setChainlinkFeed(projectToken, address(0));
-    }
-
-    function test_SetBlocksenseOracle_Success() public {
-        address newOracle = makeAddr("newOracle");
         vm.expectEmit(true, true, false, true);
-        emit BlocksenseOracleUpdated(address(blocksenseOracle), newOracle);
+        emit OracleProviderRegistered(
+            providerId,
+            address(chainlinkOracle),
+            IBaseOracle.OracleType.PUSH
+        );
 
-        priceFeedManager.setBlocksenseOracle(payable(newOracle));
+        priceFeedManager.registerOracleProvider(providerId, provider);
 
-        assertEq(priceFeedManager.blocksenseOracle(), newOracle);
+        assertTrue(priceFeedManager.providerExists(providerId));
+
+        IPriceFeedManager.OracleProvider memory saved = priceFeedManager
+            .getOracleProvider(providerId);
+        assertEq(saved.oracleContract, address(chainlinkOracle));
+        assertTrue(saved.enabled);
+        assertEq(uint8(saved.oracleType), uint8(IBaseOracle.OracleType.PUSH));
     }
 
-    function test_SetBlocksenseOracle_RevertZeroAddress() public {
-        vm.expectRevert(PriceFeedManager.InvalidAddress.selector);
-        priceFeedManager.setBlocksenseOracle(payable(address(0)));
+    function testRegisterMultipleProviders() public {
+        bytes32[] memory providerIds = new bytes32[](2);
+        providerIds[0] = priceFeedManager.CHAINLINK_PROVIDER();
+        providerIds[1] = priceFeedManager.BLOCKSENSE_PROVIDER();
+
+        IPriceFeedManager.OracleProvider[]
+            memory providers = new IPriceFeedManager.OracleProvider[](2);
+        providers[0] = IPriceFeedManager.OracleProvider({
+            oracleContract: address(chainlinkOracle),
+            oracleType: IBaseOracle.OracleType.PUSH,
+            enabled: true
+        });
+        providers[1] = IPriceFeedManager.OracleProvider({
+            oracleContract: address(blocksenseOracle),
+            oracleType: IBaseOracle.OracleType.PUSH,
+            enabled: true
+        });
+
+        priceFeedManager.registerOracleProviders(providerIds, providers);
+
+        assertTrue(priceFeedManager.providerExists(providerIds[0]));
+        assertTrue(priceFeedManager.providerExists(providerIds[1]));
     }
 
-    function test_SetChainlinkOracle_Success() public {
-        address newOracle = makeAddr("newOracle");
+    function testUpdateProvider() public {
+        // Register provider first
+        bytes32 providerId = priceFeedManager.CHAINLINK_PROVIDER();
+        IPriceFeedManager.OracleProvider
+            memory initialProvider = IPriceFeedManager.OracleProvider({
+                oracleContract: address(chainlinkOracle),
+                oracleType: IBaseOracle.OracleType.PUSH,
+                enabled: true
+            });
+
+        priceFeedManager.registerOracleProvider(providerId, initialProvider);
+
+        // Update provider - change oracle contract address
+        IPriceFeedManager.OracleProvider
+            memory updatedProvider = IPriceFeedManager.OracleProvider({
+                oracleContract: address(blocksenseOracle), // Changed
+                oracleType: IBaseOracle.OracleType.PULL, // Changed type
+                enabled: false // Changed enabled
+            });
+
         vm.expectEmit(true, true, false, true);
-        emit ChainlinkOracleUpdated(address(chainlinkOracle), newOracle);
+        emit OracleProviderUpdated(providerId, address(blocksenseOracle));
 
-        priceFeedManager.setChainlinkOracle(newOracle);
+        priceFeedManager.updateOracleProvider(providerId, updatedProvider);
 
-        assertEq(priceFeedManager.chainlinkOracle(), newOracle);
+        IPriceFeedManager.OracleProvider memory updated = priceFeedManager
+            .getOracleProvider(providerId);
+        assertEq(updated.oracleContract, address(blocksenseOracle));
+        assertEq(uint8(updated.oracleType), uint8(IBaseOracle.OracleType.PULL));
+        assertFalse(updated.enabled);
     }
 
-    // ========================================================================
-    // GET PRICE TESTS
-    // ========================================================================
+    function testGetAllProviderIds() public {
+        bytes32 chainlink = priceFeedManager.CHAINLINK_PROVIDER();
+        bytes32 blocksense = priceFeedManager.BLOCKSENSE_PROVIDER();
 
-    function test_GetPrice_ChainlinkSuccess() public {
-        // Configure both feeds
-        priceFeedManager.setPriceFeedConfig(
-            projectToken, address(mockBlocksenseAdapter), address(mockChainlinkFeed)
-        );
+        IPriceFeedManager.OracleProvider memory provider1 = IPriceFeedManager
+            .OracleProvider({
+                oracleContract: address(chainlinkOracle),
+                oracleType: IBaseOracle.OracleType.PUSH,
+                enabled: true
+            });
 
-        (uint256 price, uint256 publishTime) =
-            priceFeedManager.getPrice(projectToken, MAX_PRICE_AGE);
+        IPriceFeedManager.OracleProvider memory provider2 = IPriceFeedManager
+            .OracleProvider({
+                oracleContract: address(blocksenseOracle),
+                oracleType: IBaseOracle.OracleType.PUSH,
+                enabled: true
+            });
 
-        assertEq(price, TEST_PRICE);
-        assertEq(publishTime, block.timestamp);
+        priceFeedManager.registerOracleProvider(chainlink, provider1);
+        priceFeedManager.registerOracleProvider(blocksense, provider2);
+
+        bytes32[] memory allIds = priceFeedManager.getAllProviderIds();
+        assertEq(allIds.length, 2);
+        assertEq(allIds[0], chainlink);
+        assertEq(allIds[1], blocksense);
     }
 
-    function test_GetPrice_BlocksenseFallback() public {
-        // Configure only Blocksense (no Chainlink)
-        priceFeedManager.setPriceFeedConfig(
-            projectToken, address(mockBlocksenseAdapter), address(0)
-        );
+    function testRevertRegisterDuplicateProvider() public {
+        IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager
+            .OracleProvider({
+                oracleContract: address(chainlinkOracle),
+                oracleType: IBaseOracle.OracleType.PUSH,
+                enabled: true
+            });
 
-        (uint256 price, uint256 publishTime) =
-            priceFeedManager.getPrice(projectToken, MAX_PRICE_AGE);
-
-        assertEq(price, TEST_PRICE);
-        assertEq(publishTime, block.timestamp);
-    }
-
-    function test_GetPrice_ChainlinkFailsBlocksenseSuccess() public {
-        // Configure both feeds
-        priceFeedManager.setPriceFeedConfig(
-            projectToken, address(mockBlocksenseAdapter), address(mockChainlinkFeed)
-        );
-
-        // Make Chainlink feed return invalid price
-        mockChainlinkFeed.setAnswer(-1);
-
-        // Should fallback to Blocksense
-        (uint256 price, uint256 publishTime) =
-            priceFeedManager.getPrice(projectToken, MAX_PRICE_AGE);
-
-        assertEq(price, TEST_PRICE);
-        assertEq(publishTime, block.timestamp);
-    }
-
-    function test_GetPrice_RevertStalePrice() public {
-        priceFeedManager.setPriceFeedConfig(
-            projectToken, address(mockBlocksenseAdapter), address(mockChainlinkFeed)
-        );
-
-        // Warp to future time to ensure we have enough time for calculation
-        vm.warp(MAX_PRICE_AGE + 100);
-
-        // Set old timestamp (ensure no underflow)
-        uint256 oldTimestamp = block.timestamp - MAX_PRICE_AGE - 1;
-        mockChainlinkFeed.setUpdatedAt(oldTimestamp);
-        mockBlocksenseAdapter.setTimestamp(oldTimestamp);
-
-        vm.expectRevert(PriceFeedManager.InvalidOraclePrice.selector);
-        priceFeedManager.getPrice(projectToken, MAX_PRICE_AGE);
-    }
-
-    function test_GetPrice_RevertNoConfig() public {
-        vm.expectRevert(PriceFeedManager.InvalidOraclePrice.selector);
-        priceFeedManager.getPrice(projectToken, MAX_PRICE_AGE);
-    }
-
-    function test_GetPriceWithFallback_EmitsEvent() public {
-        priceFeedManager.setPriceFeedConfig(
-            projectToken, address(mockBlocksenseAdapter), address(mockChainlinkFeed)
-        );
-
-        // Make Chainlink fail
-        mockChainlinkFeed.setAnswer(-1);
-
-        vm.expectEmit(true, true, true, false);
-        emit PriceFallbackUsed(
-            projectToken,
-            address(mockChainlinkFeed),
-            address(mockBlocksenseAdapter),
-            "Chainlink failed, using Blocksense"
-        );
-
-        (uint256 price, uint256 publishTime) =
-            priceFeedManager.getPriceWithFallback(projectToken, MAX_PRICE_AGE);
-
-        assertEq(price, TEST_PRICE);
-        assertEq(publishTime, block.timestamp);
-    }
-
-    // ========================================================================
-    // PAUSABLE TESTS
-    // ========================================================================
-
-    function test_Pause_Success() public {
-        priceFeedManager.pause();
-        assertTrue(priceFeedManager.paused());
-    }
-
-    function test_GetPrice_RevertWhenPaused() public {
-        priceFeedManager.setPriceFeedConfig(
-            projectToken, address(mockBlocksenseAdapter), address(mockChainlinkFeed)
-        );
-        priceFeedManager.pause();
+        bytes32 providerId = priceFeedManager.CHAINLINK_PROVIDER();
+        priceFeedManager.registerOracleProvider(providerId, provider);
 
         vm.expectRevert();
-        priceFeedManager.getPrice(projectToken, MAX_PRICE_AGE);
+        priceFeedManager.registerOracleProvider(providerId, provider);
     }
 
-    function test_SetPriceFeedConfig_RevertWhenPaused() public {
-        priceFeedManager.pause();
+    function testRevertGetNonExistentProvider() public {
+        bytes32 fakeProviderId = keccak256("FAKE");
 
         vm.expectRevert();
-        priceFeedManager.setPriceFeedConfig(
-            projectToken, address(mockBlocksenseAdapter), address(mockChainlinkFeed)
-        );
+        priceFeedManager.getOracleProvider(fakeProviderId);
     }
 
     // ========================================================================
-    // AUTHORIZATION TESTS
+    // TOKEN CONFIGURATION TESTS
     // ========================================================================
 
-    function test_OnlyOwnerCanSetPriceFeedConfig() public {
-        vm.prank(user);
+    function testSetPriceFeedConfig() public {
+        // Register provider first
+        IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager
+            .OracleProvider({
+                oracleContract: address(chainlinkOracle),
+                oracleType: IBaseOracle.OracleType.PUSH,
+                enabled: true
+            });
+
+        bytes32 providerId = priceFeedManager.CHAINLINK_PROVIDER();
+        priceFeedManager.registerOracleProvider(providerId, provider);
+
+        // Configure token
+        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager
+            .PriceFeedConfig({
+                primaryProviderId: providerId,
+                secondaryProviderId: bytes32(0),
+                primaryFeed: address(mockAdapter),
+                secondaryFeed: address(0),
+                usePullMode: false
+            });
+
+        vm.expectEmit(true, true, true, true);
+        emit PriceFeedConfigUpdated(token, providerId, bytes32(0));
+
+        priceFeedManager.setPriceFeedConfig(token, config);
+
+        IPriceFeedManager.PriceFeedConfig memory saved = priceFeedManager
+            .getPriceFeedConfig(token);
+        assertEq(saved.primaryProviderId, providerId);
+        assertEq(saved.secondaryProviderId, bytes32(0));
+        assertFalse(saved.usePullMode);
+    }
+
+    function testSetPrimaryProvider() public {
+        // Setup providers
+        bytes32 chainlink = priceFeedManager.CHAINLINK_PROVIDER();
+        bytes32 blocksense = priceFeedManager.BLOCKSENSE_PROVIDER();
+
+        IPriceFeedManager.OracleProvider memory provider1 = IPriceFeedManager
+            .OracleProvider({
+                oracleContract: address(chainlinkOracle),
+                oracleType: IBaseOracle.OracleType.PUSH,
+                enabled: true
+            });
+
+        IPriceFeedManager.OracleProvider memory provider2 = IPriceFeedManager
+            .OracleProvider({
+                oracleContract: address(blocksenseOracle),
+                oracleType: IBaseOracle.OracleType.PUSH,
+                enabled: true
+            });
+
+        priceFeedManager.registerOracleProvider(chainlink, provider1);
+        priceFeedManager.registerOracleProvider(blocksense, provider2);
+
+        // Set initial config
+        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager
+            .PriceFeedConfig({
+                primaryProviderId: chainlink,
+                secondaryProviderId: bytes32(0),
+                primaryFeed: address(mockAdapter),
+                secondaryFeed: address(0),
+                usePullMode: false
+            });
+        priceFeedManager.setPriceFeedConfig(token, config);
+
+        // Change primary provider
+        priceFeedManager.setPrimaryProvider(token, blocksense);
+
+        IPriceFeedManager.PriceFeedConfig memory updated = priceFeedManager
+            .getPriceFeedConfig(token);
+        assertEq(updated.primaryProviderId, blocksense);
+    }
+
+    function testGetResolvedConfig() public {
+        // Register providers
+        bytes32 chainlink = priceFeedManager.CHAINLINK_PROVIDER();
+        bytes32 blocksense = priceFeedManager.BLOCKSENSE_PROVIDER();
+
+        IPriceFeedManager.OracleProvider memory provider1 = IPriceFeedManager
+            .OracleProvider({
+                oracleContract: address(chainlinkOracle),
+                oracleType: IBaseOracle.OracleType.PUSH,
+                enabled: true
+            });
+
+        IPriceFeedManager.OracleProvider memory provider2 = IPriceFeedManager
+            .OracleProvider({
+                oracleContract: address(blocksenseOracle),
+                oracleType: IBaseOracle.OracleType.PUSH,
+                enabled: true
+            });
+
+        priceFeedManager.registerOracleProvider(chainlink, provider1);
+        priceFeedManager.registerOracleProvider(blocksense, provider2);
+
+        // Configure token
+        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager
+            .PriceFeedConfig({
+                primaryProviderId: chainlink,
+                secondaryProviderId: blocksense,
+                primaryFeed: address(mockAdapter),
+                secondaryFeed: address(mockAdapter),
+                usePullMode: false
+            });
+        priceFeedManager.setPriceFeedConfig(token, config);
+
+        // Get resolved config
+        (
+            IPriceFeedManager.OracleProvider memory primary,
+            IPriceFeedManager.OracleProvider memory secondary,
+            bool usePullMode
+        ) = priceFeedManager.getResolvedConfig(token);
+
+        assertEq(primary.oracleContract, address(chainlinkOracle));
+        assertEq(secondary.oracleContract, address(blocksenseOracle));
+        assertFalse(usePullMode);
+    }
+
+    // ========================================================================
+    // PRICE QUERY TESTS
+    // ========================================================================
+
+    function testGetPrice() public {
+        // Setup
+        bytes32 chainlink = priceFeedManager.CHAINLINK_PROVIDER();
+
+        IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager
+            .OracleProvider({
+                oracleContract: address(chainlinkOracle),
+                oracleType: IBaseOracle.OracleType.PUSH,
+                enabled: true
+            });
+
+        priceFeedManager.registerOracleProvider(chainlink, provider);
+
+        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager
+            .PriceFeedConfig({
+                primaryProviderId: chainlink,
+                secondaryProviderId: bytes32(0),
+                primaryFeed: address(mockAdapter),
+                secondaryFeed: address(0),
+                usePullMode: false
+            });
+
+        priceFeedManager.setPriceFeedConfig(token, config);
+
+        // Get price
+        (uint256 price, uint256 publishTime) = priceFeedManager.getPrice(
+            token,
+            3600
+        );
+
+        assertGt(price, 0);
+        assertGt(publishTime, 0);
+    }
+
+    function testGetPriceWithFallback() public {
+        // Setup both providers
+        bytes32 chainlink = priceFeedManager.CHAINLINK_PROVIDER();
+        bytes32 blocksense = priceFeedManager.BLOCKSENSE_PROVIDER();
+
+        IPriceFeedManager.OracleProvider memory provider1 = IPriceFeedManager
+            .OracleProvider({
+                oracleContract: address(chainlinkOracle),
+                oracleType: IBaseOracle.OracleType.PUSH,
+                enabled: true
+            });
+
+        IPriceFeedManager.OracleProvider memory provider2 = IPriceFeedManager
+            .OracleProvider({
+                oracleContract: address(blocksenseOracle),
+                oracleType: IBaseOracle.OracleType.PUSH,
+                enabled: true
+            });
+
+        priceFeedManager.registerOracleProvider(chainlink, provider1);
+        priceFeedManager.registerOracleProvider(blocksense, provider2);
+
+        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager
+            .PriceFeedConfig({
+                primaryProviderId: chainlink,
+                secondaryProviderId: blocksense,
+                primaryFeed: address(mockAdapter),
+                secondaryFeed: address(mockAdapter),
+                usePullMode: false
+            });
+
+        priceFeedManager.setPriceFeedConfig(token, config);
+
+        // Get price with fallback
+        (uint256 price, uint256 publishTime) = priceFeedManager
+            .getPriceWithFallback(token, 3600);
+
+        assertGt(price, 0);
+        assertGt(publishTime, 0);
+    }
+
+    function testIsPriceStale() public {
+        // Setup
+        bytes32 chainlink = priceFeedManager.CHAINLINK_PROVIDER();
+
+        IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager
+            .OracleProvider({
+                oracleContract: address(chainlinkOracle),
+                oracleType: IBaseOracle.OracleType.PUSH,
+                enabled: true
+            });
+
+        priceFeedManager.registerOracleProvider(chainlink, provider);
+
+        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager
+            .PriceFeedConfig({
+                primaryProviderId: chainlink,
+                secondaryProviderId: bytes32(0),
+                primaryFeed: address(mockAdapter),
+                secondaryFeed: address(0),
+                usePullMode: false
+            });
+
+        priceFeedManager.setPriceFeedConfig(token, config);
+
+        // Check staleness - fresh price
+        bool isStale = priceFeedManager.isPriceStale(token, 3600);
+        assertFalse(isStale); // Fresh price
+
+        // Warp time to make price stale
+        vm.warp(block.timestamp + 3601);
+
+        isStale = priceFeedManager.isPriceStale(token, 3600);
+        assertTrue(isStale); // Should be stale after 3601 seconds
+    }
+
+    function testRevertNoPrimaryProvider() public {
+        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager
+            .PriceFeedConfig({
+                primaryProviderId: bytes32(0),
+                secondaryProviderId: bytes32(0),
+                primaryFeed: address(0),
+                secondaryFeed: address(0),
+                usePullMode: false
+            });
+
         vm.expectRevert();
-        priceFeedManager.setPriceFeedConfig(
-            projectToken, address(mockBlocksenseAdapter), address(mockChainlinkFeed)
-        );
+        priceFeedManager.setPriceFeedConfig(token, config);
     }
 
-    function test_OnlyOwnerCanPause() public {
-        vm.prank(user);
+    function testRevertProviderNotFound() public {
+        bytes32 fakeProviderId = keccak256("FAKE");
+
+        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager
+            .PriceFeedConfig({
+                primaryProviderId: fakeProviderId,
+                secondaryProviderId: bytes32(0),
+                primaryFeed: address(mockAdapter),
+                secondaryFeed: address(0),
+                usePullMode: false
+            });
+
         vm.expectRevert();
-        priceFeedManager.pause();
-    }
-
-    // ========================================================================
-    // UPGRADE TESTS
-    // ========================================================================
-
-    function test_Upgrade_Success() public {
-        // Set some config
-        priceFeedManager.setPriceFeedConfig(
-            projectToken, address(mockBlocksenseAdapter), address(mockChainlinkFeed)
-        );
-
-        // Deploy new implementation
-        PriceFeedManager newImpl = new PriceFeedManager();
-
-        // Upgrade
-        priceFeedManager.upgradeToAndCall(address(newImpl), "");
-
-        // Verify state persists
-        assertEq(priceFeedManager.owner(), owner);
-        IPriceFeedManager.PriceFeedConfig memory config =
-            priceFeedManager.getPriceFeedConfig(projectToken);
-        assertEq(config.blocksenseAdapter, address(mockBlocksenseAdapter));
-        assertEq(config.chainlinkFeed, address(mockChainlinkFeed));
-    }
-
-    function test_Version_ReturnsCorrectVersion() public view {
-        string memory ver = priceFeedManager.version();
-        assertEq(ver, "1.0.0-price-feed-manager");
+        priceFeedManager.setPriceFeedConfig(token, config);
     }
 }

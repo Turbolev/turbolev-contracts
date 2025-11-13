@@ -8,8 +8,8 @@ import "../src/PositionManager.sol";
 import "../src/AssetVault.sol";
 import "../src/VaultManager.sol";
 import "../src/SettlementEngine.sol";
-import "../src/BlocksenseOracle.sol";
-import "../src/ChainlinkOracle.sol";
+import "../src/oracles/BlocksenseOracle.sol";
+import "../src/oracles/ChainlinkOracle.sol";
 import "../src/PriceFeedManager.sol";
 import "../src/VaultManagerHelper.sol";
 import "../src/interfaces/ICLFeedRegistryAdapter.sol";
@@ -316,16 +316,12 @@ contract BaseTest is Test {
         ERC1967Proxy chainlinkProxy = new ERC1967Proxy(address(chainlinkImpl), chainlinkInitData);
         chainlinkOracle = ChainlinkOracle(address(chainlinkProxy));
 
-        // Deploy PriceFeedManager (upgradeable via ERC1967Proxy)
+        // Deploy PriceFeedManager (upgradeable via ERC1967Proxy) - V2.1
         PriceFeedManager priceFeedImpl = new PriceFeedManager();
-        bytes memory priceFeedInitData = abi.encodeWithSelector(
-            PriceFeedManager.initialize.selector,
-            owner,
-            payable(address(blocksenseOracle)),
-            address(chainlinkOracle)
-        );
+        bytes memory priceFeedInitData =
+            abi.encodeWithSelector(PriceFeedManager.initialize.selector, owner);
         ERC1967Proxy priceFeedProxy = new ERC1967Proxy(address(priceFeedImpl), priceFeedInitData);
-        priceFeedManager = PriceFeedManager(address(priceFeedProxy));
+        priceFeedManager = PriceFeedManager(payable(address(priceFeedProxy)));
 
         // Deploy SettlementEngine (upgradeable via ERC1967Proxy)
         SettlementEngine settlementImpl = new SettlementEngine();
@@ -361,7 +357,7 @@ contract BaseTest is Test {
         settlementEngine.setPositionManager(address(positionManager));
         settlementEngine.setVaultManager(address(vaultManager));
         settlementEngine.setPriceFeedManager(address(priceFeedManager));
-        settlementEngine.setChainlinkOracle(address(chainlinkOracle));
+        // Note: Oracle logic moved to PriceFeedManager
 
         vaultManagerHelper.setPriceFeedManager(address(priceFeedManager));
     }
@@ -384,14 +380,36 @@ contract BaseTest is Test {
         // Set tokens for mock adapter now that they're created
         mockAdapter.setTokens(address(projectToken), address(usdc));
 
-        // Configure PriceFeedManager for project token
-        // Use mockAdapter as Blocksense adapter and create a mock Chainlink feed
-        // For testing, we'll use mockAdapter for both (since ChainlinkOracle needs a feed address)
-        // In real scenario, Chainlink feed would be a separate contract
-        address mockChainlinkFeed = address(mockAdapter); // Using same mock for simplicity
-        priceFeedManager.setPriceFeedConfig(
-            address(projectToken), address(mockAdapter), mockChainlinkFeed
+        // Configure PriceFeedManager V2.1 with Oracle Registry
+        // 1. Register providers (without feed - feed is per-token in config)
+        IPriceFeedManager.OracleProvider memory chainlinkProvider = IPriceFeedManager.OracleProvider({
+            oracleContract: address(chainlinkOracle),
+            oracleType: IBaseOracle.OracleType.PUSH,
+            enabled: true
+        });
+        priceFeedManager.registerOracleProvider(
+            priceFeedManager.CHAINLINK_PROVIDER(), chainlinkProvider
         );
+
+        IPriceFeedManager.OracleProvider memory blocksenseProvider = IPriceFeedManager
+            .OracleProvider({
+            oracleContract: address(blocksenseOracle),
+            oracleType: IBaseOracle.OracleType.PUSH,
+            enabled: true
+        });
+        priceFeedManager.registerOracleProvider(
+            priceFeedManager.BLOCKSENSE_PROVIDER(), blocksenseProvider
+        );
+
+        // 2. Configure token with feed addresses
+        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
+            primaryProviderId: priceFeedManager.CHAINLINK_PROVIDER(),
+            secondaryProviderId: priceFeedManager.BLOCKSENSE_PROVIDER(),
+            primaryFeed: address(mockAdapter), // Feed for Chainlink
+            secondaryFeed: address(mockAdapter), // Feed for Blocksense
+            usePullMode: false
+        });
+        priceFeedManager.setPriceFeedConfig(address(projectToken), config);
 
         // Set position manager in vault so it can accept deposits
         // Note: Already set in constructor by VaultManager, but we re-set to be sure
@@ -430,7 +448,8 @@ contract BaseTest is Test {
             leverage,
             direction,
             0, // no price limit
-            block.timestamp + 3600 // deadline = 1 hour
+            block.timestamp + 3600, // deadline = 1 hour
+            "" // No price update data
         );
         vm.stopPrank();
     }

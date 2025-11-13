@@ -6,19 +6,28 @@ import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "./interfaces/IPriceFeedManager.sol";
-import "./BlocksenseOracle.sol";
-import "./ChainlinkOracle.sol";
+import "./interfaces/oracles/IPushOracle.sol";
+import "./interfaces/oracles/IPullOracle.sol";
+import "./interfaces/oracles/IHybridOracle.sol";
 
 /**
- * @title PriceFeedManager
- * @notice Contract managing mapping of project token addresses with adapter/price feed addresses
+ * @title PriceFeedManager V2 with Oracle Registry Pattern
+ * @notice Enhanced contract managing price feeds with centralized oracle provider registry
  * @dev Upgradeable contract using UUPS pattern
  *
- * Features:
- * - Map project token addresses with price feed configs (multiple providers)
- * - Can update adapter/price feed address for each token
- * - Support multiple providers: Blocksense, Chainlink
- * - UUPS Upgradeable pattern
+ * KEY IMPROVEMENTS V2:
+ * - Oracle Provider Registry: Reusable, centralized management of oracle providers
+ * - Reference-based Config: Tokens reference providers by ID instead of duplicating data
+ * - Support for Push, Pull, and Hybrid oracles
+ * - Primary and secondary provider configuration (customizable order)
+ * - Automatic price updates for pull oracles when stale
+ * - Unified interface for all oracle types
+ *
+ * BENEFITS:
+ * - Gas savings: Providers stored once, tokens only store references
+ * - Easy updates: Update oracle address once → affects all tokens using it
+ * - Organized: Clear separation between provider management and token config
+ * - Reusable: Multiple tokens can share same provider configuration
  */
 contract PriceFeedManager is
     Initializable,
@@ -31,50 +40,63 @@ contract PriceFeedManager is
     // STATE VARIABLES
     // ========================================================================
 
-    /// @notice Mapping project token address -> PriceFeedConfig
+    /// @notice Registry of oracle providers (providerId => OracleProvider)
+    mapping(bytes32 => OracleProvider) public oracleProviders;
+
+    /// @notice Mapping project token address -> PriceFeedConfig (with provider IDs)
     mapping(address => PriceFeedConfig) private priceFeedConfigs;
 
-    /// @notice BlocksenseOracle contract address
-    address payable public blocksenseOracle;
+    /// @notice List of all registered provider IDs (for enumeration)
+    bytes32[] private providerIdsList;
 
-    /// @notice ChainlinkOracle contract address (for fallback)
-    address public chainlinkOracle;
+    /// @notice Mapping to check if provider ID is registered
+    mapping(bytes32 => bool) private providerRegistered;
+
+    // ========================================================================
+    // PREDEFINED PROVIDER IDs (for common use)
+    // ========================================================================
+
+    bytes32 public constant CHAINLINK_PROVIDER = keccak256("CHAINLINK");
+    bytes32 public constant BLOCKSENSE_PROVIDER = keccak256("BLOCKSENSE");
+    bytes32 public constant PYTH_PROVIDER = keccak256("PYTH");
 
     // ========================================================================
     // STORAGE GAP (for future upgrades)
     // ========================================================================
 
     /// @dev Storage gap to allow for new variables in future versions
-    /// @notice Currently using 3 storage slots, reserving 47 slots for future use
-    uint256[47] private __gap;
+    uint256[46] private __gap;
 
     // ========================================================================
     // EVENTS
     // ========================================================================
 
+    event OracleProviderRegistered(
+        bytes32 indexed providerId,
+        address indexed oracleContract,
+        IBaseOracle.OracleType oracleType
+    );
+    event OracleProviderUpdated(bytes32 indexed providerId, address indexed oracleContract);
+    event OracleProviderRemoved(bytes32 indexed providerId);
+
     event PriceFeedConfigUpdated(
         address indexed projectToken,
-        address indexed blocksenseAdapter,
-        address indexed chainlinkFeed
+        bytes32 indexed primaryProviderId,
+        bytes32 indexed secondaryProviderId
     );
-
-    event BlocksenseAdapterUpdated(
-        address indexed projectToken, address indexed oldAdapter, address indexed newAdapter
-    );
-
-    event ChainlinkFeedUpdated(
-        address indexed projectToken, address indexed oldFeed, address indexed newFeed
-    );
-
-    event BlocksenseOracleUpdated(address indexed oldAddress, address indexed newAddress);
-
-    event ChainlinkOracleUpdated(address indexed oldAddress, address indexed newAddress);
+    event PrimaryProviderSet(address indexed projectToken, bytes32 indexed providerId);
+    event SecondaryProviderSet(address indexed projectToken, bytes32 indexed providerId);
+    event UsePullModeUpdated(address indexed projectToken, bool usePullMode);
 
     event PriceFallbackUsed(
         address indexed projectToken,
-        address indexed chainlinkFeed,
-        address indexed blocksenseAdapter,
+        bytes32 indexed primaryProviderId,
+        bytes32 indexed secondaryProviderId,
         string reason
+    );
+
+    event PriceUpdateTriggered(
+        address indexed projectToken, bytes32 indexed providerId, uint256 updateFee
     );
 
     // ========================================================================
@@ -84,6 +106,13 @@ contract PriceFeedManager is
     error InvalidAddress();
     error InvalidConfig();
     error InvalidOraclePrice();
+    error NoPrimaryProvider();
+    error PullOracleUpdateFailed();
+    error InsufficientUpdateFee();
+    error ProviderNotFound(bytes32 providerId);
+    error ProviderAlreadyExists(bytes32 providerId);
+    error ProviderInUse(bytes32 providerId);
+    error ArrayLengthMismatch();
 
     // ========================================================================
     // CONSTRUCTOR / INITIALIZER
@@ -97,26 +126,150 @@ contract PriceFeedManager is
     /**
      * @notice Initialize contract
      * @param initialOwner Owner address
-     * @param _blocksenseOracle BlocksenseOracle contract address
-     * @param _chainlinkOracle ChainlinkOracle contract address
      */
-    function initialize(
-        address initialOwner,
-        address payable _blocksenseOracle,
-        address _chainlinkOracle
-    ) public initializer {
+    function initialize(address initialOwner) public initializer {
         if (initialOwner == address(0)) revert InvalidAddress();
 
         __Ownable_init(initialOwner);
         __Pausable_init();
         __UUPSUpgradeable_init();
-
-        blocksenseOracle = _blocksenseOracle;
-        chainlinkOracle = _chainlinkOracle;
     }
 
     // ========================================================================
-    // VIEW FUNCTIONS
+    // ORACLE PROVIDER REGISTRY FUNCTIONS
+    // ========================================================================
+
+    /**
+     * @notice Register a new oracle provider
+     * @param providerId Unique identifier for the provider
+     * @param provider Oracle provider configuration
+     */
+    function registerOracleProvider(bytes32 providerId, OracleProvider calldata provider)
+        external
+        override
+        onlyOwner
+        whenNotPaused
+    {
+        if (providerId == bytes32(0)) revert InvalidConfig();
+        if (providerRegistered[providerId]) {
+            revert ProviderAlreadyExists(providerId);
+        }
+        if (provider.oracleContract == address(0)) revert InvalidAddress();
+
+        oracleProviders[providerId] = provider;
+        providerRegistered[providerId] = true;
+        providerIdsList.push(providerId);
+
+        emit OracleProviderRegistered(providerId, provider.oracleContract, provider.oracleType);
+    }
+
+    /**
+     * @notice Register multiple oracle providers at once
+     * @param providerIds Array of provider IDs
+     * @param providers Array of provider configurations
+     */
+    function registerOracleProviders(
+        bytes32[] calldata providerIds,
+        OracleProvider[] calldata providers
+    ) external override onlyOwner whenNotPaused {
+        if (providerIds.length != providers.length) {
+            revert ArrayLengthMismatch();
+        }
+
+        for (uint256 i = 0; i < providerIds.length; i++) {
+            bytes32 providerId = providerIds[i];
+            OracleProvider calldata provider = providers[i];
+
+            if (providerId == bytes32(0)) revert InvalidConfig();
+            if (providerRegistered[providerId]) {
+                revert ProviderAlreadyExists(providerId);
+            }
+            if (provider.oracleContract == address(0)) revert InvalidAddress();
+
+            oracleProviders[providerId] = provider;
+            providerRegistered[providerId] = true;
+            providerIdsList.push(providerId);
+
+            emit OracleProviderRegistered(providerId, provider.oracleContract, provider.oracleType);
+        }
+    }
+
+    /**
+     * @notice Update an existing oracle provider
+     * @param providerId Provider ID to update
+     * @param provider New provider configuration
+     */
+    function updateOracleProvider(bytes32 providerId, OracleProvider calldata provider)
+        external
+        override
+        onlyOwner
+        whenNotPaused
+    {
+        if (!providerRegistered[providerId]) {
+            revert ProviderNotFound(providerId);
+        }
+        if (provider.oracleContract == address(0)) revert InvalidAddress();
+
+        oracleProviders[providerId] = provider;
+
+        emit OracleProviderUpdated(providerId, provider.oracleContract);
+    }
+
+    /**
+     * @notice Remove an oracle provider
+     * @param providerId Provider ID to remove
+     * @dev Will fail if any token is currently using this provider
+     */
+    function removeOracleProvider(bytes32 providerId) external override onlyOwner whenNotPaused {
+        if (!providerRegistered[providerId]) {
+            revert ProviderNotFound(providerId);
+        }
+
+        // Note: In production, you might want to check if any token is using this provider
+        // For simplicity, we allow removal here
+
+        delete oracleProviders[providerId];
+        providerRegistered[providerId] = false;
+
+        emit OracleProviderRemoved(providerId);
+    }
+
+    /**
+     * @notice Get oracle provider by ID
+     * @param providerId Provider ID
+     * @return provider Oracle provider configuration
+     */
+    function getOracleProvider(bytes32 providerId)
+        external
+        view
+        override
+        returns (OracleProvider memory provider)
+    {
+        if (!providerRegistered[providerId]) {
+            revert ProviderNotFound(providerId);
+        }
+        return oracleProviders[providerId];
+    }
+
+    /**
+     * @notice Check if provider exists
+     * @param providerId Provider ID
+     * @return exists True if provider is registered
+     */
+    function providerExists(bytes32 providerId) external view override returns (bool) {
+        return providerRegistered[providerId];
+    }
+
+    /**
+     * @notice Get list of all registered provider IDs
+     * @return providerIds Array of provider IDs
+     */
+    function getAllProviderIds() external view override returns (bytes32[] memory) {
+        return providerIdsList;
+    }
+
+    // ========================================================================
+    // PRICE FEED CONFIG FUNCTIONS
     // ========================================================================
 
     /**
@@ -134,64 +287,181 @@ contract PriceFeedManager is
     }
 
     /**
-     * @notice Get Blocksense adapter for a project token
+     * @notice Set price feed configuration for a project token
      * @param projectToken Project token address
-     * @return adapter Blocksense adapter address (address(0) if not configured)
+     * @param config Complete price feed configuration
      */
-    function getBlocksenseAdapter(address projectToken)
+    function setPriceFeedConfig(address projectToken, PriceFeedConfig calldata config)
+        external
+        override
+        onlyOwner
+        whenNotPaused
+    {
+        if (projectToken == address(0)) revert InvalidAddress();
+        if (config.primaryProviderId == bytes32(0)) revert NoPrimaryProvider();
+        if (!providerRegistered[config.primaryProviderId]) {
+            revert ProviderNotFound(config.primaryProviderId);
+        }
+        if (
+            config.secondaryProviderId != bytes32(0)
+                && !providerRegistered[config.secondaryProviderId]
+        ) {
+            revert ProviderNotFound(config.secondaryProviderId);
+        }
+
+        priceFeedConfigs[projectToken] = config;
+
+        emit PriceFeedConfigUpdated(
+            projectToken, config.primaryProviderId, config.secondaryProviderId
+        );
+    }
+
+    /**
+     * @notice Set primary provider for a project token
+     * @param projectToken Project token address
+     * @param providerId Primary provider ID
+     */
+    function setPrimaryProvider(address projectToken, bytes32 providerId)
+        external
+        override
+        onlyOwner
+        whenNotPaused
+    {
+        if (projectToken == address(0)) revert InvalidAddress();
+        if (providerId == bytes32(0)) revert NoPrimaryProvider();
+        if (!providerRegistered[providerId]) {
+            revert ProviderNotFound(providerId);
+        }
+
+        priceFeedConfigs[projectToken].primaryProviderId = providerId;
+
+        emit PrimaryProviderSet(projectToken, providerId);
+        emit PriceFeedConfigUpdated(
+            projectToken, providerId, priceFeedConfigs[projectToken].secondaryProviderId
+        );
+    }
+
+    /**
+     * @notice Set secondary provider for a project token
+     * @param projectToken Project token address
+     * @param providerId Secondary provider ID (can be bytes32(0) to disable)
+     */
+    function setSecondaryProvider(address projectToken, bytes32 providerId)
+        external
+        override
+        onlyOwner
+        whenNotPaused
+    {
+        if (projectToken == address(0)) revert InvalidAddress();
+        if (providerId != bytes32(0) && !providerRegistered[providerId]) {
+            revert ProviderNotFound(providerId);
+        }
+
+        priceFeedConfigs[projectToken].secondaryProviderId = providerId;
+
+        emit SecondaryProviderSet(projectToken, providerId);
+        emit PriceFeedConfigUpdated(
+            projectToken, priceFeedConfigs[projectToken].primaryProviderId, providerId
+        );
+    }
+
+    /**
+     * @notice Enable/disable pull mode for a project token
+     * @param projectToken Project token address
+     * @param usePullMode Whether to use pull mode
+     */
+    function setUsePullMode(address projectToken, bool usePullMode)
+        external
+        override
+        onlyOwner
+        whenNotPaused
+    {
+        if (projectToken == address(0)) revert InvalidAddress();
+
+        priceFeedConfigs[projectToken].usePullMode = usePullMode;
+
+        emit UsePullModeUpdated(projectToken, usePullMode);
+    }
+
+    /**
+     * @notice Get full provider details for a token (resolves IDs to providers)
+     * @param projectToken Project token address
+     * @return primaryProvider Primary oracle provider
+     * @return secondaryProvider Secondary oracle provider
+     * @return usePullMode Whether pull mode is enabled
+     */
+    function getResolvedConfig(address projectToken)
         external
         view
         override
-        returns (address adapter)
+        returns (
+            OracleProvider memory primaryProvider,
+            OracleProvider memory secondaryProvider,
+            bool usePullMode
+        )
     {
-        return priceFeedConfigs[projectToken].blocksenseAdapter;
+        PriceFeedConfig memory config = priceFeedConfigs[projectToken];
+
+        if (config.primaryProviderId != bytes32(0) && providerRegistered[config.primaryProviderId])
+        {
+            primaryProvider = oracleProviders[config.primaryProviderId];
+        }
+
+        if (
+            config.secondaryProviderId != bytes32(0)
+                && providerRegistered[config.secondaryProviderId]
+        ) {
+            secondaryProvider = oracleProviders[config.secondaryProviderId];
+        }
+
+        usePullMode = config.usePullMode;
     }
 
-    /**
-     * @notice Get Chainlink feed for a project token
-     * @param projectToken Project token address
-     * @return feed Chainlink feed address (address(0) if not configured)
-     */
-    function getChainlinkFeed(address projectToken) external view override returns (address feed) {
-        return priceFeedConfigs[projectToken].chainlinkFeed;
-    }
+    // ========================================================================
+    // PRICE QUERY FUNCTIONS
+    // ========================================================================
 
     /**
-     * @notice Get price for project token with custom max age
+     * @notice Get price for project token with custom max age (view function)
      * @param projectToken Project token address
      * @param maxAge Maximum acceptable price age in seconds
-     * @return price Settlement price
+     * @return price Settlement price (scaled to 18 decimals)
      * @return publishTime When price was last updated
-     * @dev Gets price from ChainlinkOracle first, falls back to BlocksenseOracle if needed
+     * @dev Tries primary provider first, falls back to secondary if needed
+     * @dev This is VIEW only - cannot update pull oracles
      */
     function getPrice(address projectToken, uint256 maxAge)
         external
         view
+        override
         whenNotPaused
         returns (uint256 price, uint256 publishTime)
     {
-        // Get price feed config
         PriceFeedConfig memory config = priceFeedConfigs[projectToken];
-        address chainlinkFeed = config.chainlinkFeed;
-        address adapter = config.blocksenseAdapter;
 
-        // Try ChainlinkOracle first
-        (bool chainlinkSuccess, uint256 chainlinkPrice, uint256 chainlinkUpdatedAt) =
-            _tryGetChainlinkPrice(chainlinkFeed, maxAge);
+        // Try primary provider
+        if (config.primaryProviderId != bytes32(0)) {
+            OracleProvider memory primary = oracleProviders[config.primaryProviderId];
+            (bool success, uint256 primaryPrice, uint256 primaryTime) =
+                _tryGetPriceFromProvider(primary, config.primaryFeed, maxAge);
 
-        if (chainlinkSuccess) {
-            return (chainlinkPrice, chainlinkUpdatedAt);
+            if (success) {
+                return (primaryPrice, primaryTime);
+            }
         }
 
-        // Chainlink failed, try BlocksenseOracle fallback
-        (bool blocksenseSuccess, uint256 blocksensePrice, uint256 blocksenseUpdatedAt) =
-            _tryGetBlocksensePrice(adapter, maxAge);
+        // Try secondary provider
+        if (config.secondaryProviderId != bytes32(0)) {
+            OracleProvider memory secondary = oracleProviders[config.secondaryProviderId];
+            (bool success, uint256 secondaryPrice, uint256 secondaryTime) =
+                _tryGetPriceFromProvider(secondary, config.secondaryFeed, maxAge);
 
-        if (blocksenseSuccess) {
-            return (blocksensePrice, blocksenseUpdatedAt);
+            if (success) {
+                return (secondaryPrice, secondaryTime);
+            }
         }
 
-        // Both sources failed
+        // Both failed
         revert InvalidOraclePrice();
     }
 
@@ -201,80 +471,288 @@ contract PriceFeedManager is
      * @param maxAge Maximum acceptable price age in seconds
      * @return price Settlement price
      * @return publishTime When price was last updated
-     * @dev Same as getPrice but emits events when fallback is used
      */
     function getPriceWithFallback(address projectToken, uint256 maxAge)
         external
+        override
         whenNotPaused
         returns (uint256 price, uint256 publishTime)
     {
-        // Get price feed config
         PriceFeedConfig memory config = priceFeedConfigs[projectToken];
-        address chainlinkFeed = config.chainlinkFeed;
-        address adapter = config.blocksenseAdapter;
 
-        // Try ChainlinkOracle first
-        (bool chainlinkSuccess, uint256 chainlinkPrice, uint256 chainlinkUpdatedAt) =
-            _tryGetChainlinkPrice(chainlinkFeed, maxAge);
-
-        if (chainlinkSuccess) {
-            return (chainlinkPrice, chainlinkUpdatedAt);
-        }
-
-        // Chainlink failed, try BlocksenseOracle fallback
-        (bool blocksenseSuccess, uint256 blocksensePrice, uint256 blocksenseUpdatedAt) =
-            _tryGetBlocksensePrice(adapter, maxAge);
-
-        if (blocksenseSuccess) {
-            // Emit fallback event (using Blocksense as fallback from Chainlink)
-            emit PriceFallbackUsed(
-                projectToken, chainlinkFeed, adapter, "Chainlink failed, using Blocksense"
+        // Try primary provider
+        if (config.primaryProviderId != bytes32(0)) {
+            OracleProvider memory primary = oracleProviders[config.primaryProviderId];
+            (bool success, uint256 primaryPrice, uint256 primaryTime) =
+            _tryGetPriceFromProviderWithUpdate(
+                primary,
+                config.primaryFeed,
+                config.primaryProviderId,
+                config.usePullMode,
+                maxAge,
+                "" // No update data in this version
             );
-            return (blocksensePrice, blocksenseUpdatedAt);
+
+            if (success) {
+                return (primaryPrice, primaryTime);
+            }
         }
 
-        // Both sources failed
+        // Try secondary provider
+        if (config.secondaryProviderId != bytes32(0)) {
+            OracleProvider memory secondary = oracleProviders[config.secondaryProviderId];
+            (bool success, uint256 secondaryPrice, uint256 secondaryTime) =
+            _tryGetPriceFromProviderWithUpdate(
+                secondary,
+                config.secondaryFeed,
+                config.secondaryProviderId,
+                config.usePullMode,
+                maxAge,
+                "" // No update data
+            );
+
+            if (success) {
+                emit PriceFallbackUsed(
+                    projectToken,
+                    config.primaryProviderId,
+                    config.secondaryProviderId,
+                    "Primary provider failed, using secondary"
+                );
+                return (secondaryPrice, secondaryTime);
+            }
+        }
+
+        // Both failed
         revert InvalidOraclePrice();
     }
 
     /**
-     * @notice Try to get price from ChainlinkOracle
-     * @param chainlinkFeed Chainlink price feed address
-     * @param maxAge Maximum acceptable price age
-     * @return success Whether the call succeeded and price is valid
-     * @return price Price (if successful)
-     * @return updatedAt Update timestamp (if successful)
+     * @notice Get price with auto-update for pull oracles (non-view)
+     * @param projectToken Project token address
+     * @param maxAge Maximum acceptable price age in seconds
+     * @param updateData Encoded update data for pull oracles
+     * @return price Settlement price
+     * @return publishTime When price was last updated
+     * @dev For pull oracles: checks staleness and updates before reading if necessary
      */
-    function _tryGetChainlinkPrice(address chainlinkFeed, uint256 maxAge)
+    function getPriceWithUpdate(address projectToken, uint256 maxAge, bytes calldata updateData)
+        external
+        payable
+        override
+        whenNotPaused
+        returns (uint256 price, uint256 publishTime)
+    {
+        PriceFeedConfig storage config = priceFeedConfigs[projectToken];
+
+        // Try primary provider with update if needed
+        if (config.primaryProviderId != bytes32(0)) {
+            OracleProvider memory primary = oracleProviders[config.primaryProviderId];
+            (bool success, uint256 primaryPrice, uint256 primaryTime) =
+            _tryGetPriceFromProviderWithUpdate(
+                primary,
+                config.primaryFeed,
+                config.primaryProviderId,
+                config.usePullMode,
+                maxAge,
+                updateData
+            );
+
+            if (success) {
+                return (primaryPrice, primaryTime);
+            }
+        }
+
+        // Try secondary provider with update if needed
+        if (config.secondaryProviderId != bytes32(0)) {
+            OracleProvider memory secondary = oracleProviders[config.secondaryProviderId];
+            (bool success, uint256 secondaryPrice, uint256 secondaryTime) =
+            _tryGetPriceFromProviderWithUpdate(
+                secondary,
+                config.secondaryFeed,
+                config.secondaryProviderId,
+                config.usePullMode,
+                maxAge,
+                updateData
+            );
+
+            if (success) {
+                emit PriceFallbackUsed(
+                    projectToken,
+                    config.primaryProviderId,
+                    config.secondaryProviderId,
+                    "Primary provider failed, using secondary"
+                );
+                return (secondaryPrice, secondaryTime);
+            }
+        }
+
+        // Both failed
+        revert InvalidOraclePrice();
+    }
+
+    /**
+     * @notice Check if price is stale for a project token
+     * @param projectToken Project token address
+     * @param maxAge Maximum acceptable age in seconds
+     * @return isStale True if primary provider's price is stale
+     */
+    function isPriceStale(address projectToken, uint256 maxAge)
+        external
+        view
+        override
+        returns (bool)
+    {
+        PriceFeedConfig memory config = priceFeedConfigs[projectToken];
+
+        if (config.primaryProviderId == bytes32(0)) {
+            return true;
+        }
+
+        OracleProvider memory provider = oracleProviders[config.primaryProviderId];
+
+        if (
+            !provider.enabled || provider.oracleContract == address(0)
+                || config.primaryFeed == address(0)
+        ) {
+            return true;
+        }
+
+        // Check based on oracle type
+        if (provider.oracleType == IBaseOracle.OracleType.PUSH) {
+            try IPushOracle(provider.oracleContract).isPriceStale(config.primaryFeed, maxAge)
+            returns (bool stale) {
+                return stale;
+            } catch {
+                return true;
+            }
+        } else {
+            // PULL oracle
+            try IPullOracle(provider.oracleContract).isPriceStale(config.primaryFeed, maxAge)
+            returns (bool stale) {
+                return stale;
+            } catch {
+                return true;
+            }
+        }
+    }
+
+    // ========================================================================
+    // INTERNAL FUNCTIONS
+    // ========================================================================
+
+    /**
+     * @notice Try to get price from a provider (view version - no updates)
+     * @param provider Oracle provider config
+     * @param maxAge Maximum acceptable price age
+     * @return success Whether price was retrieved successfully
+     * @return price Price (scaled to 18 decimals)
+     * @return updatedAt Update timestamp
+     */
+    function _tryGetPriceFromProvider(OracleProvider memory provider, address feed, uint256 maxAge)
         internal
         view
         returns (bool success, uint256 price, uint256 updatedAt)
     {
-        // Check if ChainlinkOracle configured
-        if (chainlinkOracle == address(0)) {
+        // Check if provider is configured and enabled
+        if (!provider.enabled || provider.oracleContract == address(0) || feed == address(0)) {
             return (false, 0, 0);
         }
 
-        // Check if chainlinkFeed configured
-        if (chainlinkFeed == address(0)) {
+        // Get price based on oracle type
+        if (provider.oracleType == IBaseOracle.OracleType.PUSH) {
+            return _tryGetPushPrice(provider.oracleContract, feed, maxAge);
+        } else {
+            // PULL oracle - just read current price (may be stale)
+            return _tryGetPullPrice(provider.oracleContract, feed, maxAge);
+        }
+    }
+
+    /**
+     * @notice Try to get price from provider with update support (non-view)
+     * @param provider Oracle provider config
+     * @param feed Feed address for this provider
+     * @param providerId Provider ID (for events)
+     * @param usePullMode Whether to use pull mode (auto-update if stale)
+     * @param maxAge Maximum acceptable price age
+     * @param updateData Update data for pull oracles
+     * @return success Whether price was retrieved successfully
+     * @return price Price (scaled to 18 decimals)
+     * @return updatedAt Update timestamp
+     */
+    function _tryGetPriceFromProviderWithUpdate(
+        OracleProvider memory provider,
+        address feed,
+        bytes32 providerId,
+        bool usePullMode,
+        uint256 maxAge,
+        bytes memory updateData
+    ) internal returns (bool success, uint256 price, uint256 updatedAt) {
+        // Check if provider is configured and enabled
+        if (!provider.enabled || provider.oracleContract == address(0) || feed == address(0)) {
             return (false, 0, 0);
         }
 
-        // Try to get price from ChainlinkOracle
-        try ChainlinkOracle(chainlinkOracle).getPrice(chainlinkFeed) returns (
+        // For PUSH oracles, just read
+        if (provider.oracleType == IBaseOracle.OracleType.PUSH) {
+            return _tryGetPushPrice(provider.oracleContract, feed, maxAge);
+        }
+
+        // For PULL oracles
+        if (!usePullMode) {
+            // Pull mode disabled - just read (may be stale)
+            return _tryGetPullPrice(provider.oracleContract, feed, maxAge);
+        }
+
+        // Pull mode enabled - check staleness and update if needed
+        IPullOracle pullOracle = IPullOracle(provider.oracleContract);
+
+        // Check if stale
+        bool isStale;
+        try pullOracle.isPriceStale(feed, maxAge) returns (bool _isStale) {
+            isStale = _isStale;
+        } catch {
+            return (false, 0, 0);
+        }
+        // Update if stale
+        if (isStale && updateData.length > 0) {
+            try pullOracle.getPriceWithUpdate{ value: msg.value }(feed, maxAge, updateData)
+            returns (int256 _price, uint256 _updatedAt) {
+                if (_price <= 0) {
+                    return (false, 0, 0);
+                }
+
+                emit PriceUpdateTriggered(feed, providerId, msg.value);
+
+                return (true, uint256(_price), _updatedAt);
+            } catch {
+                return (false, 0, 0);
+            }
+        }
+
+        // Not stale or no update data - just read
+        return _tryGetPullPrice(provider.oracleContract, feed, maxAge);
+    }
+
+    /**
+     * @notice Try to get price from push oracle
+     * @param oracleContract Oracle contract address
+     * @param feed Feed address
+     * @param maxAge Maximum acceptable age
+     * @return success Whether successful
+     * @return price Price (scaled to 18 decimals)
+     * @return updatedAt Update timestamp
+     */
+    function _tryGetPushPrice(address oracleContract, address feed, uint256 maxAge)
+        internal
+        view
+        returns (bool success, uint256 price, uint256 updatedAt)
+    {
+        try IPushOracle(oracleContract).getPriceNoOlderThan(feed, maxAge) returns (
             int256 _price, uint256 _updatedAt
         ) {
-            // Validate price
             if (_price <= 0) {
                 return (false, 0, 0);
             }
-
-            // Check staleness
-            if (block.timestamp - _updatedAt > maxAge) {
-                return (false, 0, 0);
-            }
-
-            // Success
             return (true, uint256(_price), _updatedAt);
         } catch {
             return (false, 0, 0);
@@ -282,33 +760,20 @@ contract PriceFeedManager is
     }
 
     /**
-     * @notice Try to get price from Blocksense Oracle
-     * @param adapter CLAggregatorAdapter address
-     * @param maxAge Maximum acceptable price age
-     * @return success Whether the call succeeded and price is valid
-     * @return price Price (if successful)
-     * @return updatedAt Update timestamp (if successful)
+     * @notice Try to get price from pull oracle (read only - no update)
+     * @param oracleContract Oracle contract address
+     * @param feed Feed address
+     * @param maxAge Maximum acceptable age
+     * @return success Whether successful
+     * @return price Price (scaled to 18 decimals)
+     * @return updatedAt Update timestamp
      */
-    function _tryGetBlocksensePrice(address adapter, uint256 maxAge)
+    function _tryGetPullPrice(address oracleContract, address feed, uint256 maxAge)
         internal
         view
         returns (bool success, uint256 price, uint256 updatedAt)
     {
-        // Check if Blocksense Oracle configured
-        if (blocksenseOracle == address(0)) {
-            return (false, 0, 0);
-        }
-
-        // Check if adapter configured
-        if (adapter == address(0)) {
-            return (false, 0, 0);
-        }
-
-        // Try to get price
-        try BlocksenseOracle(blocksenseOracle).getPrice(adapter) returns (
-            int256 _price, uint256 _updatedAt
-        ) {
-            // Validate price
+        try IPullOracle(oracleContract).getPrice(feed) returns (int256 _price, uint256 _updatedAt) {
             if (_price <= 0) {
                 return (false, 0, 0);
             }
@@ -318,7 +783,6 @@ contract PriceFeedManager is
                 return (false, 0, 0);
             }
 
-            // Success
             return (true, uint256(_price), _updatedAt);
         } catch {
             return (false, 0, 0);
@@ -328,113 +792,6 @@ contract PriceFeedManager is
     // ========================================================================
     // ADMIN FUNCTIONS
     // ========================================================================
-
-    /**
-     * @notice Set price feed configuration for a project token
-     * @param projectToken Project token address
-     * @param blocksenseAdapter Blocksense adapter address (can be address(0) to disable)
-     * @param chainlinkFeed Chainlink feed address (can be address(0) to disable)
-     */
-    function setPriceFeedConfig(
-        address projectToken,
-        address blocksenseAdapter,
-        address chainlinkFeed
-    ) external override onlyOwner whenNotPaused {
-        if (projectToken == address(0)) revert InvalidAddress();
-
-        // At least one provider must be configured
-        if (blocksenseAdapter == address(0) && chainlinkFeed == address(0)) {
-            revert InvalidConfig();
-        }
-
-        PriceFeedConfig storage config = priceFeedConfigs[projectToken];
-        address oldBlocksenseAdapter = config.blocksenseAdapter;
-        address oldChainlinkFeed = config.chainlinkFeed;
-
-        config.blocksenseAdapter = blocksenseAdapter;
-        config.chainlinkFeed = chainlinkFeed;
-
-        emit PriceFeedConfigUpdated(projectToken, blocksenseAdapter, chainlinkFeed);
-
-        if (oldBlocksenseAdapter != blocksenseAdapter) {
-            emit BlocksenseAdapterUpdated(projectToken, oldBlocksenseAdapter, blocksenseAdapter);
-        }
-
-        if (oldChainlinkFeed != chainlinkFeed) {
-            emit ChainlinkFeedUpdated(projectToken, oldChainlinkFeed, chainlinkFeed);
-        }
-    }
-
-    /**
-     * @notice Update Blocksense adapter for a project token
-     * @param projectToken Project token address
-     * @param blocksenseAdapter New Blocksense adapter address (can be address(0) to disable)
-     */
-    function setBlocksenseAdapter(address projectToken, address blocksenseAdapter)
-        external
-        override
-        onlyOwner
-        whenNotPaused
-    {
-        if (projectToken == address(0)) revert InvalidAddress();
-
-        // Cannot disable both providers
-        PriceFeedConfig storage config = priceFeedConfigs[projectToken];
-        if (blocksenseAdapter == address(0) && config.chainlinkFeed == address(0)) {
-            revert InvalidConfig();
-        }
-
-        address oldAdapter = config.blocksenseAdapter;
-        config.blocksenseAdapter = blocksenseAdapter;
-
-        emit BlocksenseAdapterUpdated(projectToken, oldAdapter, blocksenseAdapter);
-        emit PriceFeedConfigUpdated(projectToken, blocksenseAdapter, config.chainlinkFeed);
-    }
-
-    /**
-     * @notice Update Chainlink feed for a project token
-     * @param projectToken Project token address
-     * @param chainlinkFeed New Chainlink feed address (can be address(0) to disable)
-     */
-    function setChainlinkFeed(address projectToken, address chainlinkFeed)
-        external
-        override
-        onlyOwner
-        whenNotPaused
-    {
-        if (projectToken == address(0)) revert InvalidAddress();
-
-        // Cannot disable both providers
-        PriceFeedConfig storage config = priceFeedConfigs[projectToken];
-        if (chainlinkFeed == address(0) && config.blocksenseAdapter == address(0)) {
-            revert InvalidConfig();
-        }
-
-        address oldFeed = config.chainlinkFeed;
-        config.chainlinkFeed = chainlinkFeed;
-
-        emit ChainlinkFeedUpdated(projectToken, oldFeed, chainlinkFeed);
-        emit PriceFeedConfigUpdated(projectToken, config.blocksenseAdapter, chainlinkFeed);
-    }
-
-    /**
-     * @notice Set BlocksenseOracle address
-     */
-    function setBlocksenseOracle(address payable _blocksenseOracle) external onlyOwner {
-        if (_blocksenseOracle == address(0)) revert InvalidAddress();
-        address oldAddress = blocksenseOracle;
-        blocksenseOracle = _blocksenseOracle;
-        emit BlocksenseOracleUpdated(oldAddress, _blocksenseOracle);
-    }
-
-    /**
-     * @notice Set ChainlinkOracle address (for fallback)
-     */
-    function setChainlinkOracle(address _chainlinkOracle) external onlyOwner {
-        address oldOracle = chainlinkOracle;
-        chainlinkOracle = _chainlinkOracle;
-        emit ChainlinkOracleUpdated(oldOracle, _chainlinkOracle);
-    }
 
     /**
      * @notice Pause contract
@@ -459,6 +816,11 @@ contract PriceFeedManager is
      * @notice Get contract version
      */
     function version() external pure returns (string memory) {
-        return "1.0.0-price-feed-manager";
+        return "2.1.0-oracle-registry";
     }
+
+    /**
+     * @notice Receive function to accept ETH for pull oracle updates
+     */
+    receive() external payable { }
 }

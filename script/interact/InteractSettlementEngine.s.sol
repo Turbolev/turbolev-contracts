@@ -52,7 +52,7 @@ contract InteractSettlementEngine is DeployHelper {
         console.log("Owner:", settlement.owner());
         console.log("Position Manager:", settlement.positionManager());
         console.log("Vault Manager:", settlement.vaultManager());
-        console.log("Blocksense Oracle:", settlement.blocksenseOracle());
+        // DEPRECATED: console.log("Blocksense Oracle:", settlement.blocksenseOracle());
         console.log("Version:", settlement.version());
     }
 
@@ -170,28 +170,25 @@ contract InteractSettlementEngine is DeployHelper {
     /**
      * @notice Set Blocksense Oracle address
      */
-    function setBlocksenseOracle(address newOracle) public {
-        console.log("\n=== Set Blocksense Oracle ===");
-        console.log("New Oracle:", newOracle);
+    // DEPRECATED: Direct oracle configuration removed - use PriceFeedManager
+    // function setBlocksenseOracle(address newOracle) public {
+    //     console.log("\n=== Set Blocksense Oracle ===");
+    //     console.log("New Oracle:", newOracle);
+    //     vm.startBroadcast(deployer);
+    //     settlement.setBlocksenseOracle(payable(newOracle));
+    //     console.log("Blocksense Oracle updated successfully");
+    //     vm.stopBroadcast();
+    // }
 
-        vm.startBroadcast(deployer);
-        settlement.setBlocksenseOracle(payable(newOracle));
-        console.log("Blocksense Oracle updated successfully");
-        vm.stopBroadcast();
-    }
-
-    /**
-     * @notice Set Chainlink Oracle address
-     */
-    function setChainlinkOracle(address newOracle) public {
-        console.log("\n=== Set Chainlink Oracle ===");
-        console.log("New Oracle:", newOracle);
-
-        vm.startBroadcast(deployer);
-        settlement.setChainlinkOracle(payable(newOracle));
-        console.log("Chainlink Oracle updated successfully");
-        vm.stopBroadcast();
-    }
+    // DEPRECATED: Direct oracle configuration removed - use PriceFeedManager
+    // function setChainlinkOracle(address newOracle) public {
+    //     console.log("\n=== Set Chainlink Oracle ===");
+    //     console.log("New Oracle:", newOracle);
+    //     vm.startBroadcast(deployer);
+    //     settlement.setChainlinkOracle(payable(newOracle));
+    //     console.log("Chainlink Oracle updated successfully");
+    //     vm.stopBroadcast();
+    // }
 
     /**
      * @notice Pause settlement engine
