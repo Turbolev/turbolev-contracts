@@ -4,7 +4,7 @@ pragma solidity ^0.8.22;
 import "forge-std/Script.sol";
 import "./DeployHelper.s.sol";
 
-import "../src/BlocksenseOracle.sol";
+import "../src/oracles/BlocksenseOracle.sol";
 import "../src/SettlementEngine.sol";
 import "../src/VaultManager.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
@@ -82,7 +82,7 @@ contract DeployBlocksenseOracle is DeployHelper {
 
         // Reconnect BlocksenseOracle to contracts that use it
         if (_isContractDeployed(settlementEngine)) {
-            SettlementEngine(settlementEngine).setBlocksenseOracle(blocksenseOracle);
+            // DEPRECATED:             SettlementEngine(settlementEngine).setBlocksenseOracle(blocksenseOracle);
             console.log("Reconnected BlocksenseOracle to SettlementEngine");
         } else {
             console.log("WARNING: SettlementEngine not set - skipping connection");

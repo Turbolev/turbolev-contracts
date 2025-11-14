@@ -148,7 +148,8 @@ contract InteractPositionManager is DeployHelper {
             leverage,
             direction,
             maxAcceptablePrice,
-            block.timestamp + 3600 // deadline = 1 hour
+            block.timestamp + 3600, // deadline = 1 hour
+            "" // No price update data for push oracles
         );
         console.log("Position opened with ID:", positionId);
         vm.stopBroadcast();
@@ -163,7 +164,7 @@ contract InteractPositionManager is DeployHelper {
         console.log("Deadline:", deadline);
 
         vm.startBroadcast(deployer);
-        positionMgr.closePosition(positionId, deadline, 0); // maxAcceptablePrice = 0 (no limit)
+        positionMgr.closePosition(positionId, deadline, 0, ""); // maxAcceptablePrice = 0, no updateData
         console.log("Position closed successfully");
         vm.stopBroadcast();
     }

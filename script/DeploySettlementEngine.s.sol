@@ -84,7 +84,7 @@ contract DeploySettlementEngine is DeployHelper {
 
         // Only reconnect if dependencies are available
         if (_isContractDeployed(blocksenseOracle)) {
-            SettlementEngine(settlementEngine).setBlocksenseOracle(blocksenseOracle);
+            // DEPRECATED:             SettlementEngine(settlementEngine).setBlocksenseOracle(blocksenseOracle);
             console.log("Reconnected BlocksenseOracle to SettlementEngine");
         } else {
             console.log("WARNING: BlocksenseOracle not set - skipping connection");

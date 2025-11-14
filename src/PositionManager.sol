@@ -292,7 +292,8 @@ contract PositionManager is
         uint8 leverage,
         uint8 direction,
         uint256 maxAcceptablePrice,
-        uint256 deadline
+        uint256 deadline,
+        bytes calldata priceUpdateData
     ) external payable nonReentrant whenNotPaused returns (uint64 positionId) {
         // Check deadline
         if (block.timestamp > deadline) revert DeadlineExpired();
@@ -315,12 +316,6 @@ contract PositionManager is
         uint256 openPrice;
         uint256 pricePublishTime;
 
-        if (msg.value > 0) {
-            // Native token is not allowed to be used as collateral
-            // Next version will support native token as collateral
-            revert NativeTokenNotAllowed();
-        }
-
         // ERC20 project token (most common)
         amount = collateralAmount;
         if (amount == 0) revert InvalidAmount();
@@ -333,8 +328,16 @@ contract PositionManager is
         if (priceFeedManager == address(0)) revert InvalidAddress();
         uint256 maxAge =
             deadline > block.timestamp ? deadline - block.timestamp : DEFAULT_PRICE_MAX_AGE;
-        (openPrice, pricePublishTime) =
-            IPriceFeedManager(priceFeedManager).getPrice(projectToken, maxAge);
+
+        // Use getPriceWithUpdate for pull oracles (Pyth) if updateData provided
+        if (priceUpdateData.length > 0) {
+            (openPrice, pricePublishTime) = IPriceFeedManager(priceFeedManager).getPriceWithUpdate{
+                value: msg.value
+            }(projectToken, maxAge, priceUpdateData);
+        } else {
+            (openPrice, pricePublishTime) =
+                IPriceFeedManager(priceFeedManager).getPrice(projectToken, maxAge);
+        }
 
         if (openPrice == 0) revert InvalidPrice();
 
@@ -434,11 +437,12 @@ contract PositionManager is
      * @param deadline Deadline timestamp for transaction execution
      * @param maxAcceptablePrice Maximum acceptable close price (0 = no limit)
      */
-    function closePosition(uint64 positionId, uint256 deadline, uint256 maxAcceptablePrice)
-        external
-        nonReentrant
-        whenNotPaused
-    {
+    function closePosition(
+        uint64 positionId,
+        uint256 deadline,
+        uint256 maxAcceptablePrice,
+        bytes calldata priceUpdateData
+    ) external payable nonReentrant whenNotPaused {
         PositionLib.Position storage pos = positions[positionId];
 
         if (block.timestamp > deadline) revert DeadlineExpired();
@@ -465,9 +469,37 @@ contract PositionManager is
         if (priceFeedManager == address(0)) {
             revert InvalidAddress();
         }
-        try IPriceFeedManager(priceFeedManager).getPrice(pos.projectToken, maxAge) returns (
-            uint256 closePrice, uint256 pricePublishTime
-        ) {
+
+        // Try to get price (support both push and pull oracles)
+        bool priceSuccess = false;
+        uint256 closePrice;
+        uint256 pricePublishTime;
+
+        if (priceUpdateData.length > 0) {
+            // Pull oracle with update data
+            try IPriceFeedManager(priceFeedManager).getPriceWithUpdate{ value: msg.value }(
+                pos.projectToken, maxAge, priceUpdateData
+            ) returns (uint256 _price, uint256 _publishTime) {
+                closePrice = _price;
+                pricePublishTime = _publishTime;
+                priceSuccess = true;
+            } catch {
+                // Price update failed - will move to pending
+            }
+        } else {
+            // Push oracle or cached price
+            try IPriceFeedManager(priceFeedManager).getPrice(pos.projectToken, maxAge) returns (
+                uint256 _price, uint256 _publishTime
+            ) {
+                closePrice = _price;
+                pricePublishTime = _publishTime;
+                priceSuccess = true;
+            } catch {
+                // Price fetch failed - will move to pending
+            }
+        }
+
+        if (priceSuccess) {
             if (closePrice == 0) revert InvalidPrice();
 
             // Check maxAcceptablePrice if specified
@@ -494,7 +526,7 @@ contract PositionManager is
             _processSettlement(
                 positionId, closePrice, false, pricePublishTime, PositionClosedBy.USER_REQUESTED
             );
-        } catch {
+        } else {
             // Price is stale or unavailable - move to pending close
             _addPendingCloseRequest(
                 positionId, deadline, maxAcceptablePrice, PendingCloseReason.PRICE_STALE

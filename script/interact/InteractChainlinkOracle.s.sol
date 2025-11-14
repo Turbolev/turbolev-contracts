@@ -2,7 +2,7 @@
 pragma solidity ^0.8.22;
 
 import "../DeployHelper.s.sol";
-import "../../src/ChainlinkOracle.sol";
+import "../../src/oracles/ChainlinkOracle.sol";
 
 /**
  * @title SetChainlinkFeed

@@ -2,7 +2,7 @@
 pragma solidity ^0.8.22;
 
 import "./DeployHelper.s.sol";
-import "../src/ChainlinkOracle.sol";
+import "../src/oracles/ChainlinkOracle.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 /**

@@ -6,8 +6,7 @@ import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol
 import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import "./BlocksenseOracle.sol";
-import "./ChainlinkOracle.sol";
+// NOTE: Direct oracle imports removed - all oracle logic via PriceFeedManager
 import "./libraries/PositionLib.sol";
 import "./interfaces/IVaultManager.sol";
 import "./interfaces/IAssetVault.sol";
@@ -53,13 +52,7 @@ contract SettlementEngine is
     /// @notice VaultManager contract address
     address public vaultManager;
 
-    /// @notice BlocksenseOracle contract address
-    address payable public blocksenseOracle;
-
-    /// @notice ChainlinkOracle contract address (for fallback)
-    address public chainlinkOracle;
-
-    /// @notice PriceFeedManager contract address
+    /// @notice PriceFeedManager contract address (handles all oracle logic)
     address public priceFeedManager;
 
     /// @notice Max profit cap in bps (200 = 2% of vault USD value)
@@ -106,17 +99,7 @@ contract SettlementEngine is
     );
 
     event PositionManagerUpdated(address indexed oldAddress, address indexed newAddress);
-    event ChainlinkOracleUpdated(address indexed oldOracle, address indexed newOracle);
-    event PriceFallbackUsed(
-        address indexed projectToken,
-        address indexed adapter,
-        address indexed chainlinkFeed,
-        string reason
-    );
     event VaultManagerUpdated(address indexed oldAddress, address indexed newAddress);
-
-    event BlocksenseOracleUpdated(address indexed oldAddress, address indexed newAddress);
-
     event PriceFeedManagerUpdated(address indexed oldAddress, address indexed newAddress);
 
     event ProfitCapped(
@@ -355,31 +338,8 @@ contract SettlementEngine is
     {
         if (priceFeedManager == address(0)) revert InvalidAddress();
 
-        // Get price feed config from PriceFeedManager
-        IPriceFeedManager.PriceFeedConfig memory config =
-            IPriceFeedManager(priceFeedManager).getPriceFeedConfig(projectToken);
-
-        address chainlinkFeed = config.chainlinkFeed;
-        address adapter = config.blocksenseAdapter;
-
-        // Try ChainlinkOracle first
-        (bool chainlinkSuccess, uint256 chainlinkPrice, uint256 chainlinkUpdatedAt) =
-            _tryGetChainlinkPrice(chainlinkFeed, maxAge);
-
-        if (chainlinkSuccess) {
-            return (chainlinkPrice, chainlinkUpdatedAt);
-        }
-
-        // Chainlink failed, try BlocksenseOracle fallback
-        (bool blocksenseSuccess, uint256 blocksensePrice, uint256 blocksenseUpdatedAt,) =
-            _tryGetBlocksensePrice(adapter, maxAge);
-
-        if (blocksenseSuccess) {
-            return (blocksensePrice, blocksenseUpdatedAt);
-        }
-
-        // Both sources failed
-        revert InvalidOraclePrice();
+        // Delegate to PriceFeedManager
+        return IPriceFeedManager(priceFeedManager).getPrice(projectToken, maxAge);
     }
 
     /**
@@ -388,8 +348,7 @@ contract SettlementEngine is
      * @param maxAge Maximum acceptable price age in seconds
      * @return closePrice Settlement price
      * @return publishTime When price was last updated
-     * @dev Same as getSettlementPrice but emits events when fallback is used
-     *      Now uses PriceFeedManager to get price feed addresses
+     * @dev Delegates to PriceFeedManager with fallback support
      */
     function getSettlementPriceWithFallback(address projectToken, uint256 maxAge)
         external
@@ -398,150 +357,8 @@ contract SettlementEngine is
     {
         if (priceFeedManager == address(0)) revert InvalidAddress();
 
-        // Get price feed config from PriceFeedManager
-        IPriceFeedManager.PriceFeedConfig memory config =
-            IPriceFeedManager(priceFeedManager).getPriceFeedConfig(projectToken);
-
-        address chainlinkFeed = config.chainlinkFeed;
-        address adapter = config.blocksenseAdapter;
-
-        // Try ChainlinkOracle first
-        (bool chainlinkSuccess, uint256 chainlinkPrice, uint256 chainlinkUpdatedAt) =
-            _tryGetChainlinkPrice(chainlinkFeed, maxAge);
-
-        if (chainlinkSuccess) {
-            return (chainlinkPrice, chainlinkUpdatedAt);
-        }
-
-        // Chainlink failed, try BlocksenseOracle fallback
-        (bool blocksenseSuccess, uint256 blocksensePrice, uint256 blocksenseUpdatedAt,) =
-            _tryGetBlocksensePrice(adapter, maxAge);
-
-        if (blocksenseSuccess) {
-            // Emit fallback event (using Blocksense as fallback from Chainlink)
-            emit PriceFallbackUsed(
-                projectToken, chainlinkFeed, adapter, "Chainlink failed, using Blocksense"
-            );
-            return (blocksensePrice, blocksenseUpdatedAt);
-        }
-
-        // Both sources failed
-        revert InvalidOraclePrice();
-    }
-
-    /**
-     * @notice Try to get price from ChainlinkOracle
-     * @param chainlinkFeed Chainlink price feed address
-     * @param maxAge Maximum acceptable price age
-     * @return success Whether the call succeeded and price is valid
-     * @return price Price (if successful)
-     * @return updatedAt Update timestamp (if successful)
-     */
-    function _tryGetChainlinkPrice(address chainlinkFeed, uint256 maxAge)
-        internal
-        view
-        returns (bool success, uint256 price, uint256 updatedAt)
-    {
-        // Check if ChainlinkOracle configured
-        if (chainlinkOracle == address(0)) {
-            return (false, 0, 0);
-        }
-
-        // Check if chainlinkFeed configured
-        if (chainlinkFeed == address(0)) {
-            return (false, 0, 0);
-        }
-
-        // Try to get price from ChainlinkOracle
-        try ChainlinkOracle(chainlinkOracle).getPrice(chainlinkFeed) returns (
-            int256 _price, uint256 _updatedAt
-        ) {
-            // Validate price
-            if (_price <= 0) {
-                return (false, 0, 0);
-            }
-
-            // Check staleness
-            if (block.timestamp - _updatedAt > maxAge) {
-                return (false, 0, 0);
-            }
-
-            // Success
-            return (true, uint256(_price), _updatedAt);
-        } catch {
-            return (false, 0, 0);
-        }
-    }
-
-    /**
-     * @notice Try to get price from Blocksense Oracle
-     * @param adapter CLAggregatorAdapter address
-     * @param maxAge Maximum acceptable price age
-     * @return success Whether the call succeeded and price is valid
-     * @return price Price (if successful)
-     * @return updatedAt Update timestamp (if successful)
-     * @return failReason Reason for failure (if failed)
-     */
-    function _tryGetBlocksensePrice(address adapter, uint256 maxAge)
-        internal
-        view
-        returns (bool success, uint256 price, uint256 updatedAt, string memory failReason)
-    {
-        // Check if Blocksense Oracle configured
-        if (blocksenseOracle == address(0)) {
-            return (false, 0, 0, "Blocksense Oracle not configured");
-        }
-
-        // Check if adapter configured
-        if (adapter == address(0)) {
-            return (false, 0, 0, "No adapter configured");
-        }
-
-        // Try to get price
-        try BlocksenseOracle(blocksenseOracle).getPrice(adapter) returns (
-            int256 _price, uint256 _updatedAt
-        ) {
-            // Validate price
-            if (_price <= 0) {
-                return (false, 0, 0, "Invalid price from Blocksense (<=0)");
-            }
-
-            // Check staleness
-            if (block.timestamp - _updatedAt > maxAge) {
-                return (false, 0, 0, "Stale price from Blocksense");
-            }
-
-            // Success
-            return (true, uint256(_price), _updatedAt, "");
-        } catch {
-            return (false, 0, 0, "Blocksense Oracle call failed");
-        }
-    }
-
-    /**
-     * @notice Get settlement price from adapter (for admin settlement)
-     * @param adapter CLAggregatorAdapter address for price feed
-     * @param maxAge Maximum acceptable price age
-     * @return closePrice Settlement price
-     * @return publishTime When price was last updated
-     * @dev Public wrapper for external calls - internal logic uses direct oracle call
-     */
-    function getSettlementPriceFromAdapter(address adapter, uint256 maxAge)
-        external
-        view
-        whenNotPaused
-        returns (uint256 closePrice, uint256 publishTime)
-    {
-        if (blocksenseOracle == address(0)) revert InvalidAddress();
-
-        (int256 price, uint256 updatedAt) = BlocksenseOracle(blocksenseOracle).getPrice(adapter);
-
-        // Check price age
-        if (block.timestamp - updatedAt > maxAge) revert InvalidOraclePrice();
-
-        // Convert to uint256 (price should always be positive for assets)
-        if (price <= 0) revert InvalidOraclePrice();
-        return (uint256(price), updatedAt);
+        // Delegate to PriceFeedManager with fallback
+        return IPriceFeedManager(priceFeedManager).getPriceWithFallback(projectToken, maxAge);
     }
 
     // ========================================================================
@@ -590,25 +407,6 @@ contract SettlementEngine is
         address oldAddress = vaultManager;
         vaultManager = _vaultManager;
         emit VaultManagerUpdated(oldAddress, _vaultManager);
-    }
-
-    /**
-     * @notice Set BlocksenseOracle address
-     */
-    function setBlocksenseOracle(address payable _blocksenseOracle) external onlyOwner {
-        if (_blocksenseOracle == address(0)) revert InvalidAddress();
-        address oldAddress = blocksenseOracle;
-        blocksenseOracle = _blocksenseOracle;
-        emit BlocksenseOracleUpdated(oldAddress, _blocksenseOracle);
-    }
-
-    /**
-     * @notice Set ChainlinkOracle address (for fallback)
-     */
-    function setChainlinkOracle(address _chainlinkOracle) external onlyOwner {
-        address oldOracle = chainlinkOracle;
-        chainlinkOracle = _chainlinkOracle;
-        emit ChainlinkOracleUpdated(oldOracle, _chainlinkOracle);
     }
 
     /**

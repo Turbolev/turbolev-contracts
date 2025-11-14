@@ -2,8 +2,8 @@
 pragma solidity ^0.8.22;
 
 import "forge-std/Test.sol";
-import "../src/ChainlinkOracle.sol";
-import "../src/BlocksenseOracle.sol";
+import "../src/oracles/ChainlinkOracle.sol";
+import "../src/oracles/BlocksenseOracle.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 /**

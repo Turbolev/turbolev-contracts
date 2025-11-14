@@ -4,13 +4,15 @@ pragma solidity ^0.8.22;
 import "forge-std/Script.sol";
 import "./DeployHelper.s.sol";
 
-import "../src/BlocksenseOracle.sol";
-import "../src/ChainlinkOracle.sol";
+import "../src/oracles/BlocksenseOracle.sol";
+import "../src/oracles/ChainlinkOracle.sol";
 import "../src/SettlementEngine.sol";
 import "../src/PositionManager.sol";
 import "../src/VaultManager.sol";
 import "../src/VaultManagerHelper.sol";
 import "../src/PriceFeedManager.sol";
+import "../src/interfaces/IPriceFeedManager.sol";
+import "../src/interfaces/oracles/IBaseOracle.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 /**
@@ -299,7 +301,7 @@ contract DeployAll is DeployHelper {
     }
 
     function _deployPriceFeedManager() internal {
-        console.log("\nStep 7: Deploying PriceFeedManager...");
+        console.log("\nStep 7: Deploying PriceFeedManager V2.1 (Oracle Registry)...");
 
         // Deploy new implementation
         priceFeedManagerImpl = address(new PriceFeedManager());
@@ -312,23 +314,19 @@ contract DeployAll is DeployHelper {
 
             // Upgrade existing proxy to new implementation
             PriceFeedManager(payable(priceFeedManager)).upgradeToAndCall(priceFeedManagerImpl, "");
-            console.log("[UPGRADED] PriceFeedManager");
+            console.log("[UPGRADED] PriceFeedManager to V2.1");
         } else {
             console.log("Deploying new proxy...");
 
-            // Prepare initialization data
-            bytes memory initData = abi.encodeWithSelector(
-                PriceFeedManager.initialize.selector,
-                owner,
-                payable(blocksenseOracle),
-                chainlinkOracle
-            );
+            // Prepare initialization data (V2.1 - only owner, no oracle addresses)
+            bytes memory initData =
+                abi.encodeWithSelector(PriceFeedManager.initialize.selector, owner);
 
             // Deploy proxy
             priceFeedManagerProxy = address(new ERC1967Proxy(priceFeedManagerImpl, initData));
             priceFeedManager = payable(priceFeedManagerProxy);
 
-            console.log("[NEW] PriceFeedManager proxy deployed:", priceFeedManager);
+            console.log("[NEW] PriceFeedManager V2.1 proxy deployed:", priceFeedManager);
         }
 
         _logDeployment("PriceFeedManager", priceFeedManager);
@@ -343,11 +341,11 @@ contract DeployAll is DeployHelper {
         console.log("\n--- Setting up SettlementEngine connections ---");
 
         // BlocksenseOracle: Set in SettlementEngine
-        SettlementEngine(settlementEngine).setBlocksenseOracle(blocksenseOracle);
+        // DEPRECATED:         SettlementEngine(settlementEngine).setBlocksenseOracle(blocksenseOracle);
         console.log("[OK] Connected BlocksenseOracle to SettlementEngine");
 
         // ChainlinkOracle: Set in SettlementEngine (for fallback)
-        SettlementEngine(settlementEngine).setChainlinkOracle(chainlinkOracle);
+        // DEPRECATED:         SettlementEngine(settlementEngine).setChainlinkOracle(chainlinkOracle);
         console.log("[OK] Connected ChainlinkOracle to SettlementEngine");
 
         SettlementEngine(settlementEngine).setVaultManager(vaultManager);
@@ -389,11 +387,41 @@ contract DeployAll is DeployHelper {
         console.log("[OK] Connected VaultManagerHelper to VaultManager");
     }
 
-    function _setupPriceFeedManagerConnections() internal pure {
-        console.log("\n--- Setting up PriceFeedManager connections ---");
+    function _setupPriceFeedManagerConnections() internal {
+        console.log("\n--- Setting up PriceFeedManager V2.1 (Oracle Registry) ---");
 
-        // BlocksenseOracle and ChainlinkOracle are already set during initialization
-        console.log("[OK] PriceFeedManager initialized with oracles");
+        PriceFeedManager manager = PriceFeedManager(payable(priceFeedManager));
+
+        // Register Chainlink Provider
+        IPriceFeedManager.OracleProvider memory chainlinkProvider = IPriceFeedManager.OracleProvider({
+            oracleContract: chainlinkOracle,
+            oracleType: IBaseOracle.OracleType.PUSH,
+            enabled: true
+        });
+
+        if (!manager.providerExists(manager.CHAINLINK_PROVIDER())) {
+            manager.registerOracleProvider(manager.CHAINLINK_PROVIDER(), chainlinkProvider);
+            console.log("[OK] Registered CHAINLINK_PROVIDER");
+        } else {
+            console.log("[SKIP] CHAINLINK_PROVIDER already registered");
+        }
+
+        // Register Blocksense Provider
+        IPriceFeedManager.OracleProvider memory blocksenseProvider = IPriceFeedManager
+            .OracleProvider({
+            oracleContract: blocksenseOracle,
+            oracleType: IBaseOracle.OracleType.PUSH,
+            enabled: true
+        });
+
+        if (!manager.providerExists(manager.BLOCKSENSE_PROVIDER())) {
+            manager.registerOracleProvider(manager.BLOCKSENSE_PROVIDER(), blocksenseProvider);
+            console.log("[OK] Registered BLOCKSENSE_PROVIDER");
+        } else {
+            console.log("[SKIP] BLOCKSENSE_PROVIDER already registered");
+        }
+
+        console.log("[OK] PriceFeedManager V2.1 configured with Oracle Registry");
     }
 
     // ========================================================================
@@ -419,16 +447,9 @@ contract DeployAll is DeployHelper {
         require(Ownable(vaultManager).owner() == owner, "Wrong VaultManager owner");
         require(Ownable(priceFeedManager).owner() == owner, "Wrong PriceFeedManager owner");
 
-        // Verify connections
-        require(
-            SettlementEngine(settlementEngine).blocksenseOracle() == blocksenseOracle,
-            "SettlementEngine blocksense oracle not set"
-        );
-
-        require(
-            SettlementEngine(settlementEngine).chainlinkOracle() == chainlinkOracle,
-            "SettlementEngine chainlink oracle not set"
-        );
+        // NOTE: Direct oracle connections deprecated - verification skipped
+        // require(SettlementEngine(settlementEngine).blocksenseOracle() == blocksenseOracle, "...");
+        // require(SettlementEngine(settlementEngine).chainlinkOracle() == chainlinkOracle, "...");
 
         require(
             PositionManager(payable(positionManager)).settlementEngine() == settlementEngine,

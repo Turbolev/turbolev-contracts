@@ -4,7 +4,7 @@ pragma solidity ^0.8.22;
 import "forge-std/Script.sol";
 import "./DeployHelper.s.sol";
 
-import "../src/BlocksenseOracle.sol";
+import "../src/oracles/BlocksenseOracle.sol";
 import "../src/SettlementEngine.sol";
 import "../src/PositionManager.sol";
 import "../src/VaultManager.sol";

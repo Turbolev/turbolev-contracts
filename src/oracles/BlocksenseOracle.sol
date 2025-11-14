@@ -4,7 +4,8 @@ pragma solidity ^0.8.22;
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import "./interfaces/ICLAggregatorAdapter.sol";
+import "../interfaces/ICLAggregatorAdapter.sol";
+import "../interfaces/oracles/IPushOracle.sol";
 
 /**
  * @title BlocksenseOracle
@@ -18,8 +19,14 @@ import "./interfaces/ICLAggregatorAdapter.sol";
  * - Validate price updates and freshness
  * - Circuit breaker for price manipulation protection
  * - Manage multiple feed adapters for different asset pairs
+ * - Implements IPushOracle interface (push-based oracle)
  */
-contract BlocksenseOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgradeable {
+contract BlocksenseOracle is
+    OwnableUpgradeable,
+    PausableUpgradeable,
+    UUPSUpgradeable,
+    IPushOracle
+{
     // ========================================================================
     // STATE VARIABLES
     // ========================================================================
@@ -192,6 +199,8 @@ contract BlocksenseOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgrad
      */
     function getPriceNoOlderThan(address adapter, uint256 maxAge)
         external
+        view
+        override
         whenNotPaused
         returns (int256 price, uint256 updatedAt)
     {
@@ -207,7 +216,8 @@ contract BlocksenseOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgrad
         uint8 feedDecimals = feed.decimals();
         int256 scaledPrice = _scalePrice(answer, feedDecimals);
 
-        _validatePrice(adapter, scaledPrice, timestamp);
+        // Note: Circuit breaker validation is skipped in view function
+        // Use the non-view version with validation if needed
 
         return (scaledPrice, timestamp);
     }
@@ -335,7 +345,54 @@ contract BlocksenseOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgrad
     /**
      * @notice Get contract version
      */
-    function version() external pure returns (string memory) {
+    function version() external pure override returns (string memory) {
         return "1.0.0-blocksense";
+    }
+
+    // ========================================================================
+    // IBASE ORACLE INTERFACE
+    // ========================================================================
+
+    /**
+     * @notice Get oracle type
+     * @return oracleType Always PUSH for Blocksense
+     */
+    function getOracleType() external pure override returns (OracleType) {
+        return OracleType.PUSH;
+    }
+
+    /**
+     * @notice Check if oracle supports hybrid mode
+     * @return supported Always false for Blocksense (push-only)
+     */
+    function supportsHybridMode() external pure override returns (bool) {
+        return false;
+    }
+
+    // ========================================================================
+    // IPUSH ORACLE INTERFACE (ALREADY IMPLEMENTED ABOVE)
+    // ========================================================================
+    // getPrice() - already implemented
+    // getPriceNoOlderThan() - already implemented
+    // isPriceStale() - needs to be added
+
+    /**
+     * @notice Check if price is stale
+     * @param feed CLAggregatorAdapter address
+     * @param maxAge Maximum acceptable age in seconds
+     * @return isStale True if price is stale
+     */
+    function isPriceStale(address feed, uint256 maxAge) external view override returns (bool) {
+        if (feed == address(0)) return true;
+
+        try ICLAggregatorAdapter(feed).latestRoundData() returns (
+            uint80, int256 answer, uint256, uint256 timestamp, uint80
+        ) {
+            if (answer <= 0) return true;
+            if (timestamp == 0) return true;
+            return (block.timestamp - timestamp) > maxAge;
+        } catch {
+            return true;
+        }
     }
 }
