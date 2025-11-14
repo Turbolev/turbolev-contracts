@@ -25,13 +25,9 @@ contract MockAdapter is ICLAggregatorAdapter, IChainlinkAggregatorV3 {
         mockTimestamp = block.timestamp;
     }
 
-    function setLatestRoundData(
-        uint80,
-        int256 price,
-        uint256,
-        uint256 timestamp,
-        uint80
-    ) external {
+    function setLatestRoundData(uint80, int256 price, uint256, uint256 timestamp, uint80)
+        external
+    {
         _price = price;
         mockTimestamp = timestamp;
     }
@@ -63,9 +59,11 @@ contract MockAdapter is ICLAggregatorAdapter, IChainlinkAggregatorV3 {
         return "Mock Adapter";
     }
 
-    function getRoundData(
-        uint80
-    ) external view returns (uint80, int256, uint256, uint256, uint80) {
+    function getRoundData(uint80)
+        external
+        view
+        returns (uint80, int256, uint256, uint256, uint80)
+    {
         return (1, _price, mockTimestamp, mockTimestamp, 1);
     }
 
@@ -100,10 +98,7 @@ contract PriceFeedManagerTest is Test {
         address indexed oracleContract,
         IBaseOracle.OracleType oracleType
     );
-    event OracleProviderUpdated(
-        bytes32 indexed providerId,
-        address indexed oracleContract
-    );
+    event OracleProviderUpdated(bytes32 indexed providerId, address indexed oracleContract);
     event PriceFeedConfigUpdated(
         address indexed projectToken,
         bytes32 indexed primaryProviderId,
@@ -122,10 +117,7 @@ contract PriceFeedManagerTest is Test {
             owner,
             3600 // max price age
         );
-        ERC1967Proxy blocksenseProxy = new ERC1967Proxy(
-            address(blocksenseImpl),
-            blocksenseInitData
-        );
+        ERC1967Proxy blocksenseProxy = new ERC1967Proxy(address(blocksenseImpl), blocksenseInitData);
         blocksenseOracle = BlocksenseOracle(payable(address(blocksenseProxy)));
 
         // Deploy ChainlinkOracle
@@ -134,22 +126,14 @@ contract PriceFeedManagerTest is Test {
             ChainlinkOracle.initialize.selector,
             3600 // max price age
         );
-        ERC1967Proxy chainlinkProxy = new ERC1967Proxy(
-            address(chainlinkImpl),
-            chainlinkInitData
-        );
+        ERC1967Proxy chainlinkProxy = new ERC1967Proxy(address(chainlinkImpl), chainlinkInitData);
         chainlinkOracle = ChainlinkOracle(address(chainlinkProxy));
 
         // Deploy PriceFeedManager V2.1
         PriceFeedManager priceFeedImpl = new PriceFeedManager();
-        bytes memory priceFeedInitData = abi.encodeWithSelector(
-            PriceFeedManager.initialize.selector,
-            owner
-        );
-        ERC1967Proxy priceFeedProxy = new ERC1967Proxy(
-            address(priceFeedImpl),
-            priceFeedInitData
-        );
+        bytes memory priceFeedInitData =
+            abi.encodeWithSelector(PriceFeedManager.initialize.selector, owner);
+        ERC1967Proxy priceFeedProxy = new ERC1967Proxy(address(priceFeedImpl), priceFeedInitData);
         priceFeedManager = PriceFeedManager(payable(address(priceFeedProxy)));
     }
 
@@ -158,28 +142,25 @@ contract PriceFeedManagerTest is Test {
     // ========================================================================
 
     function testRegisterProvider() public {
-        IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager
-            .OracleProvider({
-                oracleContract: address(chainlinkOracle),
-                oracleType: IBaseOracle.OracleType.PUSH,
-                enabled: true
-            });
+        IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager.OracleProvider({
+            oracleContract: address(chainlinkOracle),
+            oracleType: IBaseOracle.OracleType.PUSH,
+            enabled: true
+        });
 
         bytes32 providerId = priceFeedManager.CHAINLINK_PROVIDER();
 
         vm.expectEmit(true, true, false, true);
         emit OracleProviderRegistered(
-            providerId,
-            address(chainlinkOracle),
-            IBaseOracle.OracleType.PUSH
+            providerId, address(chainlinkOracle), IBaseOracle.OracleType.PUSH
         );
 
         priceFeedManager.registerOracleProvider(providerId, provider);
 
         assertTrue(priceFeedManager.providerExists(providerId));
 
-        IPriceFeedManager.OracleProvider memory saved = priceFeedManager
-            .getOracleProvider(providerId);
+        IPriceFeedManager.OracleProvider memory saved =
+            priceFeedManager.getOracleProvider(providerId);
         assertEq(saved.oracleContract, address(chainlinkOracle));
         assertTrue(saved.enabled);
         assertEq(uint8(saved.oracleType), uint8(IBaseOracle.OracleType.PUSH));
@@ -190,8 +171,8 @@ contract PriceFeedManagerTest is Test {
         providerIds[0] = priceFeedManager.CHAINLINK_PROVIDER();
         providerIds[1] = priceFeedManager.BLOCKSENSE_PROVIDER();
 
-        IPriceFeedManager.OracleProvider[]
-            memory providers = new IPriceFeedManager.OracleProvider[](2);
+        IPriceFeedManager.OracleProvider[] memory providers =
+            new IPriceFeedManager.OracleProvider[](2);
         providers[0] = IPriceFeedManager.OracleProvider({
             oracleContract: address(chainlinkOracle),
             oracleType: IBaseOracle.OracleType.PUSH,
@@ -212,30 +193,28 @@ contract PriceFeedManagerTest is Test {
     function testUpdateProvider() public {
         // Register provider first
         bytes32 providerId = priceFeedManager.CHAINLINK_PROVIDER();
-        IPriceFeedManager.OracleProvider
-            memory initialProvider = IPriceFeedManager.OracleProvider({
-                oracleContract: address(chainlinkOracle),
-                oracleType: IBaseOracle.OracleType.PUSH,
-                enabled: true
-            });
+        IPriceFeedManager.OracleProvider memory initialProvider = IPriceFeedManager.OracleProvider({
+            oracleContract: address(chainlinkOracle),
+            oracleType: IBaseOracle.OracleType.PUSH,
+            enabled: true
+        });
 
         priceFeedManager.registerOracleProvider(providerId, initialProvider);
 
         // Update provider - change oracle contract address
-        IPriceFeedManager.OracleProvider
-            memory updatedProvider = IPriceFeedManager.OracleProvider({
-                oracleContract: address(blocksenseOracle), // Changed
-                oracleType: IBaseOracle.OracleType.PULL, // Changed type
-                enabled: false // Changed enabled
-            });
+        IPriceFeedManager.OracleProvider memory updatedProvider = IPriceFeedManager.OracleProvider({
+            oracleContract: address(blocksenseOracle), // Changed
+            oracleType: IBaseOracle.OracleType.PULL, // Changed type
+            enabled: false // Changed enabled
+         });
 
         vm.expectEmit(true, true, false, true);
         emit OracleProviderUpdated(providerId, address(blocksenseOracle));
 
         priceFeedManager.updateOracleProvider(providerId, updatedProvider);
 
-        IPriceFeedManager.OracleProvider memory updated = priceFeedManager
-            .getOracleProvider(providerId);
+        IPriceFeedManager.OracleProvider memory updated =
+            priceFeedManager.getOracleProvider(providerId);
         assertEq(updated.oracleContract, address(blocksenseOracle));
         assertEq(uint8(updated.oracleType), uint8(IBaseOracle.OracleType.PULL));
         assertFalse(updated.enabled);
@@ -245,19 +224,17 @@ contract PriceFeedManagerTest is Test {
         bytes32 chainlink = priceFeedManager.CHAINLINK_PROVIDER();
         bytes32 blocksense = priceFeedManager.BLOCKSENSE_PROVIDER();
 
-        IPriceFeedManager.OracleProvider memory provider1 = IPriceFeedManager
-            .OracleProvider({
-                oracleContract: address(chainlinkOracle),
-                oracleType: IBaseOracle.OracleType.PUSH,
-                enabled: true
-            });
+        IPriceFeedManager.OracleProvider memory provider1 = IPriceFeedManager.OracleProvider({
+            oracleContract: address(chainlinkOracle),
+            oracleType: IBaseOracle.OracleType.PUSH,
+            enabled: true
+        });
 
-        IPriceFeedManager.OracleProvider memory provider2 = IPriceFeedManager
-            .OracleProvider({
-                oracleContract: address(blocksenseOracle),
-                oracleType: IBaseOracle.OracleType.PUSH,
-                enabled: true
-            });
+        IPriceFeedManager.OracleProvider memory provider2 = IPriceFeedManager.OracleProvider({
+            oracleContract: address(blocksenseOracle),
+            oracleType: IBaseOracle.OracleType.PUSH,
+            enabled: true
+        });
 
         priceFeedManager.registerOracleProvider(chainlink, provider1);
         priceFeedManager.registerOracleProvider(blocksense, provider2);
@@ -269,12 +246,11 @@ contract PriceFeedManagerTest is Test {
     }
 
     function testRevertRegisterDuplicateProvider() public {
-        IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager
-            .OracleProvider({
-                oracleContract: address(chainlinkOracle),
-                oracleType: IBaseOracle.OracleType.PUSH,
-                enabled: true
-            });
+        IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager.OracleProvider({
+            oracleContract: address(chainlinkOracle),
+            oracleType: IBaseOracle.OracleType.PUSH,
+            enabled: true
+        });
 
         bytes32 providerId = priceFeedManager.CHAINLINK_PROVIDER();
         priceFeedManager.registerOracleProvider(providerId, provider);
@@ -296,33 +272,30 @@ contract PriceFeedManagerTest is Test {
 
     function testSetPriceFeedConfig() public {
         // Register provider first
-        IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager
-            .OracleProvider({
-                oracleContract: address(chainlinkOracle),
-                oracleType: IBaseOracle.OracleType.PUSH,
-                enabled: true
-            });
+        IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager.OracleProvider({
+            oracleContract: address(chainlinkOracle),
+            oracleType: IBaseOracle.OracleType.PUSH,
+            enabled: true
+        });
 
         bytes32 providerId = priceFeedManager.CHAINLINK_PROVIDER();
         priceFeedManager.registerOracleProvider(providerId, provider);
 
         // Configure token
-        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager
-            .PriceFeedConfig({
-                primaryProviderId: providerId,
-                secondaryProviderId: bytes32(0),
-                primaryFeed: address(mockAdapter),
-                secondaryFeed: address(0),
-                usePullMode: false
-            });
+        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
+            primaryProviderId: providerId,
+            secondaryProviderId: bytes32(0),
+            primaryFeed: address(mockAdapter),
+            secondaryFeed: address(0),
+            usePullMode: false
+        });
 
         vm.expectEmit(true, true, true, true);
         emit PriceFeedConfigUpdated(token, providerId, bytes32(0));
 
         priceFeedManager.setPriceFeedConfig(token, config);
 
-        IPriceFeedManager.PriceFeedConfig memory saved = priceFeedManager
-            .getPriceFeedConfig(token);
+        IPriceFeedManager.PriceFeedConfig memory saved = priceFeedManager.getPriceFeedConfig(token);
         assertEq(saved.primaryProviderId, providerId);
         assertEq(saved.secondaryProviderId, bytes32(0));
         assertFalse(saved.usePullMode);
@@ -333,39 +306,36 @@ contract PriceFeedManagerTest is Test {
         bytes32 chainlink = priceFeedManager.CHAINLINK_PROVIDER();
         bytes32 blocksense = priceFeedManager.BLOCKSENSE_PROVIDER();
 
-        IPriceFeedManager.OracleProvider memory provider1 = IPriceFeedManager
-            .OracleProvider({
-                oracleContract: address(chainlinkOracle),
-                oracleType: IBaseOracle.OracleType.PUSH,
-                enabled: true
-            });
+        IPriceFeedManager.OracleProvider memory provider1 = IPriceFeedManager.OracleProvider({
+            oracleContract: address(chainlinkOracle),
+            oracleType: IBaseOracle.OracleType.PUSH,
+            enabled: true
+        });
 
-        IPriceFeedManager.OracleProvider memory provider2 = IPriceFeedManager
-            .OracleProvider({
-                oracleContract: address(blocksenseOracle),
-                oracleType: IBaseOracle.OracleType.PUSH,
-                enabled: true
-            });
+        IPriceFeedManager.OracleProvider memory provider2 = IPriceFeedManager.OracleProvider({
+            oracleContract: address(blocksenseOracle),
+            oracleType: IBaseOracle.OracleType.PUSH,
+            enabled: true
+        });
 
         priceFeedManager.registerOracleProvider(chainlink, provider1);
         priceFeedManager.registerOracleProvider(blocksense, provider2);
 
         // Set initial config
-        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager
-            .PriceFeedConfig({
-                primaryProviderId: chainlink,
-                secondaryProviderId: bytes32(0),
-                primaryFeed: address(mockAdapter),
-                secondaryFeed: address(0),
-                usePullMode: false
-            });
+        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
+            primaryProviderId: chainlink,
+            secondaryProviderId: bytes32(0),
+            primaryFeed: address(mockAdapter),
+            secondaryFeed: address(0),
+            usePullMode: false
+        });
         priceFeedManager.setPriceFeedConfig(token, config);
 
         // Change primary provider
         priceFeedManager.setPrimaryProvider(token, blocksense);
 
-        IPriceFeedManager.PriceFeedConfig memory updated = priceFeedManager
-            .getPriceFeedConfig(token);
+        IPriceFeedManager.PriceFeedConfig memory updated =
+            priceFeedManager.getPriceFeedConfig(token);
         assertEq(updated.primaryProviderId, blocksense);
     }
 
@@ -374,32 +344,29 @@ contract PriceFeedManagerTest is Test {
         bytes32 chainlink = priceFeedManager.CHAINLINK_PROVIDER();
         bytes32 blocksense = priceFeedManager.BLOCKSENSE_PROVIDER();
 
-        IPriceFeedManager.OracleProvider memory provider1 = IPriceFeedManager
-            .OracleProvider({
-                oracleContract: address(chainlinkOracle),
-                oracleType: IBaseOracle.OracleType.PUSH,
-                enabled: true
-            });
+        IPriceFeedManager.OracleProvider memory provider1 = IPriceFeedManager.OracleProvider({
+            oracleContract: address(chainlinkOracle),
+            oracleType: IBaseOracle.OracleType.PUSH,
+            enabled: true
+        });
 
-        IPriceFeedManager.OracleProvider memory provider2 = IPriceFeedManager
-            .OracleProvider({
-                oracleContract: address(blocksenseOracle),
-                oracleType: IBaseOracle.OracleType.PUSH,
-                enabled: true
-            });
+        IPriceFeedManager.OracleProvider memory provider2 = IPriceFeedManager.OracleProvider({
+            oracleContract: address(blocksenseOracle),
+            oracleType: IBaseOracle.OracleType.PUSH,
+            enabled: true
+        });
 
         priceFeedManager.registerOracleProvider(chainlink, provider1);
         priceFeedManager.registerOracleProvider(blocksense, provider2);
 
         // Configure token
-        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager
-            .PriceFeedConfig({
-                primaryProviderId: chainlink,
-                secondaryProviderId: blocksense,
-                primaryFeed: address(mockAdapter),
-                secondaryFeed: address(mockAdapter),
-                usePullMode: false
-            });
+        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
+            primaryProviderId: chainlink,
+            secondaryProviderId: blocksense,
+            primaryFeed: address(mockAdapter),
+            secondaryFeed: address(mockAdapter),
+            usePullMode: false
+        });
         priceFeedManager.setPriceFeedConfig(token, config);
 
         // Get resolved config
@@ -422,31 +389,26 @@ contract PriceFeedManagerTest is Test {
         // Setup
         bytes32 chainlink = priceFeedManager.CHAINLINK_PROVIDER();
 
-        IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager
-            .OracleProvider({
-                oracleContract: address(chainlinkOracle),
-                oracleType: IBaseOracle.OracleType.PUSH,
-                enabled: true
-            });
+        IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager.OracleProvider({
+            oracleContract: address(chainlinkOracle),
+            oracleType: IBaseOracle.OracleType.PUSH,
+            enabled: true
+        });
 
         priceFeedManager.registerOracleProvider(chainlink, provider);
 
-        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager
-            .PriceFeedConfig({
-                primaryProviderId: chainlink,
-                secondaryProviderId: bytes32(0),
-                primaryFeed: address(mockAdapter),
-                secondaryFeed: address(0),
-                usePullMode: false
-            });
+        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
+            primaryProviderId: chainlink,
+            secondaryProviderId: bytes32(0),
+            primaryFeed: address(mockAdapter),
+            secondaryFeed: address(0),
+            usePullMode: false
+        });
 
         priceFeedManager.setPriceFeedConfig(token, config);
 
         // Get price
-        (uint256 price, uint256 publishTime) = priceFeedManager.getPrice(
-            token,
-            3600
-        );
+        (uint256 price, uint256 publishTime) = priceFeedManager.getPrice(token, 3600);
 
         assertGt(price, 0);
         assertGt(publishTime, 0);
@@ -457,37 +419,33 @@ contract PriceFeedManagerTest is Test {
         bytes32 chainlink = priceFeedManager.CHAINLINK_PROVIDER();
         bytes32 blocksense = priceFeedManager.BLOCKSENSE_PROVIDER();
 
-        IPriceFeedManager.OracleProvider memory provider1 = IPriceFeedManager
-            .OracleProvider({
-                oracleContract: address(chainlinkOracle),
-                oracleType: IBaseOracle.OracleType.PUSH,
-                enabled: true
-            });
+        IPriceFeedManager.OracleProvider memory provider1 = IPriceFeedManager.OracleProvider({
+            oracleContract: address(chainlinkOracle),
+            oracleType: IBaseOracle.OracleType.PUSH,
+            enabled: true
+        });
 
-        IPriceFeedManager.OracleProvider memory provider2 = IPriceFeedManager
-            .OracleProvider({
-                oracleContract: address(blocksenseOracle),
-                oracleType: IBaseOracle.OracleType.PUSH,
-                enabled: true
-            });
+        IPriceFeedManager.OracleProvider memory provider2 = IPriceFeedManager.OracleProvider({
+            oracleContract: address(blocksenseOracle),
+            oracleType: IBaseOracle.OracleType.PUSH,
+            enabled: true
+        });
 
         priceFeedManager.registerOracleProvider(chainlink, provider1);
         priceFeedManager.registerOracleProvider(blocksense, provider2);
 
-        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager
-            .PriceFeedConfig({
-                primaryProviderId: chainlink,
-                secondaryProviderId: blocksense,
-                primaryFeed: address(mockAdapter),
-                secondaryFeed: address(mockAdapter),
-                usePullMode: false
-            });
+        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
+            primaryProviderId: chainlink,
+            secondaryProviderId: blocksense,
+            primaryFeed: address(mockAdapter),
+            secondaryFeed: address(mockAdapter),
+            usePullMode: false
+        });
 
         priceFeedManager.setPriceFeedConfig(token, config);
 
         // Get price with fallback
-        (uint256 price, uint256 publishTime) = priceFeedManager
-            .getPriceWithFallback(token, 3600);
+        (uint256 price, uint256 publishTime) = priceFeedManager.getPriceWithFallback(token, 3600);
 
         assertGt(price, 0);
         assertGt(publishTime, 0);
@@ -497,23 +455,21 @@ contract PriceFeedManagerTest is Test {
         // Setup
         bytes32 chainlink = priceFeedManager.CHAINLINK_PROVIDER();
 
-        IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager
-            .OracleProvider({
-                oracleContract: address(chainlinkOracle),
-                oracleType: IBaseOracle.OracleType.PUSH,
-                enabled: true
-            });
+        IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager.OracleProvider({
+            oracleContract: address(chainlinkOracle),
+            oracleType: IBaseOracle.OracleType.PUSH,
+            enabled: true
+        });
 
         priceFeedManager.registerOracleProvider(chainlink, provider);
 
-        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager
-            .PriceFeedConfig({
-                primaryProviderId: chainlink,
-                secondaryProviderId: bytes32(0),
-                primaryFeed: address(mockAdapter),
-                secondaryFeed: address(0),
-                usePullMode: false
-            });
+        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
+            primaryProviderId: chainlink,
+            secondaryProviderId: bytes32(0),
+            primaryFeed: address(mockAdapter),
+            secondaryFeed: address(0),
+            usePullMode: false
+        });
 
         priceFeedManager.setPriceFeedConfig(token, config);
 
@@ -529,14 +485,13 @@ contract PriceFeedManagerTest is Test {
     }
 
     function testRevertNoPrimaryProvider() public {
-        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager
-            .PriceFeedConfig({
-                primaryProviderId: bytes32(0),
-                secondaryProviderId: bytes32(0),
-                primaryFeed: address(0),
-                secondaryFeed: address(0),
-                usePullMode: false
-            });
+        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
+            primaryProviderId: bytes32(0),
+            secondaryProviderId: bytes32(0),
+            primaryFeed: address(0),
+            secondaryFeed: address(0),
+            usePullMode: false
+        });
 
         vm.expectRevert();
         priceFeedManager.setPriceFeedConfig(token, config);
@@ -545,14 +500,13 @@ contract PriceFeedManagerTest is Test {
     function testRevertProviderNotFound() public {
         bytes32 fakeProviderId = keccak256("FAKE");
 
-        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager
-            .PriceFeedConfig({
-                primaryProviderId: fakeProviderId,
-                secondaryProviderId: bytes32(0),
-                primaryFeed: address(mockAdapter),
-                secondaryFeed: address(0),
-                usePullMode: false
-            });
+        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
+            primaryProviderId: fakeProviderId,
+            secondaryProviderId: bytes32(0),
+            primaryFeed: address(mockAdapter),
+            secondaryFeed: address(0),
+            usePullMode: false
+        });
 
         vm.expectRevert();
         priceFeedManager.setPriceFeedConfig(token, config);
