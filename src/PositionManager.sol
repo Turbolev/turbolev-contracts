@@ -316,12 +316,6 @@ contract PositionManager is
         uint256 openPrice;
         uint256 pricePublishTime;
 
-        if (msg.value > 0) {
-            // Native token is not allowed to be used as collateral
-            // Next version will support native token as collateral
-            revert NativeTokenNotAllowed();
-        }
-
         // ERC20 project token (most common)
         amount = collateralAmount;
         if (amount == 0) revert InvalidAmount();

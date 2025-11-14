@@ -24,13 +24,13 @@ contract InteractPriceFeedManagerV2 is Script {
      * @dev Đăng ký 1 lần, dùng cho nhiều tokens
      */
     function registerProviders() external {
-        uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
-        address payable priceFeedManager = payable(vm.envAddress("PRICE_FEED_MANAGER"));
+        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
+        address payable priceFeedManager = payable(vm.envAddress("PRICE_FEED_MANAGER_ADDRESS"));
 
         // Oracle contract addresses
-        address chainlinkOracle = vm.envAddress("CHAINLINK_ORACLE");
-        address blocksenseOracle = vm.envAddress("BLOCKSENSE_ORACLE");
-        address pythOracle = vm.envOr("PYTH_ORACLE", address(0));
+        address chainlinkOracle = vm.envAddress("CHAINLINK_ORACLE_ADDRESS");
+        address blocksenseOracle = vm.envAddress("BLOCKSENSE_ORACLE_ADDRESS");
+        address pythOracle = vm.envOr("PYTH_ORACLE_ADDRESS", address(0));
 
         console.log("=== Register Oracle Providers ===");
         console.log("PriceFeedManager:", priceFeedManager);
@@ -164,8 +164,8 @@ contract InteractPriceFeedManagerV2 is Script {
      */
     function setupTokenConfigPythPrimary() external {
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
-        address payable priceFeedManager = payable(vm.envAddress("PRICE_FEED_MANAGER"));
-        address projectToken = vm.envAddress("PROJECT_TOKEN");
+        address payable priceFeedManager = payable(vm.envAddress("PRICE_FEED_MANAGER_ADDRESS"));
+        address projectToken = vm.envAddress("PROJECT_TOKEN_ADDRESS");
 
         console.log("=== Setup Pyth Primary (Pull Mode) ===");
         console.log("Token:", projectToken);
