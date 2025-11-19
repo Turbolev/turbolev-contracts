@@ -3,9 +3,21 @@ pragma solidity ^0.8.22;
 
 /**
  * @title IVaultManager
- * @notice Interface for VaultManager contract - Single project token per vault with dual currency support
+ * @notice Interface for VaultManager contract - Beacon proxy factory with governance
+ * @dev V2.0 with Timelock + Multisig + Opt-in upgrades
  */
 interface IVaultManager {
+    // ========================================================================
+    // STRUCTS
+    // ========================================================================
+
+    struct VaultInfo {
+        address projectToken;
+        address vaultAddress;
+        uint256 deployedAt;
+        bool isActive;
+        bool isBeaconProxy;
+    }
     /**
      * @notice Get vault address for project token
      * @param _projectToken Project token address
@@ -111,14 +123,69 @@ interface IVaultManager {
     function unpause() external;
 
     /**
-     * @notice Pause a specific vault
+     * @notice Pause vault by project token
      * @param _projectToken Project token address
      */
     function pauseVault(address _projectToken) external;
 
     /**
-     * @notice Unpause a specific vault
+     * @notice Unpause vault by project token
      * @param _projectToken Project token address
      */
     function unpauseVault(address _projectToken) external;
+
+    /**
+     * @notice Pause vault by vault address directly
+     * @param vault Vault address
+     */
+    function pauseVaultByAddress(address vault) external;
+
+    /**
+     * @notice Unpause vault by vault address directly
+     * @param vault Vault address
+     */
+    function unpauseVaultByAddress(address vault) external;
+
+    /**
+     * @notice Batch pause multiple vaults
+     * @param vaults Array of vault addresses
+     */
+    function batchPauseVaults(address[] calldata vaults) external;
+
+    /**
+     * @notice Batch unpause multiple vaults
+     * @param vaults Array of vault addresses
+     */
+    function batchUnpauseVaults(address[] calldata vaults) external;
+
+    /**
+     * @notice Get vault info
+     * @param vault Vault address
+     * @return info VaultInfo struct
+     */
+    function getVaultInfo(address vault) external view returns (VaultInfo memory info);
+
+    /**
+     * @notice Get active vaults only
+     * @return active Array of active vault addresses
+     */
+    function getActiveVaults() external view returns (address[] memory active);
+
+    /**
+     * @notice Get beacon proxy vaults only
+     * @return beaconVaults Array of beacon proxy vault addresses
+     */
+    function getBeaconProxyVaults() external view returns (address[] memory beaconVaults);
+
+    /**
+     * @notice Deactivate vault
+     * @param vault Vault address
+     */
+    function deactivateVault(address vault) external;
+
+    /**
+     * @notice Reactivate vault
+     * @param vault Vault address
+     */
+    function reactivateVault(address vault) external;
 }
