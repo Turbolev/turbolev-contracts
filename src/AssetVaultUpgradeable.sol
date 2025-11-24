@@ -57,6 +57,10 @@ contract AssetVaultUpgradeable is
     uint16 public stakingFeeBps;
     uint16 public earlyWithdrawalFeeBps;
 
+    // Position fees (open and close)
+    uint16 public openPositionFeeBps; // Fee khi mở position (default 5 = 0.05%)
+    uint16 public closePositionFeeBps; // Fee khi đóng position (default 5 = 0.05%)
+
     // Staker reward state
     mapping(uint256 => DailySnapshot) public dailySnapshots;
     uint256 public currentDay;
@@ -160,6 +164,8 @@ contract AssetVaultUpgradeable is
     uint256 public constant REWARD_MIN_STAKE_PERIOD = 1 days;
     uint256 public constant DEFAULT_MAX_STAKING_FEE_BPS = 200;
     uint256 public constant DEFAULT_EARLY_WITHDRAWAL_FEE_BPS = 1000;
+    uint256 public constant DEFAULT_OPEN_POSITION_FEE_BPS = 5; // 0.05%
+    uint256 public constant DEFAULT_CLOSE_POSITION_FEE_BPS = 5; // 0.05%
     uint256 public constant DEFAULT_MAX_DIRECTIONAL_EXPOSURE_BPS = 5000; // 50% of TVL
     uint256 public constant DEFAULT_MAX_POSITION_SIZE_PERCENT_BPS = 3000;
     uint256 public constant BASIS_POINTS = 10_000;
@@ -269,6 +275,21 @@ contract AssetVaultUpgradeable is
     );
     event StakingFeeBpsUpdated(uint16 oldBps, uint16 newBps);
     event EarlyWithdrawalFeeBpsUpdated(uint16 oldBps, uint16 newBps);
+    event OpenPositionFeeCollected(
+        uint64 indexed positionId,
+        address indexed user,
+        uint256 fee,
+        uint256 collateral,
+        uint256 timestamp
+    );
+    event ClosePositionFeeCollected(
+        uint64 indexed positionId,
+        address indexed user,
+        uint256 fee,
+        uint256 timestamp
+    );
+    event OpenPositionFeeBpsUpdated(uint16 oldBps, uint16 newBps);
+    event ClosePositionFeeBpsUpdated(uint16 oldBps, uint16 newBps);
     event VaultGraduated(
         address indexed vaultAddress,
         uint256 currentValueUSD,
@@ -457,6 +478,8 @@ contract AssetVaultUpgradeable is
 
         stakingFeeBps = uint16(DEFAULT_MAX_STAKING_FEE_BPS);
         earlyWithdrawalFeeBps = uint16(DEFAULT_EARLY_WITHDRAWAL_FEE_BPS);
+        openPositionFeeBps = uint16(DEFAULT_OPEN_POSITION_FEE_BPS); // 0.05%
+        closePositionFeeBps = uint16(DEFAULT_CLOSE_POSITION_FEE_BPS); // 0.05%
         maxDirectionalExposureBps = uint16(
             DEFAULT_MAX_DIRECTIONAL_EXPOSURE_BPS
         ); // 50% TVL cap
@@ -765,7 +788,7 @@ contract AssetVaultUpgradeable is
     /**
      * @notice Deposit collateral from bet (VERSION 1: ONLY project token)
      * @param positionId Position ID
-     * @param amount Collateral amount in project tokens
+     * @param amount Collateral amount in project tokens (including open position fee)
      * @param positionSize Position size (amount * leverage)
      * @param isMarginAdd True if adding margin to existing position, false if opening new position
      * @param direction Position direction (1 = LONG, 2 = SHORT)
@@ -779,13 +802,37 @@ contract AssetVaultUpgradeable is
     ) external payable onlyVaultManager nonReentrant {
         if (amount == 0) revert InvalidAmount();
 
-        // Store bet collateral for this position (NOT added to vault liquidity yet)
+        // Calculate open position fee (only for new positions, not margin adds)
+        uint256 openFee = 0;
+        uint256 netCollateral = amount;
+
+        if (!isMarginAdd && openPositionFeeBps > 0) {
+            // Thu phí khi mở position mới
+            openFee = (amount * openPositionFeeBps) / BASIS_POINTS;
+            netCollateral = amount - openFee;
+
+            // Add fee to vault liquidity and make it withdrawable
+            vaultInfo.totalLiquidity += openFee;
+            vaultInfo.totalFeesCollected += openFee;
+            withdrawableFees += openFee;
+
+            // Emit event
+            emit OpenPositionFeeCollected(
+                positionId,
+                msg.sender,
+                openFee,
+                netCollateral,
+                block.timestamp
+            );
+        }
+
+        // Store bet collateral for this position (net amount after fee, NOT added to vault liquidity yet)
         if (isMarginAdd) {
-            // Adding margin: increment existing collateral
+            // Adding margin: increment existing collateral (no fee)
             betCollateral[positionId] += amount;
         } else {
-            // Opening new position: set initial collateral
-            betCollateral[positionId] = amount;
+            // Opening new position: set initial collateral (after fee deduction)
+            betCollateral[positionId] = netCollateral;
         }
 
         vaultInfo.totalVolume += amount;
@@ -802,7 +849,7 @@ contract AssetVaultUpgradeable is
             totalShortExposure += positionSize;
         }
 
-        emit CollateralDeposited(amount, positionSize, block.timestamp);
+        emit CollateralDeposited(netCollateral, positionSize, block.timestamp);
     }
 
     /**
@@ -898,13 +945,12 @@ contract AssetVaultUpgradeable is
 
     /**
      * @notice Update vault P&L after position settlement
-     * @dev NEW LOGIC: Handle collateral based on win/loss
-     * - Trader wins: collateral stays with trader (returned via payout)
-     * - Trader loses: loss amount added to vault liquidity
+     * @dev NEW LOGIC: Handle collateral based on win/loss and collect close position fee
+     * - Trader wins: collateral stays with trader (returned via payout), close fee deducted from payout
+     * - Trader loses: loss amount + close fee added to vault liquidity
      * @param positionId Position ID (for tracking)
      * @param collateral Collateral amount
      * @param vaultPnL Vault P&L (negative of user P&L)
-     * @param fee Fee collected
      * @param positionSize Position size to remove from exposure
      * @param direction Position direction (1 = LONG, 2 = SHORT)
      */
@@ -912,10 +958,29 @@ contract AssetVaultUpgradeable is
         uint64 positionId,
         uint256 collateral,
         int256 vaultPnL,
-        uint256 fee,
+        uint256 /* fee */,
         uint256 positionSize,
         uint8 direction
     ) external onlyPositionManager {
+        // Calculate close position fee based on collateral
+        uint256 closeFee = 0;
+        if (closePositionFeeBps > 0 && collateral > 0) {
+            closeFee = (collateral * closePositionFeeBps) / BASIS_POINTS;
+
+            // Add close fee to vault liquidity and make it withdrawable
+            vaultInfo.totalLiquidity += closeFee;
+            vaultInfo.totalFeesCollected += closeFee;
+            withdrawableFees += closeFee;
+
+            // Emit event
+            emit ClosePositionFeeCollected(
+                positionId,
+                tx.origin, // Original user who opened the position
+                closeFee,
+                block.timestamp
+            );
+        }
+
         // Process collateral based on outcome
         if (vaultPnL >= 0) {
             // Vault gained (trader lost)
@@ -938,23 +1003,32 @@ contract AssetVaultUpgradeable is
                 block.timestamp
             );
 
-            // Update lifetime P&L
+            // Update lifetime P&L (including close fee as profit)
+            uint256 totalGain = lossAmount + closeFee;
             if (vaultInfo.isNegativePnL) {
-                if (lossAmount >= vaultInfo.lifetimePnL) {
-                    vaultInfo.lifetimePnL = lossAmount - vaultInfo.lifetimePnL;
+                if (totalGain >= vaultInfo.lifetimePnL) {
+                    vaultInfo.lifetimePnL = totalGain - vaultInfo.lifetimePnL;
                     vaultInfo.isNegativePnL = false;
                 } else {
-                    vaultInfo.lifetimePnL -= lossAmount;
+                    vaultInfo.lifetimePnL -= totalGain;
                 }
             } else {
-                vaultInfo.lifetimePnL += lossAmount;
+                vaultInfo.lifetimePnL += totalGain;
             }
         } else {
             // Vault lost (trader won)
             // Collateral + rewards will be paid out via executePayout
-            // No liquidity change here
+            // Close fee already added to vault above
+            // Adjust vaultPnL by close fee (fee reduces vault loss)
 
             uint256 loss = uint256(-vaultPnL);
+            // Subtract close fee from loss (fee partially offsets vault loss)
+            if (loss > closeFee) {
+                loss -= closeFee;
+            } else {
+                loss = 0;
+            }
+
             // Update lifetime P&L
             if (vaultInfo.isNegativePnL) {
                 vaultInfo.lifetimePnL += loss;
@@ -972,7 +1046,9 @@ contract AssetVaultUpgradeable is
         // dailyNetPnL tracks vault's profit/loss for the day
         // Positive value = vault profit (from losing positions + fees)
         // This will be distributed to LPs during finalizeDailyReward
-        dailyNetPnL += vaultPnL; // Accumulate for current day
+        // Add close fee to daily PnL
+        int256 adjustedPnL = vaultPnL + int256(closeFee);
+        dailyNetPnL += adjustedPnL; // Accumulate for current day
         dailyPositionIds.push(positionId);
 
         // Update leverage exposure
@@ -1008,7 +1084,7 @@ contract AssetVaultUpgradeable is
         emit VaultPnLUpdated(
             collateral,
             vaultPnL,
-            fee,
+            closeFee, // Use close fee instead of old fee parameter
             vaultInfo.lifetimePnL,
             vaultInfo.isNegativePnL,
             block.timestamp
@@ -1949,6 +2025,47 @@ contract AssetVaultUpgradeable is
     }
 
     /**
+     * @notice Get position fee configuration (open and close fees)
+     * @return _openPositionFeeBps Open position fee in basis points
+     * @return _closePositionFeeBps Close position fee in basis points
+     */
+    function getPositionFeeConfig()
+        external
+        view
+        returns (uint16 _openPositionFeeBps, uint16 _closePositionFeeBps)
+    {
+        return (openPositionFeeBps, closePositionFeeBps);
+    }
+
+    /**
+     * @notice Get all fee configuration (including position fees)
+     * @return _stakingFeeBps Staking fee in basis points
+     * @return _earlyWithdrawalFeeBps Early withdrawal fee in basis points
+     * @return _openPositionFeeBps Open position fee in basis points
+     * @return _closePositionFeeBps Close position fee in basis points
+     * @return _minLockPeriod Minimum lock period in seconds
+     */
+    function getAllFeeConfig()
+        external
+        view
+        returns (
+            uint16 _stakingFeeBps,
+            uint16 _earlyWithdrawalFeeBps,
+            uint16 _openPositionFeeBps,
+            uint16 _closePositionFeeBps,
+            uint256 _minLockPeriod
+        )
+    {
+        return (
+            stakingFeeBps,
+            earlyWithdrawalFeeBps,
+            openPositionFeeBps,
+            closePositionFeeBps,
+            MIN_LOCK_PERIOD
+        );
+    }
+
+    /**
      * @notice Get total fees collected
      * @return total Total fees collected (all types)
      * @return staking Total staking fees
@@ -2002,6 +2119,32 @@ contract AssetVaultUpgradeable is
         uint16 oldBps = earlyWithdrawalFeeBps;
         earlyWithdrawalFeeBps = _earlyWithdrawalFeeBps;
         emit EarlyWithdrawalFeeBpsUpdated(oldBps, _earlyWithdrawalFeeBps);
+    }
+
+    /**
+     * @notice Update open position fee
+     * @param _openPositionFeeBps New open position fee in basis points
+     */
+    function setOpenPositionFeeBps(
+        uint16 _openPositionFeeBps
+    ) external onlyVaultManagerOrHelper {
+        if (_openPositionFeeBps > 1000) revert InvalidParameters(); // Max 10%
+        uint16 oldBps = openPositionFeeBps;
+        openPositionFeeBps = _openPositionFeeBps;
+        emit OpenPositionFeeBpsUpdated(oldBps, _openPositionFeeBps);
+    }
+
+    /**
+     * @notice Update close position fee
+     * @param _closePositionFeeBps New close position fee in basis points
+     */
+    function setClosePositionFeeBps(
+        uint16 _closePositionFeeBps
+    ) external onlyVaultManagerOrHelper {
+        if (_closePositionFeeBps > 1000) revert InvalidParameters(); // Max 10%
+        uint16 oldBps = closePositionFeeBps;
+        closePositionFeeBps = _closePositionFeeBps;
+        emit ClosePositionFeeBpsUpdated(oldBps, _closePositionFeeBps);
     }
 
     // ========================================================================
