@@ -48,7 +48,7 @@ contract DeployVaultManager is DeployHelper {
             console.log("No existing proxy found, deploying new...");
 
             // Prepare initialization data
-            bytes memory initData = abi.encodeWithSelector(VaultManager.initialize.selector, owner);
+            bytes memory initData = abi.encodeWithSelector(VaultManager.initializeV2.selector, owner);
 
             // Deploy proxy
             address proxy = address(new ERC1967Proxy(newImplementation, initData));

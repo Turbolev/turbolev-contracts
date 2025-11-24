@@ -339,7 +339,7 @@ contract BaseTest is Test {
 
         // Deploy VaultManager (upgradeable via ERC1967Proxy)
         VaultManager vaultImpl = new VaultManager();
-        bytes memory vaultInitData = abi.encodeWithSelector(VaultManager.initialize.selector, owner);
+        bytes memory vaultInitData = abi.encodeWithSelector(VaultManager.initializeV2.selector, owner);
         ERC1967Proxy vaultProxy = new ERC1967Proxy(address(vaultImpl), vaultInitData);
         vaultManager = VaultManager(payable(address(vaultProxy)));
 
@@ -367,7 +367,7 @@ contract BaseTest is Test {
         mockRegistry.setDecimals(address(projectToken), address(usdc), 18);
 
         // Create vault for project token
-        address vaultAddr = vaultManager.createVault(
+        address vaultAddr = vaultManager.createVaultWithBeacon(
             address(projectToken), DEFAULT_MIN_BET, DEFAULT_MAX_BET, DEFAULT_GRADUATION_THRESHOLD
         );
         assetVault = AssetVault(payable(vaultAddr));

@@ -175,6 +175,12 @@ interface IAssetVault {
      */
     function unpause() external;
 
+    /**
+     * @notice Set upgrade manager for opt-in upgrades
+     * @param _upgradeManager OptInUpgradeManager address
+     */
+    function setUpgradeManager(address _upgradeManager) external;
+
     // ========================================================================
     // FEE-RELATED FUNCTIONS
     // ========================================================================

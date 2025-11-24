@@ -139,7 +139,7 @@ contract SettlementEngineTest is Test {
         // Deploy VaultManager
         VaultManager vaultManagerImpl = new VaultManager();
         bytes memory vaultManagerInitData =
-            abi.encodeWithSelector(VaultManager.initialize.selector, owner);
+            abi.encodeWithSelector(VaultManager.initializeV2.selector, owner);
         ERC1967Proxy vaultManagerProxy =
             new ERC1967Proxy(address(vaultManagerImpl), vaultManagerInitData);
         vaultManager = VaultManager(payable(address(vaultManagerProxy)));

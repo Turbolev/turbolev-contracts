@@ -30,7 +30,7 @@ contract CreateVault is DeployHelper {
         console.log("Max Bet Amount:", maxBet);
         console.log("Graduation Threshold:", graduationThreshold);
 
-        address vaultAddr = VaultManager(vaultManager).createVault(
+        address vaultAddr = VaultManager(vaultManager).createVaultWithBeacon(
             projectToken, minBet, maxBet, graduationThreshold
         );
 

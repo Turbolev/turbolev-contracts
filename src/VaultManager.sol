@@ -249,14 +249,11 @@ contract VaultManager is
         });
 
         // Set upgrade manager for vault (if implemented)
-        (bool success, ) = vaultAddress.call(
-            abi.encodeWithSignature(
-                "setUpgradeManager(address)",
-                optInUpgradeManager
-            )
-        );
-        // Don't revert if fails (backward compatibility)
-
+        try IAssetVault(vaultAddress).setUpgradeManager(optInUpgradeManager) {
+            // Successfully set upgrade manager
+        } catch {
+            // Don't revert if fails (backward compatibility)
+        }
         emit VaultCreated(_projectToken, vaultAddress, true, block.timestamp);
 
         return vaultAddress;

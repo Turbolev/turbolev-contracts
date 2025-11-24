@@ -447,7 +447,7 @@ contract IntegrationTest is BaseTest {
         // Create new vault for different token
         MockERC20 newToken = new MockERC20("NewToken", "NEW");
 
-        address newVaultAddr = vaultManager.createVault(
+        address newVaultAddr = vaultManager.createVaultWithBeacon(
             address(newToken), DEFAULT_MIN_BET, DEFAULT_MAX_BET, DEFAULT_GRADUATION_THRESHOLD
         );
 
