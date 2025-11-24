@@ -174,6 +174,12 @@ contract VaultManager is
             revert InvalidAddress();
         }
 
+        // Initialize base contracts (for first-time deploy)
+        __Ownable_init(initialOwner);
+        __ReentrancyGuard_init();
+        __Pausable_init();
+        __UUPSUpgradeable_init();
+
         vaultBeacon = _vaultBeacon;
         optInUpgradeManager = _optInUpgradeManager;
         timelockController = _timelockController;
@@ -305,13 +311,15 @@ contract VaultManager is
      * @param amount Collateral amount
      * @param positionSize Position size
      * @param isMarginAdd Is margin add
+     * @param direction Position direction (1 = LONG, 2 = SHORT)
      */
     function depositFromBet(
         address _projectToken,
         uint64 positionId,
         uint256 amount,
         uint256 positionSize,
-        bool isMarginAdd
+        bool isMarginAdd,
+        uint8 direction
     ) external payable onlyPositionManager {
         address vaultAddress = _getVault(_projectToken);
         IERC20(_projectToken).transferFrom(
@@ -323,7 +331,8 @@ contract VaultManager is
             positionId,
             amount,
             positionSize,
-            isMarginAdd
+            isMarginAdd,
+            direction
         );
         emit CollateralDepositedFromBet(
             vaultAddress,
@@ -352,6 +361,7 @@ contract VaultManager is
 
     /**
      * @notice Update vault P&L
+     * @param direction Position direction (1 = LONG, 2 = SHORT)
      */
     function updateVaultPnLWithLeverage(
         address _projectToken,
@@ -359,14 +369,16 @@ contract VaultManager is
         uint256 collateral,
         int256 vaultPnL,
         uint256 fee,
-        uint256 positionSize
+        uint256 positionSize,
+        uint8 direction
     ) external onlyPositionManager {
         IAssetVault(_getVault(_projectToken)).updateVaultPnL(
             positionId,
             collateral,
             vaultPnL,
             fee,
-            positionSize
+            positionSize,
+            direction
         );
     }
 

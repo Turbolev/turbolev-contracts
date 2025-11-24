@@ -52,13 +52,15 @@ interface IVaultManager {
      * @param amount Collateral amount in project tokens
      * @param positionSize Position size
      * @param isMarginAdd True if adding margin to existing position
+     * @param direction Position direction (1 = LONG, 2 = SHORT)
      */
     function depositFromBet(
         address _projectToken,
         uint64 positionId,
         uint256 amount,
         uint256 positionSize,
-        bool isMarginAdd
+        bool isMarginAdd,
+        uint8 direction
     ) external payable;
 
     /**
@@ -79,6 +81,7 @@ interface IVaultManager {
      * @param vaultPnL Vault P&L
      * @param fee Fee collected
      * @param positionSize Position size
+     * @param direction Position direction (1 = LONG, 2 = SHORT)
      */
     function updateVaultPnLWithLeverage(
         address _projectToken,
@@ -86,7 +89,8 @@ interface IVaultManager {
         uint256 collateral,
         int256 vaultPnL,
         uint256 fee,
-        uint256 positionSize
+        uint256 positionSize,
+        uint8 direction
     ) external;
 
     /**

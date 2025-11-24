@@ -461,6 +461,180 @@ contract IntegrationTest is BaseTest {
     }
 
     // ========================================================================
+    // DIRECTIONAL EXPOSURE TESTS
+    // ========================================================================
+
+    function testIntegration_DirectionalExposure_Balanced() public {
+        // Open equal LONG and SHORT positions - should not hit exposure limit
+        uint256 positionAmount = 100 ether;
+
+        // User1 opens LONG
+        vm.startPrank(user1);
+        projectToken.mint(user1, positionAmount);
+        projectToken.approve(address(positionManager), positionAmount);
+        uint64 longPos = positionManager.openPosition(
+            address(projectToken),
+            positionAmount,
+            LEVERAGE_5X,
+            1, // LONG
+            0,
+            block.timestamp + 3600,
+            ""
+        );
+        vm.stopPrank();
+
+        // User2 opens SHORT with same size
+        vm.startPrank(user2);
+        projectToken.mint(user2, positionAmount);
+        projectToken.approve(address(positionManager), positionAmount);
+        uint64 shortPos = positionManager.openPosition(
+            address(projectToken),
+            positionAmount,
+            LEVERAGE_5X,
+            2, // SHORT
+            0,
+            block.timestamp + 3600,
+            ""
+        );
+        vm.stopPrank();
+
+        // Check exposure - should be balanced
+        (
+            uint256 longExposure,
+            uint256 shortExposure,
+            uint256 netExposure,
+            ,
+            ,
+
+        ) = assetVault.getDirectionalExposure();
+
+        uint256 expectedExposure = positionAmount * LEVERAGE_5X;
+        assertEq(longExposure, expectedExposure, "Long exposure should match");
+        assertEq(shortExposure, expectedExposure, "Short exposure should match");
+        assertEq(netExposure, 0, "Net exposure should be 0 when balanced");
+
+        // Verify positions were created
+        assertTrue(longPos > 0, "Long position should be created");
+        assertTrue(shortPos > 0, "Short position should be created");
+    }
+
+    function testIntegration_DirectionalExposure_ExceedsLimit() public {
+        // Try to open position that would exceed 50% TVL net exposure
+        // TVL = 15,000 ether, 50% = 7,500 ether
+        // But also need to consider maxBetAmount (100 ether default)
+        // Try to open LONG with size that exceeds directional exposure
+
+        // First, update maxBetAmount to allow larger positions
+        assetVault.updateVaultParams(
+            0.01 ether, // minBetAmount
+            2000 ether, // maxBetAmount - increased
+            3000 // maxPositionSizePercentBps (30% of TVL)
+        );
+
+        uint256 excessiveAmount = 2000 ether; // 2000 * 5 = 10,000 > 7,500
+
+        vm.startPrank(user1);
+        projectToken.mint(user1, excessiveAmount);
+        projectToken.approve(address(positionManager), excessiveAmount);
+
+        // Should revert due to exposure limit
+        vm.expectRevert();
+        positionManager.openPosition(
+            address(projectToken),
+            excessiveAmount,
+            LEVERAGE_5X,
+            1, // LONG
+            0,
+            block.timestamp + 3600,
+            ""
+        );
+        vm.stopPrank();
+    }
+
+    function testIntegration_DirectionalExposure_WithinLimit() public {
+        // Open position within exposure limit
+        // TVL = 15,000 ether, 50% = 7,500 ether
+        // maxBetAmount = 100 ether (default), so max collateral = 100 ether
+        // Open LONG with size = 500 ether (collateral = 100 ether, within limit)
+
+        // First, update maxBetAmount if needed
+        assetVault.updateVaultParams(
+            0.01 ether, // minBetAmount
+            500 ether, // maxBetAmount - increased to allow test
+            3000 // maxPositionSizePercentBps (30% of TVL)
+        );
+
+        uint256 safeAmount = 100 ether; // 100 * 5 = 500 < 7,500 and < maxBet
+
+        vm.startPrank(user1);
+        projectToken.mint(user1, safeAmount);
+        projectToken.approve(address(positionManager), safeAmount);
+
+        uint64 positionId = positionManager.openPosition(
+            address(projectToken),
+            safeAmount,
+            LEVERAGE_5X,
+            1, // LONG
+            0,
+            block.timestamp + 3600,
+            ""
+        );
+        vm.stopPrank();
+
+        // Verify position was created
+        PositionLib.Position memory pos = positionManager.getPosition(positionId);
+        assertEq(pos.user, user1, "Position should be created");
+
+        // Check exposure
+        (uint256 longExposure, , , , , ) = assetVault.getDirectionalExposure();
+        assertEq(longExposure, safeAmount * LEVERAGE_5X, "Long exposure should be updated");
+    }
+
+    function testIntegration_DirectionalExposure_AfterClose() public {
+        // Test that exposure is properly reduced after closing position
+        // Use smaller amount to stay within default maxBetAmount (100 ether)
+        uint256 positionAmount = 50 ether; // 50 * 5 = 250 ether position size
+
+        // Update maxBetAmount if needed
+        assetVault.updateVaultParams(
+            0.01 ether, // minBetAmount
+            200 ether, // maxBetAmount
+            3000 // maxPositionSizePercentBps
+        );
+
+        // Open LONG position
+        vm.startPrank(user1);
+        projectToken.mint(user1, positionAmount);
+        projectToken.approve(address(positionManager), positionAmount);
+        uint64 positionId = positionManager.openPosition(
+            address(projectToken),
+            positionAmount,
+            LEVERAGE_5X,
+            1, // LONG
+            0,
+            block.timestamp + 3600,
+            ""
+        );
+        vm.stopPrank();
+
+        // Check exposure before close
+        (uint256 longBefore, , , , , ) = assetVault.getDirectionalExposure();
+        uint256 expectedExposure = positionAmount * LEVERAGE_5X;
+        assertEq(longBefore, expectedExposure, "Long exposure should be set");
+
+        // Wait and close position
+        vm.warp(block.timestamp + 61);
+        mockAdapter.setMockTimestamp(block.timestamp);
+
+        vm.prank(user1);
+        positionManager.closePosition(positionId, block.timestamp + 3600, 0, "");
+
+        // Check exposure after close
+        (uint256 longAfter, , , , , ) = assetVault.getDirectionalExposure();
+        assertEq(longAfter, 0, "Long exposure should be cleared after close");
+    }
+
+    // ========================================================================
     // ERROR HANDLING TESTS
     // ========================================================================
 

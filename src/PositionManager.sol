@@ -370,8 +370,7 @@ contract PositionManager is
         uint256 positionSize = amount * leverage;
 
         // Check risk limits - get vault address and call AssetVault directly
-
-        (bool canOpen,) = IAssetVault(vaultAddress).checkPositionRisk(positionSize, leverage);
+        (bool canOpen,) = IAssetVault(vaultAddress).checkPositionRisk(positionSize, leverage, direction);
 
         if (!canOpen) revert RiskLimitExceeded();
 
@@ -383,7 +382,7 @@ contract PositionManager is
         IERC20(projectToken).approve(vaultManager, amount);
 
         IVaultManager(vaultManager).depositFromBet(
-            projectToken, positionId, amount, positionSize, false
+            projectToken, positionId, amount, positionSize, false, direction
         ); // false = opening new position
 
         PositionLib.Position storage pos = positions[positionId];
@@ -639,7 +638,8 @@ contract PositionManager is
                 positionId,
                 marginAmount,
                 0, // No position size increase
-                true // true = adding margin
+                true, // true = adding margin
+                pos.direction // Pass position direction
             );
         }
 
@@ -956,7 +956,8 @@ contract PositionManager is
                 pos.amount,
                 vaultPnL,
                 fee,
-                pos.positionSize
+                pos.positionSize,
+                pos.direction // Pass position direction
             );
         }
 

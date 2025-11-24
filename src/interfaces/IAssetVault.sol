@@ -81,12 +81,14 @@ interface IAssetVault {
      * @param amount Collateral amount in project tokens
      * @param positionSize Position size
      * @param isMarginAdd True if adding margin to existing position, false if opening new position
+     * @param direction Position direction (1 = LONG, 2 = SHORT)
      */
     function depositFromBet(
         uint64 positionId,
         uint256 amount,
         uint256 positionSize,
-        bool isMarginAdd
+        bool isMarginAdd,
+        uint8 direction
     ) external payable;
 
     /**
@@ -104,13 +106,15 @@ interface IAssetVault {
      * @param vaultPnL Vault P&L
      * @param fee Fee collected
      * @param positionSize Position size
+     * @param direction Position direction (1 = LONG, 2 = SHORT)
      */
     function updateVaultPnL(
         uint64 positionId,
         uint256 collateral,
         int256 vaultPnL,
         uint256 fee,
-        uint256 positionSize
+        uint256 positionSize,
+        uint8 direction
     ) external;
 
     function updateVaultParams(
@@ -123,10 +127,11 @@ interface IAssetVault {
      * @notice Check position risk
      * @param positionSize Position size
      * @param leverage Leverage multiplier
+     * @param direction Position direction (1 = LONG, 2 = SHORT)
      * @return canOpen Whether position can be opened
      * @return reason Reason if cannot open
      */
-    function checkPositionRisk(uint256 positionSize, uint8 leverage)
+    function checkPositionRisk(uint256 positionSize, uint8 leverage, uint8 direction)
         external
         view
         returns (bool canOpen, string memory reason);
@@ -410,4 +415,53 @@ interface IAssetVault {
      * @return queue Array of position IDs in FIFO order
      */
     function getPendingPayoutQueue() external view returns (uint64[] memory queue);
+
+    // ========================================================================
+    // DIRECTIONAL EXPOSURE FUNCTIONS
+    // ========================================================================
+
+    /**
+     * @notice Set maximum directional exposure cap
+     * @param maxDirectionalExposureBps New max directional exposure in basis points (e.g., 5000 = 50%)
+     */
+    function setMaxDirectionalExposure(uint16 maxDirectionalExposureBps) external;
+
+    /**
+     * @notice Get current directional exposure stats
+     * @return longExposure Total LONG exposure
+     * @return shortExposure Total SHORT exposure
+     * @return netExposure Net exposure (|Long OI - Short OI|)
+     * @return maxExposure Maximum allowed directional exposure (based on TVL)
+     * @return netUtilization Net exposure utilization in basis points (netExposure / maxExposure * 10000)
+     * @return isLongBias True if long bias (longExposure > shortExposure), false if short bias
+     */
+    function getDirectionalExposure()
+        external
+        view
+        returns (
+            uint256 longExposure,
+            uint256 shortExposure,
+            uint256 netExposure,
+            uint256 maxExposure,
+            uint256 netUtilization,
+            bool isLongBias
+        );
+
+    /**
+     * @notice Get total LONG exposure
+     * @return Total LONG position exposure
+     */
+    function totalLongExposure() external view returns (uint256);
+
+    /**
+     * @notice Get total SHORT exposure
+     * @return Total SHORT position exposure
+     */
+    function totalShortExposure() external view returns (uint256);
+
+    /**
+     * @notice Get max directional exposure in basis points
+     * @return Max directional exposure cap (e.g., 5000 = 50%)
+     */
+    function maxDirectionalExposureBps() external view returns (uint16);
 }

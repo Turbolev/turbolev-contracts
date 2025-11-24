@@ -39,6 +39,6 @@ contract VaultManagerTest is BaseTest {
 
     function test_Version_ReturnsCorrectVersion() public {
         string memory ver = vaultManager.version();
-        assertEq(ver, "1.0.0-vault-manager", "Version should match");
+        assertEq(ver, "2.0.0-with-governance", "Version should match");
     }
 }
