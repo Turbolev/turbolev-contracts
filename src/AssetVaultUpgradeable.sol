@@ -86,6 +86,25 @@ contract AssetVaultUpgradeable is
     uint16 public maxDirectionalExposureBps;
 
     // ========================================================================
+    // TOTAL OPEN INTEREST CAP CONTROL
+    // ========================================================================
+
+    /// @notice Risk multiplier for total OI cap in basis points (1.5x = 15000, 3x = 30000)
+    uint16 public totalOIRiskMultiplierBps;
+
+    /// @notice TVL tiers for dynamic risk multiplier (in token amount)
+    /// @dev tier1 < tier2 < tier3, multiplier increases with tier
+    uint256 public tier1Threshold; // Small vaults
+    uint256 public tier2Threshold; // Medium vaults
+    uint256 public tier3Threshold; // Large vaults
+
+    /// @notice Risk multipliers for each tier (in basis points)
+    uint16 public tier1MultiplierBps; // Default: 15000 (1.5x)
+    uint16 public tier2MultiplierBps; // Default: 20000 (2.0x)
+    uint16 public tier3MultiplierBps; // Default: 25000 (2.5x)
+    uint16 public tier4MultiplierBps; // Default: 30000 (3.0x) - for TVL >= tier3
+
+    // ========================================================================
     // NEW STATE VARIABLES FOR UPGRADE
     // ========================================================================
 
@@ -102,7 +121,7 @@ contract AssetVaultUpgradeable is
     // STORAGE GAP
     // ========================================================================
 
-    uint256[41] private __gap;
+    uint256[32] private __gap; // Reduced from 41 to 32 (added 9 slots above)
 
     // ========================================================================
     // STRUCTS (copy từ AssetVault)
@@ -168,6 +187,11 @@ contract AssetVaultUpgradeable is
     uint256 public constant DEFAULT_CLOSE_POSITION_FEE_BPS = 5; // 0.05%
     uint256 public constant DEFAULT_MAX_DIRECTIONAL_EXPOSURE_BPS = 5000; // 50% of TVL
     uint256 public constant DEFAULT_MAX_POSITION_SIZE_PERCENT_BPS = 3000;
+    uint256 public constant DEFAULT_TOTAL_OI_RISK_MULTIPLIER_BPS = 20000; // 2.0x default
+    uint256 public constant DEFAULT_TIER1_MULTIPLIER_BPS = 15000; // 1.5x for small vaults
+    uint256 public constant DEFAULT_TIER2_MULTIPLIER_BPS = 20000; // 2.0x for medium vaults
+    uint256 public constant DEFAULT_TIER3_MULTIPLIER_BPS = 25000; // 2.5x for large vaults
+    uint256 public constant DEFAULT_TIER4_MULTIPLIER_BPS = 30000; // 3.0x for very large vaults
     uint256 public constant BASIS_POINTS = 10_000;
     uint256 public constant INITIAL_SHARE_MULTIPLIER = 1e18;
     uint256 public constant MAX_PAYOUTS_PER_TX = 50;
@@ -349,6 +373,18 @@ contract AssetVaultUpgradeable is
         address indexed oldTreasury,
         address indexed newTreasury
     );
+    event TotalOIRiskMultiplierUpdated(uint16 oldBps, uint16 newBps);
+    event TotalOITierThresholdsUpdated(
+        uint256 tier1,
+        uint256 tier2,
+        uint256 tier3
+    );
+    event TotalOITierMultipliersUpdated(
+        uint16 tier1Bps,
+        uint16 tier2Bps,
+        uint16 tier3Bps,
+        uint16 tier4Bps
+    );
 
     // ========================================================================
     // ERRORS
@@ -378,6 +414,7 @@ contract AssetVaultUpgradeable is
     error NativeTokenNotAllowed();
     error UpgradeNotOptedIn();
     error OnlyUpgradeManager();
+    error TotalOICapExceeded();
 
     // ========================================================================
     // MODIFIERS
@@ -483,6 +520,21 @@ contract AssetVaultUpgradeable is
         maxDirectionalExposureBps = uint16(
             DEFAULT_MAX_DIRECTIONAL_EXPOSURE_BPS
         ); // 50% TVL cap
+
+        // Initialize Total OI cap with default multiplier (2.0x)
+        totalOIRiskMultiplierBps = uint16(DEFAULT_TOTAL_OI_RISK_MULTIPLIER_BPS);
+
+        // Initialize tier multipliers (1.5x, 2.0x, 2.5x, 3.0x)
+        tier1MultiplierBps = uint16(DEFAULT_TIER1_MULTIPLIER_BPS);
+        tier2MultiplierBps = uint16(DEFAULT_TIER2_MULTIPLIER_BPS);
+        tier3MultiplierBps = uint16(DEFAULT_TIER3_MULTIPLIER_BPS);
+        tier4MultiplierBps = uint16(DEFAULT_TIER4_MULTIPLIER_BPS);
+
+        // Tier thresholds will be set by admin after deployment based on token decimals
+        // Default: 0 (disabled, use fixed totalOIRiskMultiplierBps)
+        tier1Threshold = 0;
+        tier2Threshold = 0;
+        tier3Threshold = 0;
 
         // Default: opt-in upgrade disabled (vault owner phải enable)
         optInUpgrade = false;
@@ -1180,7 +1232,64 @@ contract AssetVaultUpgradeable is
             }
         }
 
+        // ========================================================================
+        // CONTROL LEVER 2: TOTAL OPEN INTEREST CAP
+        // ========================================================================
+        // Check total OI cap: Max Total OI = TVL × Risk Multiplier
+        // Risk multiplier ranges from 1.5x to 3x based on vault size
+
+        if (totalLiquidity > 0) {
+            // Calculate current risk multiplier based on vault size (TVL tiers)
+            uint16 currentMultiplier = _calculateRiskMultiplier(totalLiquidity);
+
+            // Calculate maximum allowed total OI
+            uint256 maxTotalOI = (totalLiquidity * currentMultiplier) /
+                BASIS_POINTS;
+
+            // Calculate current total OI (sum of all open positions)
+            uint256 currentTotalOI = totalLongExposure + totalShortExposure;
+
+            // Calculate new total OI after adding this position
+            uint256 newTotalOI = currentTotalOI + positionSize;
+
+            // Check if new total OI exceeds maximum
+            if (newTotalOI > maxTotalOI) {
+                return (false, "Exceeds maximum total open interest cap");
+            }
+        }
+
         return (true, "");
+    }
+
+    /**
+     * @notice Calculate risk multiplier based on vault TVL (tiered system)
+     * @param tvl Current total value locked in vault
+     * @return multiplierBps Risk multiplier in basis points (1.5x = 15000, 3x = 30000)
+     * @dev If tier thresholds are not set (all 0), returns fixed totalOIRiskMultiplierBps
+     *      Otherwise, returns tiered multiplier:
+     *      - TVL < tier1: tier1MultiplierBps (1.5x default)
+     *      - tier1 <= TVL < tier2: tier2MultiplierBps (2.0x default)
+     *      - tier2 <= TVL < tier3: tier3MultiplierBps (2.5x default)
+     *      - TVL >= tier3: tier4MultiplierBps (3.0x default)
+     */
+    function _calculateRiskMultiplier(
+        uint256 tvl
+    ) internal view returns (uint16 multiplierBps) {
+        // If tier system not configured (all thresholds are 0), use fixed multiplier
+        if (tier1Threshold == 0 && tier2Threshold == 0 && tier3Threshold == 0) {
+            return totalOIRiskMultiplierBps;
+        }
+
+        // Tiered system: larger vaults get higher multipliers
+        if (tvl < tier1Threshold) {
+            return tier1MultiplierBps; // Smallest: 1.5x
+        } else if (tvl < tier2Threshold) {
+            return tier2MultiplierBps; // Medium: 2.0x
+        } else if (tvl < tier3Threshold) {
+            return tier3MultiplierBps; // Large: 2.5x
+        } else {
+            return tier4MultiplierBps; // Largest: 3.0x
+        }
     }
 
     // ========================================================================
@@ -2262,6 +2371,381 @@ contract AssetVaultUpgradeable is
             maxExposure,
             netUtilization,
             isLongBias
+        );
+    }
+
+    // ========================================================================
+    // TOTAL OPEN INTEREST CAP MANAGEMENT
+    // ========================================================================
+
+    /**
+     * @notice Set fixed total OI risk multiplier (used when tier system is disabled)
+     * @param _multiplierBps Risk multiplier in basis points (15000 = 1.5x, 30000 = 3.0x)
+     * @dev Only admin can update. Max 5.0x (50000 bps) for safety
+     */
+    function setTotalOIRiskMultiplier(
+        uint16 _multiplierBps
+    ) external onlyVaultManagerOrHelper {
+        if (_multiplierBps < 10000 || _multiplierBps > 50000) {
+            revert InvalidParameters(); // Min 1.0x, Max 5.0x
+        }
+        uint16 oldBps = totalOIRiskMultiplierBps;
+        totalOIRiskMultiplierBps = _multiplierBps;
+        emit TotalOIRiskMultiplierUpdated(oldBps, _multiplierBps);
+    }
+
+    /**
+     * @notice Set TVL tier thresholds for dynamic risk multiplier
+     * @param _tier1 Threshold for tier 1 (small vaults) in token amount
+     * @param _tier2 Threshold for tier 2 (medium vaults) in token amount
+     * @param _tier3 Threshold for tier 3 (large vaults) in token amount
+     * @dev Set all to 0 to disable tier system and use fixed multiplier
+     *      Thresholds must be in ascending order: tier1 < tier2 < tier3
+     */
+    function setTotalOITierThresholds(
+        uint256 _tier1,
+        uint256 _tier2,
+        uint256 _tier3
+    ) external onlyVaultManagerOrHelper {
+        // Allow all 0 to disable tier system
+        if (_tier1 == 0 && _tier2 == 0 && _tier3 == 0) {
+            tier1Threshold = 0;
+            tier2Threshold = 0;
+            tier3Threshold = 0;
+            emit TotalOITierThresholdsUpdated(0, 0, 0);
+            return;
+        }
+
+        // If not all 0, must be in ascending order
+        if (_tier1 >= _tier2 || _tier2 >= _tier3) {
+            revert InvalidParameters();
+        }
+
+        tier1Threshold = _tier1;
+        tier2Threshold = _tier2;
+        tier3Threshold = _tier3;
+
+        emit TotalOITierThresholdsUpdated(_tier1, _tier2, _tier3);
+    }
+
+    /**
+     * @notice Set risk multipliers for each TVL tier
+     * @param _tier1Bps Multiplier for tier 1 (small vaults) in bps
+     * @param _tier2Bps Multiplier for tier 2 (medium vaults) in bps
+     * @param _tier3Bps Multiplier for tier 3 (large vaults) in bps
+     * @param _tier4Bps Multiplier for tier 4 (very large vaults) in bps
+     * @dev Multipliers should be in ascending order for larger vaults to get higher caps
+     *      Min 1.0x (10000), Max 5.0x (50000) for safety
+     */
+    function setTotalOITierMultipliers(
+        uint16 _tier1Bps,
+        uint16 _tier2Bps,
+        uint16 _tier3Bps,
+        uint16 _tier4Bps
+    ) external onlyVaultManagerOrHelper {
+        // Validate range (1.0x to 5.0x)
+        if (
+            _tier1Bps < 10000 ||
+            _tier1Bps > 50000 ||
+            _tier2Bps < 10000 ||
+            _tier2Bps > 50000 ||
+            _tier3Bps < 10000 ||
+            _tier3Bps > 50000 ||
+            _tier4Bps < 10000 ||
+            _tier4Bps > 50000
+        ) {
+            revert InvalidParameters();
+        }
+
+        // Validate ascending order (larger vaults should have higher or equal multipliers)
+        if (
+            _tier1Bps > _tier2Bps ||
+            _tier2Bps > _tier3Bps ||
+            _tier3Bps > _tier4Bps
+        ) {
+            revert InvalidParameters();
+        }
+
+        tier1MultiplierBps = _tier1Bps;
+        tier2MultiplierBps = _tier2Bps;
+        tier3MultiplierBps = _tier3Bps;
+        tier4MultiplierBps = _tier4Bps;
+
+        emit TotalOITierMultipliersUpdated(
+            _tier1Bps,
+            _tier2Bps,
+            _tier3Bps,
+            _tier4Bps
+        );
+    }
+
+    /**
+     * @notice Get total OI cap configuration and current status
+     * @return currentMultiplierBps Current active risk multiplier based on vault TVL
+     * @return maxTotalOI Maximum allowed total open interest
+     * @return currentTotalOI Current total open interest (long + short)
+     * @return utilizationBps Total OI utilization in basis points (current / max * 10000)
+     * @return canOpenMore Whether vault can accept more positions
+     */
+    function getTotalOICapStatus()
+        external
+        view
+        returns (
+            uint16 currentMultiplierBps,
+            uint256 maxTotalOI,
+            uint256 currentTotalOI,
+            uint256 utilizationBps,
+            bool canOpenMore
+        )
+    {
+        uint256 tvl = vaultInfo.totalLiquidity;
+        currentMultiplierBps = _calculateRiskMultiplier(tvl);
+
+        if (tvl > 0) {
+            maxTotalOI = (tvl * currentMultiplierBps) / BASIS_POINTS;
+            currentTotalOI = totalLongExposure + totalShortExposure;
+
+            if (maxTotalOI > 0) {
+                utilizationBps = (currentTotalOI * BASIS_POINTS) / maxTotalOI;
+            } else {
+                utilizationBps = 0;
+            }
+
+            canOpenMore = currentTotalOI < maxTotalOI;
+        } else {
+            maxTotalOI = 0;
+            currentTotalOI = 0;
+            utilizationBps = 0;
+            canOpenMore = false;
+        }
+
+        return (
+            currentMultiplierBps,
+            maxTotalOI,
+            currentTotalOI,
+            utilizationBps,
+            canOpenMore
+        );
+    }
+
+    /**
+     * @notice Get total OI tier configuration
+     * @return fixedMultiplierBps Fixed multiplier used when tier system disabled
+     * @return _tier1Threshold TVL threshold for tier 1
+     * @return _tier2Threshold TVL threshold for tier 2
+     * @return _tier3Threshold TVL threshold for tier 3
+     * @return _tier1MultiplierBps Multiplier for tier 1
+     * @return _tier2MultiplierBps Multiplier for tier 2
+     * @return _tier3MultiplierBps Multiplier for tier 3
+     * @return _tier4MultiplierBps Multiplier for tier 4
+     */
+    function getTotalOITierConfig()
+        external
+        view
+        returns (
+            uint16 fixedMultiplierBps,
+            uint256 _tier1Threshold,
+            uint256 _tier2Threshold,
+            uint256 _tier3Threshold,
+            uint16 _tier1MultiplierBps,
+            uint16 _tier2MultiplierBps,
+            uint16 _tier3MultiplierBps,
+            uint16 _tier4MultiplierBps
+        )
+    {
+        return (
+            totalOIRiskMultiplierBps,
+            tier1Threshold,
+            tier2Threshold,
+            tier3Threshold,
+            tier1MultiplierBps,
+            tier2MultiplierBps,
+            tier3MultiplierBps,
+            tier4MultiplierBps
+        );
+    }
+
+    /**
+     * @notice Check if a new position can be opened based on Total OI Cap
+     * @param positionSize Size of the position to open
+     * @return canOpen Whether the position can be opened
+     * @return maxTotalOI Maximum total OI allowed
+     * @return currentTotalOI Current total OI
+     * @return remainingCapacity Remaining capacity before hitting cap
+     * @return reason Reason if cannot open (empty if can open)
+     */
+    function checkTotalOICap(
+        uint256 positionSize
+    )
+        external
+        view
+        returns (
+            bool canOpen,
+            uint256 maxTotalOI,
+            uint256 currentTotalOI,
+            uint256 remainingCapacity,
+            string memory reason
+        )
+    {
+        uint256 tvl = vaultInfo.totalLiquidity;
+
+        if (tvl == 0) {
+            return (false, 0, 0, 0, "Vault has no liquidity");
+        }
+
+        // Calculate current risk multiplier
+        uint16 currentMultiplier = _calculateRiskMultiplier(tvl);
+
+        // Calculate maximum allowed total OI
+        maxTotalOI = (tvl * currentMultiplier) / BASIS_POINTS;
+
+        // Calculate current total OI
+        currentTotalOI = totalLongExposure + totalShortExposure;
+
+        // Calculate new total OI after adding this position
+        uint256 newTotalOI = currentTotalOI + positionSize;
+
+        // Check if new total OI exceeds maximum
+        if (newTotalOI > maxTotalOI) {
+            uint256 available = maxTotalOI > currentTotalOI
+                ? maxTotalOI - currentTotalOI
+                : 0;
+            return (
+                false,
+                maxTotalOI,
+                currentTotalOI,
+                available,
+                "Exceeds maximum total open interest cap"
+            );
+        }
+
+        // Calculate remaining capacity
+        remainingCapacity = maxTotalOI - newTotalOI;
+
+        return (true, maxTotalOI, currentTotalOI, remainingCapacity, "");
+    }
+
+    /**
+     * @notice Simulate what would happen if vault TVL changes
+     * @param newTVL New TVL to simulate
+     * @return newMultiplierBps New risk multiplier that would apply
+     * @return newMaxTotalOI New maximum total OI that would be allowed
+     * @return currentTotalOI Current total OI
+     * @return wouldExceedCap Whether current positions would exceed new cap
+     */
+    function simulateTVLChange(
+        uint256 newTVL
+    )
+        external
+        view
+        returns (
+            uint16 newMultiplierBps,
+            uint256 newMaxTotalOI,
+            uint256 currentTotalOI,
+            bool wouldExceedCap
+        )
+    {
+        // Calculate what multiplier would apply with new TVL
+        newMultiplierBps = _calculateRiskMultiplier(newTVL);
+
+        // Calculate new max total OI
+        if (newTVL > 0) {
+            newMaxTotalOI = (newTVL * newMultiplierBps) / BASIS_POINTS;
+        } else {
+            newMaxTotalOI = 0;
+        }
+
+        // Get current total OI
+        currentTotalOI = totalLongExposure + totalShortExposure;
+
+        // Check if current positions would exceed new cap
+        wouldExceedCap = currentTotalOI > newMaxTotalOI;
+
+        return (
+            newMultiplierBps,
+            newMaxTotalOI,
+            currentTotalOI,
+            wouldExceedCap
+        );
+    }
+
+    /**
+     * @notice Get detailed breakdown of OI utilization
+     * @return tvl Current vault TVL
+     * @return longOI Total long open interest
+     * @return shortOI Total short open interest
+     * @return totalOI Total open interest (long + short)
+     * @return maxOI Maximum allowed total OI
+     * @return utilizationBps Utilization in basis points (0-10000)
+     * @return remainingCapacity Remaining capacity before hitting cap
+     * @return currentTier Current TVL tier (0-4, 0 = fixed multiplier)
+     * @return currentMultiplierBps Current risk multiplier
+     */
+    function getTotalOIBreakdown()
+        external
+        view
+        returns (
+            uint256 tvl,
+            uint256 longOI,
+            uint256 shortOI,
+            uint256 totalOI,
+            uint256 maxOI,
+            uint256 utilizationBps,
+            uint256 remainingCapacity,
+            uint8 currentTier,
+            uint16 currentMultiplierBps
+        )
+    {
+        tvl = vaultInfo.totalLiquidity;
+        longOI = totalLongExposure;
+        shortOI = totalShortExposure;
+        totalOI = longOI + shortOI;
+
+        currentMultiplierBps = _calculateRiskMultiplier(tvl);
+
+        if (tvl > 0) {
+            maxOI = (tvl * currentMultiplierBps) / BASIS_POINTS;
+
+            if (maxOI > 0) {
+                utilizationBps = (totalOI * BASIS_POINTS) / maxOI;
+            } else {
+                utilizationBps = 0;
+            }
+
+            if (totalOI < maxOI) {
+                remainingCapacity = maxOI - totalOI;
+            } else {
+                remainingCapacity = 0;
+            }
+        } else {
+            maxOI = 0;
+            utilizationBps = 0;
+            remainingCapacity = 0;
+        }
+
+        // Determine current tier
+        if (tier1Threshold == 0 && tier2Threshold == 0 && tier3Threshold == 0) {
+            currentTier = 0; // Fixed multiplier mode
+        } else if (tvl < tier1Threshold) {
+            currentTier = 1;
+        } else if (tvl < tier2Threshold) {
+            currentTier = 2;
+        } else if (tvl < tier3Threshold) {
+            currentTier = 3;
+        } else {
+            currentTier = 4;
+        }
+
+        return (
+            tvl,
+            longOI,
+            shortOI,
+            totalOI,
+            maxOI,
+            utilizationBps,
+            remainingCapacity,
+            currentTier,
+            currentMultiplierBps
         );
     }
 
