@@ -2,6 +2,7 @@
 pragma solidity ^0.8.22;
 
 import "./BaseTest.sol";
+import "../src/libraries/VaultRiskLib.sol";
 
 /**
  * @title AssetVaultTest
@@ -14,14 +15,14 @@ contract AssetVaultTest is BaseTest {
     // ========================================================================
 
     function test_GetVaultInfo_Success() public {
-        AssetVault.VaultInfo memory info = assetVault.getVaultInfo();
+        AssetVaultUpgradeable.VaultInfo memory info = assetVault.getVaultInfo();
 
         // Vault may or may not have initial liquidity depending on setup
         assertGt(info.createdAt, 0, "Should have creation time");
     }
 
     function test_GetVaultParams_Success() public {
-        AssetVault.VaultParams memory params = assetVault.getVaultParams();
+        AssetVaultUpgradeable.VaultParams memory params = assetVault.getVaultParams();
 
         assertGt(params.minBetAmount, 0, "Min bet should be > 0");
         assertGt(params.maxBetAmount, 0, "Max bet should be > 0");
@@ -36,7 +37,7 @@ contract AssetVaultTest is BaseTest {
         assetVault.addLiquidity(amount);
         vm.stopPrank();
 
-        AssetVault.LPPosition memory position = assetVault.getLPPosition(user1);
+        AssetVaultUpgradeable.LPPosition memory position = assetVault.getLPPosition(user1);
 
         assertEq(position.user, user1, "User should match");
         assertGt(position.shares, 0, "Should have shares");
@@ -103,7 +104,7 @@ contract AssetVaultTest is BaseTest {
             1000 // maxPositionSizePercentBps
         );
 
-        AssetVault.VaultParams memory params = assetVault.getVaultParams();
+        AssetVaultUpgradeable.VaultParams memory params = assetVault.getVaultParams();
         assertEq(params.maxPositionSizePercentBps, 1000, "Max position size should be updated");
         assertEq(params.minBetAmount, 0.01 ether, "Min bet should be updated");
     }
@@ -115,7 +116,7 @@ contract AssetVaultTest is BaseTest {
     }
 
     function test_SetPositionManager_RevertsOnZeroAddress() public {
-        vm.expectRevert(abi.encodeWithSelector(AssetVault.InvalidAddress.selector));
+        vm.expectRevert(abi.encodeWithSelector(AssetVaultUpgradeable.InvalidAddress.selector));
         assetVault.setPositionManager(address(0));
     }
 
@@ -123,7 +124,7 @@ contract AssetVaultTest is BaseTest {
         uint256 newThreshold = 500 ether;
         assetVault.setGraduationThreshold(newThreshold);
 
-        AssetVault.VaultInfo memory info = assetVault.getVaultInfo();
+        AssetVaultUpgradeable.VaultInfo memory info = assetVault.getVaultInfo();
         assertEq(info.graduationThreshold, newThreshold, "Threshold should be updated");
     }
 
@@ -174,8 +175,8 @@ contract AssetVaultTest is BaseTest {
         assetVault.setMaxDirectionalExposure(newMaxBps);
 
         // Verify it was updated
-        (, , , uint256 maxExposure, , ) = assetVault.getDirectionalExposure();
-        
+        (,,, uint256 maxExposure,,) = assetVault.getDirectionalExposure();
+
         // Add liquidity to calculate expected max
         uint256 liquidityAmount = 1000 ether;
         vm.startPrank(user1);
@@ -185,20 +186,20 @@ contract AssetVaultTest is BaseTest {
         vm.stopPrank();
 
         // Check max exposure = 30% of liquidity
-        (, , , uint256 newMaxExposure, , ) = assetVault.getDirectionalExposure();
-        uint256 expectedMax = (liquidityAmount * newMaxBps) / 10000;
+        (,,, uint256 newMaxExposure,,) = assetVault.getDirectionalExposure();
+        uint256 expectedMax = (liquidityAmount * newMaxBps) / 10_000;
         assertEq(newMaxExposure, expectedMax, "Max exposure should be 30% of TVL");
     }
 
     function test_SetMaxDirectionalExposure_RevertsOnInvalid() public {
         // Try to set > 100%
         vm.expectRevert();
-        assetVault.setMaxDirectionalExposure(10001);
+        assetVault.setMaxDirectionalExposure(10_001);
     }
 
     function test_CheckPositionRisk_DirectionalExposure() public {
         // Add liquidity first
-        uint256 liquidityAmount = 10000 ether;
+        uint256 liquidityAmount = 10_000 ether;
         vm.startPrank(user1);
         projectToken.mint(user1, liquidityAmount);
         projectToken.approve(address(assetVault), liquidityAmount);
@@ -218,31 +219,27 @@ contract AssetVaultTest is BaseTest {
 
         // Test position within limit (50% of 10000 = 5000)
         // Position size = 1500 ether, collateral = 300 ether (within maxBet)
-        (bool canOpen, string memory reason) = assetVault.checkPositionRisk(
+        // Should not revert
+        assetVault.checkPositionRisk(
             1500 ether, // position size
             5, // leverage (300 * 5 = 1500)
             1 // LONG
         );
-        assertTrue(canOpen, string(abi.encodePacked("Should allow position within exposure limit: ", reason)));
 
         // Test position exceeding directional exposure limit
         // Position size = 6000 ether (exceeds 50% TVL = 5000)
-        (bool cannotOpen, string memory rejectReason) = assetVault.checkPositionRisk(
+        // Should revert with ExceedsDirectionalExposure or ExceedsTotalOICap
+        vm.expectRevert();
+        assetVault.checkPositionRisk(
             6000 ether, // position size
             5, // leverage
             1 // LONG
-        );
-        assertFalse(cannotOpen, "Should reject position exceeding exposure limit");
-        // Check reason contains exposure message
-        assertTrue(
-            bytes(rejectReason).length > 0,
-            "Should provide rejection reason"
         );
     }
 
     function test_DirectionalExposure_BalancedPositions() public {
         // Add liquidity
-        uint256 liquidityAmount = 10000 ether;
+        uint256 liquidityAmount = 10_000 ether;
         vm.startPrank(user1);
         projectToken.mint(user1, liquidityAmount);
         projectToken.approve(address(assetVault), liquidityAmount);
@@ -262,12 +259,10 @@ contract AssetVaultTest is BaseTest {
 
         // Simulate balanced positions (1500 LONG, 1500 SHORT)
         // Net exposure should be 0
-        
-        // Check that equal long and short positions would be acceptable
-        (bool canOpenLong, ) = assetVault.checkPositionRisk(1500 ether, 5, 1);
-        assertTrue(canOpenLong, "Should allow LONG position");
 
-        (bool canOpenShort, ) = assetVault.checkPositionRisk(1500 ether, 5, 2);
-        assertTrue(canOpenShort, "Should allow SHORT position");
+        // Check that equal long and short positions would be acceptable
+        // Both should not revert
+        assetVault.checkPositionRisk(1500 ether, 5, 1); // LONG
+        assetVault.checkPositionRisk(1500 ether, 5, 2); // SHORT
     }
 }

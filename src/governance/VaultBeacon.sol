@@ -34,20 +34,11 @@ contract VaultBeacon is UpgradeableBeacon {
     // EVENTS
     // ========================================================================
 
-    event BeaconUpgraded(
-        address indexed oldImplementation,
-        address indexed newImplementation
-    );
+    event BeaconUpgraded(address indexed oldImplementation, address indexed newImplementation);
 
-    event VaultImplementationSet(
-        address indexed vault,
-        address indexed implementation
-    );
+    event VaultImplementationSet(address indexed vault, address indexed implementation);
 
-    event OptInUpgradeManagerUpdated(
-        address indexed oldManager,
-        address indexed newManager
-    );
+    event OptInUpgradeManagerUpdated(address indexed oldManager, address indexed newManager);
 
     event OptInEnforcementUpdated(bool enforced);
 
@@ -68,11 +59,9 @@ contract VaultBeacon is UpgradeableBeacon {
      * @param initialOwner Owner address (thường là Timelock)
      * @param _optInUpgradeManager OptInUpgradeManager address
      */
-    constructor(
-        address initialImplementation,
-        address initialOwner,
-        address _optInUpgradeManager
-    ) UpgradeableBeacon(initialImplementation, initialOwner) {
+    constructor(address initialImplementation, address initialOwner, address _optInUpgradeManager)
+        UpgradeableBeacon(initialImplementation, initialOwner)
+    {
         optInUpgradeManager = _optInUpgradeManager;
         enforceOptIn = true; // Default: enforce opt-in
     }
@@ -86,9 +75,7 @@ contract VaultBeacon is UpgradeableBeacon {
      * @param newImplementation New implementation address
      * @dev Chỉ vaults đã opt-in (hoặc emergency override) mới dùng implementation mới
      */
-    function upgradeTo(
-        address newImplementation
-    ) public virtual override onlyOwner {
+    function upgradeTo(address newImplementation) public virtual override onlyOwner {
         address oldImplementation = implementation();
         super.upgradeTo(newImplementation);
         emit BeaconUpgraded(oldImplementation, newImplementation);
@@ -100,10 +87,7 @@ contract VaultBeacon is UpgradeableBeacon {
      * @param implementation_ Custom implementation address
      * @dev Vault phải opt-in để set custom implementation
      */
-    function setVaultImplementation(
-        address vault,
-        address implementation_
-    ) external onlyOwner {
+    function setVaultImplementation(address vault, address implementation_) external onlyOwner {
         if (vault == address(0) || implementation_ == address(0)) {
             revert InvalidAddress();
         }
@@ -139,9 +123,7 @@ contract VaultBeacon is UpgradeableBeacon {
      * @dev Trả về custom implementation nếu có, otherwise trả về global implementation
      *      CHỈ trả về nếu vault đã opt-in (hoặc opt-in enforcement disabled)
      */
-    function implementation(
-        address vault
-    ) public view returns (address implementation_) {
+    function implementation(address vault) public view returns (address implementation_) {
         // Check opt-in if enforcement is enabled
         if (enforceOptIn && optInUpgradeManager != address(0)) {
             (bool success, bytes memory data) = optInUpgradeManager.staticcall(
@@ -177,9 +159,7 @@ contract VaultBeacon is UpgradeableBeacon {
      * @notice Update OptInUpgradeManager
      * @param _optInUpgradeManager New manager address
      */
-    function setOptInUpgradeManager(
-        address _optInUpgradeManager
-    ) external onlyOwner {
+    function setOptInUpgradeManager(address _optInUpgradeManager) external onlyOwner {
         address oldManager = optInUpgradeManager;
         optInUpgradeManager = _optInUpgradeManager;
 
@@ -205,9 +185,7 @@ contract VaultBeacon is UpgradeableBeacon {
      * @param vault Vault address
      * @return hasCustom True if has custom implementation
      */
-    function hasCustomImplementation(
-        address vault
-    ) external view returns (bool) {
+    function hasCustomImplementation(address vault) external view returns (bool) {
         return vaultImplementations[vault] != address(0);
     }
 }

@@ -50,4 +50,3 @@ interface IVaultBeacon {
      */
     function setOptInUpgradeManager(address manager) external;
 }
-

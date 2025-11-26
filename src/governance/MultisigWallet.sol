@@ -54,12 +54,7 @@ contract MultisigWallet {
     event OwnerAdded(address indexed owner);
     event OwnerRemoved(address indexed owner);
     event ThresholdUpdated(uint256 oldThreshold, uint256 newThreshold);
-    event TransactionSubmitted(
-        uint256 indexed txId,
-        address indexed to,
-        uint256 value,
-        bytes data
-    );
+    event TransactionSubmitted(uint256 indexed txId, address indexed to, uint256 value, bytes data);
     event TransactionConfirmed(uint256 indexed txId, address indexed owner);
     event TransactionRevoked(uint256 indexed txId, address indexed owner);
     event TransactionExecuted(uint256 indexed txId);
@@ -116,8 +111,9 @@ contract MultisigWallet {
      */
     constructor(address[] memory _owners, uint256 _threshold) {
         if (_owners.length == 0) revert InvalidOwner();
-        if (_threshold == 0 || _threshold > _owners.length)
+        if (_threshold == 0 || _threshold > _owners.length) {
             revert InvalidThreshold();
+        }
 
         for (uint256 i = 0; i < _owners.length; i++) {
             address owner = _owners[i];
@@ -150,20 +146,15 @@ contract MultisigWallet {
      * @param data Call data
      * @return txId Transaction ID
      */
-    function submitTransaction(
-        address to,
-        uint256 value,
-        bytes memory data
-    ) public onlyOwner returns (uint256 txId) {
+    function submitTransaction(address to, uint256 value, bytes memory data)
+        public
+        onlyOwner
+        returns (uint256 txId)
+    {
         txId = transactionCount;
 
-        transactions[txId] = Transaction({
-            to: to,
-            value: value,
-            data: data,
-            executed: false,
-            confirmationCount: 0
-        });
+        transactions[txId] =
+            Transaction({ to: to, value: value, data: data, executed: false, confirmationCount: 0 });
 
         transactionCount++;
 
@@ -179,9 +170,13 @@ contract MultisigWallet {
      * @notice Confirm một transaction
      * @param txId Transaction ID
      */
-    function confirmTransaction(
-        uint256 txId
-    ) public onlyOwner txExists(txId) notExecuted(txId) notConfirmed(txId) {
+    function confirmTransaction(uint256 txId)
+        public
+        onlyOwner
+        txExists(txId)
+        notExecuted(txId)
+        notConfirmed(txId)
+    {
         confirmations[txId][msg.sender] = true;
         transactions[txId].confirmationCount++;
 
@@ -197,9 +192,7 @@ contract MultisigWallet {
      * @notice Revoke confirmation
      * @param txId Transaction ID
      */
-    function revokeConfirmation(
-        uint256 txId
-    ) external onlyOwner txExists(txId) notExecuted(txId) {
+    function revokeConfirmation(uint256 txId) external onlyOwner txExists(txId) notExecuted(txId) {
         if (!confirmations[txId][msg.sender]) revert NotConfirmed();
 
         confirmations[txId][msg.sender] = false;
@@ -212,16 +205,14 @@ contract MultisigWallet {
      * @notice Execute một transaction đã được confirm đủ
      * @param txId Transaction ID
      */
-    function executeTransaction(
-        uint256 txId
-    ) public onlyOwner txExists(txId) notExecuted(txId) {
+    function executeTransaction(uint256 txId) public onlyOwner txExists(txId) notExecuted(txId) {
         Transaction storage txn = transactions[txId];
 
         if (txn.confirmationCount < threshold) revert TransactionNotConfirmed();
 
         txn.executed = true;
 
-        (bool success, ) = txn.to.call{value: txn.value}(txn.data);
+        (bool success,) = txn.to.call{ value: txn.value }(txn.data);
 
         if (success) {
             emit TransactionExecuted(txId);
@@ -287,8 +278,9 @@ contract MultisigWallet {
      */
     function changeThreshold(uint256 _threshold) external {
         if (msg.sender != address(this)) revert NotOwner();
-        if (_threshold == 0 || _threshold > owners.length)
+        if (_threshold == 0 || _threshold > owners.length) {
             revert InvalidThreshold();
+        }
 
         uint256 oldThreshold = threshold;
         threshold = _threshold;
@@ -312,21 +304,14 @@ contract MultisigWallet {
         uint256[] memory values,
         bytes[] memory dataArray
     ) external onlyOwner returns (uint256[] memory txIds) {
-        if (
-            destinations.length != values.length ||
-            destinations.length != dataArray.length
-        ) {
+        if (destinations.length != values.length || destinations.length != dataArray.length) {
             revert InvalidArrayLength();
         }
 
         txIds = new uint256[](destinations.length);
 
         for (uint256 i = 0; i < destinations.length; i++) {
-            txIds[i] = submitTransaction(
-                destinations[i],
-                values[i],
-                dataArray[i]
-            );
+            txIds[i] = submitTransaction(destinations[i], values[i], dataArray[i]);
         }
 
         return txIds;
@@ -354,9 +339,7 @@ contract MultisigWallet {
      * @notice Lấy số lượng confirmations của một transaction
      * @param txId Transaction ID
      */
-    function getConfirmationCount(
-        uint256 txId
-    ) external view returns (uint256) {
+    function getConfirmationCount(uint256 txId) external view returns (uint256) {
         return transactions[txId].confirmationCount;
     }
 
@@ -365,10 +348,7 @@ contract MultisigWallet {
      * @param txId Transaction ID
      * @param owner Owner address
      */
-    function isConfirmed(
-        uint256 txId,
-        address owner
-    ) external view returns (bool) {
+    function isConfirmed(uint256 txId, address owner) external view returns (bool) {
         return confirmations[txId][owner];
     }
 
@@ -376,9 +356,7 @@ contract MultisigWallet {
      * @notice Lấy thông tin transaction
      * @param txId Transaction ID
      */
-    function getTransaction(
-        uint256 txId
-    )
+    function getTransaction(uint256 txId)
         external
         view
         returns (
@@ -390,12 +368,6 @@ contract MultisigWallet {
         )
     {
         Transaction storage txn = transactions[txId];
-        return (
-            txn.to,
-            txn.value,
-            txn.data,
-            txn.executed,
-            txn.confirmationCount
-        );
+        return (txn.to, txn.value, txn.data, txn.executed, txn.confirmationCount);
     }
 }

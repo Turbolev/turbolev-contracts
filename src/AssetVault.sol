@@ -238,6 +238,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         CLOSE_POSITION, // Liquidity change from position closure
         BET_DEPOSIT, // Liquidity from bet collateral deposit
         PAYOUT_EXECUTION // Liquidity change from payout execution
+
     }
 
     // ========================================================================
@@ -272,17 +273,9 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         uint256 timestamp
     );
 
-    event CollateralDeposited(
-        uint256 amount,
-        uint256 positionSize,
-        uint256 timestamp
-    );
+    event CollateralDeposited(uint256 amount, uint256 positionSize, uint256 timestamp);
 
-    event PayoutExecuted(
-        address indexed user,
-        uint256 amount,
-        uint256 timestamp
-    );
+    event PayoutExecuted(address indexed user, uint256 amount, uint256 timestamp);
 
     event PayoutQueued(
         uint64 indexed positionId,
@@ -309,24 +302,14 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         uint256 timestamp
     );
 
-    event VaultParamsUpdated(
-        uint256 minBetAmount,
-        uint256 maxBetAmount,
-        uint256 timestamp
-    );
+    event VaultParamsUpdated(uint256 minBetAmount, uint256 maxBetAmount, uint256 timestamp);
 
     event StakingFeeCollected(
-        address indexed user,
-        uint256 fee,
-        uint256 netAmount,
-        uint256 timestamp
+        address indexed user, uint256 fee, uint256 netAmount, uint256 timestamp
     );
 
     event EarlyWithdrawalFeeApplied(
-        address indexed user,
-        uint256 fee,
-        uint256 remainingLockTime,
-        uint256 timestamp
+        address indexed user, uint256 fee, uint256 remainingLockTime, uint256 timestamp
     );
 
     event StakingFeeBpsUpdated(uint16 oldBps, uint16 newBps);
@@ -338,10 +321,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         uint256 thresholdUSD,
         uint256 timestamp
     );
-    event GraduationThresholdUpdated(
-        uint256 oldThreshold,
-        uint256 newThreshold
-    );
+    event GraduationThresholdUpdated(uint256 oldThreshold, uint256 newThreshold);
     event TradingEnabledUpdated(bool enabled);
 
     event DailyRewardFinalized(
@@ -353,24 +333,14 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
     );
 
     event RewardsClaimed(
-        address indexed user,
-        uint256 amount,
-        uint256 daysProcessed,
-        uint256 timestamp
+        address indexed user, uint256 amount, uint256 daysProcessed, uint256 timestamp
     );
 
     event RewardsCapped(
-        address indexed user,
-        uint256 requestedAmount,
-        uint256 actualAmount,
-        uint256 timestamp
+        address indexed user, uint256 requestedAmount, uint256 actualAmount, uint256 timestamp
     );
 
-    event PayoutQueueCleaned(
-        uint256 itemsRemoved,
-        uint256 newLength,
-        uint256 timestamp
-    );
+    event PayoutQueueCleaned(uint256 itemsRemoved, uint256 newLength, uint256 timestamp);
 
     event PayoutFailed(
         uint64 indexed positionId,
@@ -389,16 +359,10 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
     );
 
     event FeesWithdrawn(
-        address indexed recipient,
-        uint256 amount,
-        uint256 remainingFees,
-        uint256 timestamp
+        address indexed recipient, uint256 amount, uint256 remainingFees, uint256 timestamp
     );
 
-    event TreasuryUpdated(
-        address indexed oldTreasury,
-        address indexed newTreasury
-    );
+    event TreasuryUpdated(address indexed oldTreasury, address indexed newTreasury);
 
     // ========================================================================
     // ERRORS
@@ -446,11 +410,8 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
     }
 
     modifier onlyVaultManagerOrHelper() {
-        if (
-            msg.sender != vaultManager &&
-            msg.sender != vaultManagerHelper &&
-            msg.sender != owner()
-        ) {
+        if (msg.sender != vaultManager && msg.sender != vaultManagerHelper && msg.sender != owner())
+        {
             revert NotAuthorized();
         }
         _;
@@ -485,9 +446,8 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
     ) Ownable(msg.sender) {
         if (_projectToken == address(0)) revert InvalidAddress();
         if (
-            _vaultManager == address(0) ||
-            _vaultManagerHelper == address(0) ||
-            _positionManager == address(0)
+            _vaultManager == address(0) || _vaultManagerHelper == address(0)
+                || _positionManager == address(0)
         ) {
             revert InvalidAddress();
         }
@@ -505,25 +465,15 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         vaultParams = VaultParams({
             minBetAmount: _minBetAmount,
             maxBetAmount: _maxBetAmount,
-            maxPositionSizePercentBps: uint16(
-                DEFAULT_MAX_POSITION_SIZE_PERCENT_BPS
-            ),
+            maxPositionSizePercentBps: uint16(DEFAULT_MAX_POSITION_SIZE_PERCENT_BPS),
             minLiquidityAmount: _minBetAmount
         });
         stakingFeeBps = uint16(DEFAULT_MAX_STAKING_FEE_BPS);
         earlyWithdrawalFeeBps = uint16(DEFAULT_EARLY_WITHDRAWAL_FEE_BPS);
-        maxDirectionalExposureBps = uint16(
-            DEFAULT_MAX_DIRECTIONAL_EXPOSURE_BPS
-        ); // 50% TVL cap
+        maxDirectionalExposureBps = uint16(DEFAULT_MAX_DIRECTIONAL_EXPOSURE_BPS); // 50% TVL cap
 
         emit VaultInitialized(
-            _projectToken,
-            bytes32(0),
-            address(0),
-            address(0),
-            address(0),
-            false,
-            block.timestamp
+            _projectToken, bytes32(0), address(0), address(0), address(0), false, block.timestamp
         );
     }
 
@@ -550,9 +500,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
      * @param amount Amount of project tokens to add (including staking fee)
      * @dev Future versions will support multi-currency with auto-swap
      */
-    function addLiquidity(
-        uint256 amount
-    ) external payable nonReentrant whenVaultNotPaused {
+    function addLiquidity(uint256 amount) external payable nonReentrant whenVaultNotPaused {
         if (amount == 0) revert InvalidAmount();
 
         // Calculate staking fee
@@ -569,11 +517,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         } else {
             // ERC20 project token (most common)
             if (msg.value != 0) revert InvalidAmount();
-            IERC20(projectToken).safeTransferFrom(
-                msg.sender,
-                address(this),
-                amount
-            );
+            IERC20(projectToken).safeTransferFrom(msg.sender, address(this), amount);
         }
 
         // Calculate shares based on NET amount (after fee)
@@ -583,9 +527,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
             shares = netAmount * INITIAL_SHARE_MULTIPLIER;
         } else {
             // Subsequent deposits: shares = (netAmount * totalShares) / totalLiquidity
-            shares =
-                (netAmount * vaultInfo.totalShares) /
-                vaultInfo.totalLiquidity;
+            shares = (netAmount * vaultInfo.totalShares) / vaultInfo.totalLiquidity;
         }
 
         if (shares == 0) revert InvalidAmount();
@@ -624,10 +566,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         );
 
         IVaultManagerHelper(vaultManagerHelper).emitStakingFeeCollected(
-            msg.sender,
-            stakingFee,
-            netAmount,
-            block.timestamp
+            msg.sender, stakingFee, netAmount, block.timestamp
         );
 
         // Check graduation after adding liquidity
@@ -650,8 +589,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         VaultInfo storage vault = vaultInfo;
 
         // Calculate gross amount based on total liquidity
-        uint256 grossAmount = (shares * vault.totalLiquidity) /
-            vault.totalShares;
+        uint256 grossAmount = (shares * vault.totalLiquidity) / vault.totalShares;
 
         // Check early withdrawal and calculate fee
         // Early withdrawal penalty only applies AFTER vault has graduated
@@ -662,9 +600,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
 
         if (isEarlyWithdrawal && vault.isGraduated) {
             // Apply early withdrawal fee (only if vault has graduated)
-            withdrawalFee =
-                (grossAmount * earlyWithdrawalFeeBps) /
-                BASIS_POINTS;
+            withdrawalFee = (grossAmount * earlyWithdrawalFeeBps) / BASIS_POINTS;
             netPayout = grossAmount - withdrawalFee;
         }
 
@@ -696,10 +632,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         // Emit events BEFORE external calls
         if (isEarlyWithdrawal && vault.isGraduated && withdrawalFee > 0) {
             emit EarlyWithdrawalFeeApplied(
-                msg.sender,
-                withdrawalFee,
-                lockEndTime - block.timestamp,
-                block.timestamp
+                msg.sender, withdrawalFee, lockEndTime - block.timestamp, block.timestamp
             );
         }
 
@@ -722,7 +655,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         // Transfer tokens (net amount after fee) - ONLY project token
         if (projectToken == address(0)) {
             // Native project token
-            (bool success, ) = msg.sender.call{value: netPayout}("");
+            (bool success,) = msg.sender.call{ value: netPayout }("");
             if (!success) revert TransferFailed();
         } else {
             // ERC20 project token
@@ -784,11 +717,11 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
      * @param amount Total payout amount (collateral + rewards)
      * @param positionId Position ID for tracking partial payouts
      */
-    function executePayout(
-        address user,
-        uint256 amount,
-        uint64 positionId
-    ) external onlyPositionManager nonReentrant {
+    function executePayout(address user, uint256 amount, uint64 positionId)
+        external
+        onlyPositionManager
+        nonReentrant
+    {
         // ============================================================
         // CHECKS
         // ============================================================
@@ -799,9 +732,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         uint256 collateral = betCollateral[positionId];
 
         // Calculate rewards from vault (amount - collateral)
-        uint256 rewardsFromVault = amount > collateral
-            ? amount - collateral
-            : 0;
+        uint256 rewardsFromVault = amount > collateral ? amount - collateral : 0;
 
         // Check available liquidity for rewards
         if (rewardsFromVault > vaultInfo.totalLiquidity) {
@@ -857,7 +788,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         // Transfer total payout (collateral + rewards) - ONLY project token
         if (projectToken == address(0)) {
             // Native project token
-            (bool success, ) = user.call{value: amount}("");
+            (bool success,) = user.call{ value: amount }("");
             if (!success) revert TransferFailed();
         } else {
             // ERC20 project token
@@ -997,13 +928,13 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
      * @param leverage Leverage multiplier
      * @param direction Position direction (1 = LONG, 2 = SHORT)
      * @return canOpen Whether position can be opened
-     * @return reason Reason if cannot open
+     * @return reason Reason if cannot open (empty string if can open)
      */
-    function checkPositionRisk(
-        uint256 positionSize,
-        uint8 leverage,
-        uint8 direction
-    ) external view returns (bool canOpen, string memory reason) {
+    function checkPositionRisk(uint256 positionSize, uint8 leverage, uint8 direction)
+        external
+        view
+        returns (bool canOpen, string memory reason)
+    {
         // Check if vault is paused
         if (paused()) {
             return (false, "Vault is paused");
@@ -1016,9 +947,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
 
         // Check min bet amount (based on collateral)
         // collateral = positionSize / leverage
-        uint256 collateral = leverage > 0
-            ? positionSize / leverage
-            : positionSize;
+        uint256 collateral = leverage > 0 ? positionSize / leverage : positionSize;
         if (collateral < vaultParams.minBetAmount) {
             return (false, "Below minimum bet amount");
         }
@@ -1029,12 +958,10 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
 
         // Calculate max bet based on vault rate per trade (maxPositionSizePercentBps)
         if (totalLiquidity > 0 && vaultParams.maxPositionSizePercentBps > 0) {
-            uint256 maxBetByVaultRate = (totalLiquidity *
-                vaultParams.maxPositionSizePercentBps) / BASIS_POINTS;
+            uint256 maxBetByVaultRate =
+                (totalLiquidity * vaultParams.maxPositionSizePercentBps) / BASIS_POINTS;
             // Use the minimum of the two limits
-            maxAllowedBet = maxAllowedBet < maxBetByVaultRate
-                ? maxAllowedBet
-                : maxBetByVaultRate;
+            maxAllowedBet = maxAllowedBet < maxBetByVaultRate ? maxAllowedBet : maxBetByVaultRate;
         }
 
         if (collateral > maxAllowedBet) {
@@ -1046,8 +973,8 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         // Example: Long OI: $180K + Short OI: $120K => Net Exposure: $60K long
         // Compare Net Exposure with Maximum Directional Exposure (50% of vault TVL)
         if (totalLiquidity > 0 && maxDirectionalExposureBps > 0) {
-            uint256 maxDirectionalExposure = (totalLiquidity *
-                maxDirectionalExposureBps) / BASIS_POINTS;
+            uint256 maxDirectionalExposure =
+                (totalLiquidity * maxDirectionalExposureBps) / BASIS_POINTS;
 
             // Calculate new exposures after adding this position
             uint256 newLongExposure = totalLongExposure;
@@ -1069,10 +996,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
 
             // Check if net exposure exceeds maximum
             if (newNetExposure > maxDirectionalExposure) {
-                return (
-                    false,
-                    "Exceeds maximum net directional exposure (50% TVL)"
-                );
+                return (false, "Exceeds maximum net directional exposure (50% TVL)");
             }
         }
 
@@ -1088,11 +1012,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
      * @dev Called by admin bot at end of each day (UTC midnight)
      *      Pre-calculates and stores rewards for all LPs to avoid recalculation on claim
      */
-    function finalizeDailyReward()
-        external
-        onlyAdmin
-        returns (bool isComplete)
-    {
+    function finalizeDailyReward() external onlyAdmin returns (bool isComplete) {
         uint256 today = block.timestamp / 1 days;
 
         // Check if already processed today - this is the primary protection
@@ -1130,9 +1050,8 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         if (finalizedPnL > 0 && snapshot.totalShares > 0) {
             uint256 dayStartTimestamp = today * 1 days;
             uint256 totalLPs = vaultLPs.length;
-            uint256 maxIterations = totalLPs > MAX_LPS_PER_FINALIZE
-                ? MAX_LPS_PER_FINALIZE
-                : totalLPs;
+            uint256 maxIterations =
+                totalLPs > MAX_LPS_PER_FINALIZE ? MAX_LPS_PER_FINALIZE : totalLPs;
 
             // Process LPs in batches to prevent out of gas
             for (uint256 i = 0; i < maxIterations; i++) {
@@ -1145,13 +1064,10 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
                 }
 
                 // Check if user was staked for at least 1 day before this reward day
-                if (
-                    lpPos.stakedAt + REWARD_MIN_STAKE_PERIOD <=
-                    dayStartTimestamp
-                ) {
+                if (lpPos.stakedAt + REWARD_MIN_STAKE_PERIOD <= dayStartTimestamp) {
                     // Calculate user's share of profit for this day
-                    uint256 userReward = (lpPos.shares *
-                        uint256(finalizedPnL)) / snapshot.totalShares;
+                    uint256 userReward =
+                        (lpPos.shares * uint256(finalizedPnL)) / snapshot.totalShares;
 
                     if (userReward > 0) {
                         // Add reward to user's claimable rewards
@@ -1176,11 +1092,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         if (vaultManagerHelper == address(0)) revert VaultManagerHelperNotSet();
 
         IVaultManagerHelper(vaultManagerHelper).emitDailyRewardFinalized(
-            today,
-            vaultInfo.totalLiquidity,
-            vaultInfo.totalShares,
-            finalizedPnL,
-            block.timestamp
+            today, vaultInfo.totalLiquidity, vaultInfo.totalShares, finalizedPnL, block.timestamp
         );
 
         return vaultLPs.length <= MAX_LPS_PER_FINALIZE;
@@ -1192,11 +1104,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
      *      Automatically continues from last processed index
      * @return isComplete True if all LPs have been processed
      */
-    function finalizeDailyRewardRemaining()
-        external
-        onlyAdmin
-        returns (bool isComplete)
-    {
+    function finalizeDailyRewardRemaining() external onlyAdmin returns (bool isComplete) {
         uint256 today = block.timestamp / 1 days;
 
         // Check if snapshot exists
@@ -1239,8 +1147,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
             // Check if user was staked for at least 1 day before this reward day
             if (lpPos.stakedAt + REWARD_MIN_STAKE_PERIOD <= dayStartTimestamp) {
                 // Calculate user's share of profit for this day
-                uint256 userReward = (lpPos.shares * uint256(finalizedPnL)) /
-                    snapshot.totalShares;
+                uint256 userReward = (lpPos.shares * uint256(finalizedPnL)) / snapshot.totalShares;
 
                 if (userReward > 0) {
                     // Add reward to user's claimable rewards
@@ -1288,12 +1195,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
             actualRewards = vaultBalance;
             wasCapped = true;
 
-            emit RewardsCapped(
-                msg.sender,
-                rewards,
-                actualRewards,
-                block.timestamp
-            );
+            emit RewardsCapped(msg.sender, rewards, actualRewards, block.timestamp);
         }
 
         // Only revert if there's absolutely nothing to pay
@@ -1311,7 +1213,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
 
         // Transfer rewards (capped amount) - ONLY project token
         if (projectToken == address(0)) {
-            (bool success, ) = msg.sender.call{value: actualRewards}("");
+            (bool success,) = msg.sender.call{ value: actualRewards }("");
             if (!success) revert TransferFailed();
         } else {
             IERC20(projectToken).safeTransfer(msg.sender, actualRewards);
@@ -1321,9 +1223,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         if (vaultManagerHelper == address(0)) revert VaultManagerHelperNotSet();
 
         IVaultManagerHelper(vaultManagerHelper).emitRewardsClaimed(
-            msg.sender,
-            actualRewards,
-            block.timestamp
+            msg.sender, actualRewards, block.timestamp
         );
     }
 
@@ -1342,18 +1242,12 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
 
         uint256 queueLength = pendingPayoutQueue.length;
 
-        uint256 maxIterations = queueLength > MAX_PAYOUTS_PER_TX
-            ? MAX_PAYOUTS_PER_TX
-            : queueLength;
+        uint256 maxIterations = queueLength > MAX_PAYOUTS_PER_TX ? MAX_PAYOUTS_PER_TX : queueLength;
 
         uint256 processed = 0;
 
         // Process pending payouts in FIFO order
-        for (
-            uint256 i = 0;
-            i < maxIterations && vaultInfo.totalLiquidity > 0;
-
-        ) {
+        for (uint256 i = 0; i < maxIterations && vaultInfo.totalLiquidity > 0;) {
             uint64 positionId = pendingPayoutQueue[i];
 
             // Skip if already processed
@@ -1371,9 +1265,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
             uint256 collateral = betCollateral[positionId];
 
             // Calculate rewards from vault
-            uint256 rewardsFromVault = amount > collateral
-                ? amount - collateral
-                : 0;
+            uint256 rewardsFromVault = amount > collateral ? amount - collateral : 0;
 
             // Check if we have enough liquidity for rewards
             if (rewardsFromVault <= vaultInfo.totalLiquidity) {
@@ -1388,15 +1280,14 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
                             revert VaultManagerHelperNotSet();
                         }
 
-                        IVaultManagerHelper(vaultManagerHelper)
-                            .emitLiquidityRemoved(
-                                user,
-                                rewardsFromVault,
-                                0, // No shares burned for payouts
-                                vaultInfo.totalLiquidity,
-                                uint8(LiquidityOperationType.PAYOUT_EXECUTION),
-                                block.timestamp
-                            );
+                        IVaultManagerHelper(vaultManagerHelper).emitLiquidityRemoved(
+                            user,
+                            rewardsFromVault,
+                            0, // No shares burned for payouts
+                            vaultInfo.totalLiquidity,
+                            uint8(LiquidityOperationType.PAYOUT_EXECUTION),
+                            block.timestamp
+                        );
                     }
 
                     vaultInfo.pendingPositions--;
@@ -1411,7 +1302,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
                 // Transfer tokens
                 if (projectToken == address(0)) {
                     // Native project token
-                    (bool success, ) = user.call{value: amount}("");
+                    (bool success,) = user.call{ value: amount }("");
                     if (!success) {
                         uint8 retries = payoutRetryCount[positionId];
                         if (retries >= MAX_PAYOUT_RETRIES) {
@@ -1419,13 +1310,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
                             failedPayouts[positionId] = amount;
                             failedPayoutUsers[positionId] = user;
 
-                            emit PayoutFailed(
-                                positionId,
-                                user,
-                                amount,
-                                retries,
-                                block.timestamp
-                            );
+                            emit PayoutFailed(positionId, user, amount, retries, block.timestamp);
 
                             // Remove from queue
                             delete positionPayouts[positionId];
@@ -1483,7 +1368,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         uint256 writeIndex = 0;
         uint256 length = pendingPayoutQueue.length;
 
-        for (uint256 i = 0; i < length; ) {
+        for (uint256 i = 0; i < length;) {
             if (positionPayouts[pendingPayoutQueue[i]] != 0) {
                 // Keep this item - move it to writeIndex
                 if (writeIndex != i) {
@@ -1505,11 +1390,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         }
 
         if (itemsRemoved > 0) {
-            emit PayoutQueueCleaned(
-                itemsRemoved,
-                pendingPayoutQueue.length,
-                block.timestamp
-            );
+            emit PayoutQueueCleaned(itemsRemoved, pendingPayoutQueue.length, block.timestamp);
         }
     }
 
@@ -1536,9 +1417,11 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
      * @return pendingRewards Total pending rewards
      * @return lastProcessedDay Last day that was processed in this calculation
      */
-    function calculatePendingRewards(
-        address user
-    ) external view returns (uint256 pendingRewards, uint256 lastProcessedDay) {
+    function calculatePendingRewards(address user)
+        external
+        view
+        returns (uint256 pendingRewards, uint256 lastProcessedDay)
+    {
         LPPosition storage lpPos = lpPositions[user];
         if (lpPos.shares == 0) {
             return (0, 0);
@@ -1567,10 +1450,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
      * @param newRecipient New recipient address (or original user if they fixed their contract)
      * @dev Only owner can call this for positions that failed after MAX_PAYOUT_RETRIES
      */
-    function rescueFailedPayout(
-        uint64 positionId,
-        address newRecipient
-    ) external onlyOwner {
+    function rescueFailedPayout(uint64 positionId, address newRecipient) external onlyOwner {
         if (newRecipient == address(0)) revert InvalidAddress();
 
         uint256 amount = failedPayouts[positionId];
@@ -1585,20 +1465,14 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         // Transfer to new recipient
         if (projectToken == address(0)) {
             // Native token
-            (bool success, ) = newRecipient.call{value: amount}("");
+            (bool success,) = newRecipient.call{ value: amount }("");
             if (!success) revert TransferFailed();
         } else {
             // ERC20 token
             IERC20(projectToken).safeTransfer(newRecipient, amount);
         }
 
-        emit FailedPayoutRescued(
-            positionId,
-            originalUser,
-            newRecipient,
-            amount,
-            block.timestamp
-        );
+        emit FailedPayoutRescued(positionId, originalUser, newRecipient, amount, block.timestamp);
     }
 
     /**
@@ -1606,9 +1480,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
      * @param amount Amount to withdraw (0 = withdraw all)
      * @dev Only owner can withdraw fees. Fees will be sent to treasury if set, otherwise to owner.
      */
-    function withdrawFees(
-        uint256 amount
-    ) external onlyVaultManagerOrHelper nonReentrant {
+    function withdrawFees(uint256 amount) external onlyVaultManagerOrHelper nonReentrant {
         uint256 amountToWithdraw = amount;
 
         // If amount is 0, withdraw all available fees
@@ -1627,17 +1499,12 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         vaultInfo.totalLiquidity -= amountToWithdraw;
 
         // Emit event before transfer
-        emit FeesWithdrawn(
-            recipient,
-            amountToWithdraw,
-            withdrawableFees,
-            block.timestamp
-        );
+        emit FeesWithdrawn(recipient, amountToWithdraw, withdrawableFees, block.timestamp);
 
         // Transfer fees to recipient
         if (projectToken == address(0)) {
             // Native token
-            (bool success, ) = recipient.call{value: amountToWithdraw}("");
+            (bool success,) = recipient.call{ value: amountToWithdraw }("");
             if (!success) revert TransferFailed();
         } else {
             // ERC20 token
@@ -1737,9 +1604,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
     /**
      * @notice Get LP position
      */
-    function getLPPosition(
-        address user
-    ) external view returns (LPPosition memory) {
+    function getLPPosition(address user) external view returns (LPPosition memory) {
         return lpPositions[user];
     }
 
@@ -1777,9 +1642,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
      * @param shares Number of shares
      * @return value Value in combined tokens (project + MON)
      */
-    function calculateShareValue(
-        uint256 shares
-    ) external view returns (uint256 value) {
+    function calculateShareValue(uint256 shares) external view returns (uint256 value) {
         if (vaultInfo.totalShares == 0) return 0;
         uint256 totalLiquidity = vaultInfo.totalLiquidity;
         return (shares * totalLiquidity) / vaultInfo.totalShares;
@@ -1790,9 +1653,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
      * @param day Day number
      * @return snapshot Daily snapshot data
      */
-    function getDailySnapshot(
-        uint256 day
-    ) external view returns (DailySnapshot memory) {
+    function getDailySnapshot(uint256 day) external view returns (DailySnapshot memory) {
         return dailySnapshots[day];
     }
 
@@ -1801,9 +1662,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
      * @param day Day number
      * @return positionIds Array of position IDs
      */
-    function getDailyPositionIds(
-        uint256 day
-    ) external view returns (uint64[] memory) {
+    function getDailyPositionIds(uint256 day) external view returns (uint64[] memory) {
         return dailySnapshots[day].positionIds;
     }
 
@@ -1811,11 +1670,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
      * @notice Get current day's position IDs (before snapshot)
      * @return positionIds Array of position IDs settled today
      */
-    function getCurrentDailyPositionIds()
-        external
-        view
-        returns (uint64[] memory)
-    {
+    function getCurrentDailyPositionIds() external view returns (uint64[] memory) {
         return dailyPositionIds;
     }
 
@@ -1828,9 +1683,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
      * @param user User address
      * @return remainingTime Remaining lock time in seconds (0 if lock period passed)
      */
-    function getRemainingLockTime(
-        address user
-    ) external view returns (uint256) {
+    function getRemainingLockTime(address user) external view returns (uint256) {
         LPPosition storage lpPos = lpPositions[user];
         if (lpPos.user == address(0)) return 0;
 
@@ -1849,18 +1702,10 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
      * @return netAmount Net amount user will receive
      * @return isEarlyWithdrawal Whether this would be an early withdrawal
      */
-    function calculateWithdrawalAmount(
-        address user,
-        uint256 shares
-    )
+    function calculateWithdrawalAmount(address user, uint256 shares)
         external
         view
-        returns (
-            uint256 grossAmount,
-            uint256 fee,
-            uint256 netAmount,
-            bool isEarlyWithdrawal
-        )
+        returns (uint256 grossAmount, uint256 fee, uint256 netAmount, bool isEarlyWithdrawal)
     {
         LPPosition storage lpPos = lpPositions[user];
         if (lpPos.shares < shares) revert InsufficientShares();
@@ -1894,11 +1739,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
     function getFeeConfig()
         external
         view
-        returns (
-            uint16 _stakingFeeBps,
-            uint16 _earlyWithdrawalFeeBps,
-            uint256 _minLockPeriod
-        )
+        returns (uint16 _stakingFeeBps, uint16 _earlyWithdrawalFeeBps, uint256 _minLockPeriod)
     {
         return (stakingFeeBps, earlyWithdrawalFeeBps, MIN_LOCK_PERIOD);
     }
@@ -1915,9 +1756,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         returns (uint256 total, uint256 staking, uint256 withdrawal)
     {
         return (
-            vaultInfo.totalFeesCollected,
-            vaultInfo.totalStakingFees,
-            vaultInfo.totalWithdrawalFees
+            vaultInfo.totalFeesCollected, vaultInfo.totalStakingFees, vaultInfo.totalWithdrawalFees
         );
     }
 
@@ -1937,9 +1776,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
      * @notice Update staking fee
      * @param _stakingFeeBps New staking fee in basis points
      */
-    function setStakingFeeBps(
-        uint16 _stakingFeeBps
-    ) external onlyVaultManagerOrHelper {
+    function setStakingFeeBps(uint16 _stakingFeeBps) external onlyVaultManagerOrHelper {
         if (_stakingFeeBps > 1000) revert InvalidParameters(); // Max 10%
         uint16 oldBps = stakingFeeBps;
         stakingFeeBps = _stakingFeeBps;
@@ -1950,9 +1787,10 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
      * @notice Update early withdrawal fee
      * @param _earlyWithdrawalFeeBps New early withdrawal fee in basis points
      */
-    function setEarlyWithdrawalFeeBps(
-        uint16 _earlyWithdrawalFeeBps
-    ) external onlyVaultManagerOrHelper {
+    function setEarlyWithdrawalFeeBps(uint16 _earlyWithdrawalFeeBps)
+        external
+        onlyVaultManagerOrHelper
+    {
         if (_earlyWithdrawalFeeBps > 5000) revert InvalidParameters(); // Max 50%
         uint16 oldBps = earlyWithdrawalFeeBps;
         earlyWithdrawalFeeBps = _earlyWithdrawalFeeBps;
@@ -1967,9 +1805,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
      * @notice Set graduation threshold (only before graduation)
      * @param _threshold New threshold in token amount (same decimals as token)
      */
-    function setGraduationThreshold(
-        uint256 _threshold
-    ) external onlyVaultManagerOrHelper {
+    function setGraduationThreshold(uint256 _threshold) external onlyVaultManagerOrHelper {
         if (vaultInfo.isGraduated) revert AlreadyGraduated();
         if (_threshold == 0) revert InvalidAmount();
 
@@ -1982,9 +1818,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
      * @notice Emergency: Enable/disable trading (admin override)
      * @param _enabled Whether trading should be enabled
      */
-    function setTradingEnabled(
-        bool _enabled
-    ) external onlyVaultManagerOrHelper {
+    function setTradingEnabled(bool _enabled) external onlyVaultManagerOrHelper {
         vaultInfo.tradingEnabled = _enabled;
         emit TradingEnabledUpdated(_enabled);
     }
@@ -2014,11 +1848,13 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
      * @param _maxDirectionalExposureBps New max directional exposure in basis points (e.g., 5000 = 50%)
      * @dev Only owner/helper can update. Max 100% (10000 bps)
      */
-    function setMaxDirectionalExposure(
-        uint16 _maxDirectionalExposureBps
-    ) external onlyVaultManagerOrHelper {
-        if (_maxDirectionalExposureBps > BASIS_POINTS)
+    function setMaxDirectionalExposure(uint16 _maxDirectionalExposureBps)
+        external
+        onlyVaultManagerOrHelper
+    {
+        if (_maxDirectionalExposureBps > BASIS_POINTS) {
             revert InvalidParameters();
+        }
         maxDirectionalExposureBps = _maxDirectionalExposureBps;
     }
 
@@ -2056,9 +1892,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         }
 
         if (vaultInfo.totalLiquidity > 0 && maxDirectionalExposureBps > 0) {
-            maxExposure =
-                (vaultInfo.totalLiquidity * maxDirectionalExposureBps) /
-                BASIS_POINTS;
+            maxExposure = (vaultInfo.totalLiquidity * maxDirectionalExposureBps) / BASIS_POINTS;
 
             // Calculate net utilization percentage (in basis points)
             netUtilization = (netExposure * BASIS_POINTS) / maxExposure;
@@ -2067,13 +1901,6 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
             netUtilization = 0;
         }
 
-        return (
-            longExposure,
-            shortExposure,
-            netExposure,
-            maxExposure,
-            netUtilization,
-            isLongBias
-        );
+        return (longExposure, shortExposure, netExposure, maxExposure, netUtilization, isLongBias);
     }
 }

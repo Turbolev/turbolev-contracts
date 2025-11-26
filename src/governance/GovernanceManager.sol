@@ -18,7 +18,7 @@ import "@openzeppelin/contracts/governance/TimelockController.sol";
  * Uses OpenZeppelin (Battle-tested):
  * - TimelockController for delay mechanism
  * - AccessControl for role-based permissions
- * 
+ *
  * Workflow:
  * 1. Proposer calls scheduleOperation()
  * 2. TimelockController queues with delay (24-48h)
@@ -43,18 +43,18 @@ contract GovernanceManager is AccessControl {
     // ========================================================================
     // STATE VARIABLES
     // ========================================================================
-    
+
     /// @notice OpenZeppelin TimelockController
     TimelockController public immutable timelockController;
 
     /// @notice Primary multisig wallet (optional tracking)
     /// @dev Can have multiple proposers via AccessControl, this tracks the primary one
     address public multisigWallet;
-    
+
     // ========================================================================
     // EVENTS
     // ========================================================================
-    
+
     event OperationScheduled(
         bytes32 indexed id,
         address indexed target,
@@ -68,25 +68,22 @@ contract GovernanceManager is AccessControl {
 
     event OperationCancelled(bytes32 indexed id);
 
-    event MultisigWalletUpdated(
-        address indexed oldMultisig,
-        address indexed newMultisig
-    );
-    
+    event MultisigWalletUpdated(address indexed oldMultisig, address indexed newMultisig);
+
     // ========================================================================
     // ERRORS
     // ========================================================================
-    
+
     error InvalidAddress();
     error ExecutionFailed();
     error NotProposer();
     error NotExecutor();
     error NotCanceller();
-    
+
     // ========================================================================
     // MODIFIERS
     // ========================================================================
-    
+
     modifier onlyProposer() {
         if (!hasRole(PROPOSER_ROLE, msg.sender)) revert NotProposer();
         _;
@@ -101,26 +98,22 @@ contract GovernanceManager is AccessControl {
         if (!hasRole(CANCELLER_ROLE, msg.sender)) revert NotCanceller();
         _;
     }
-    
+
     // ========================================================================
     // CONSTRUCTOR
     // ========================================================================
-    
+
     /**
      * @notice Constructor
      * @param _timelockController OpenZeppelin TimelockController address
      * @param _admin Admin address (will have all roles initially)
      * @param _multisigWallet Primary multisig wallet address (optional, can be address(0))
      */
-    constructor(
-        address _timelockController,
-        address _admin,
-        address _multisigWallet
-    ) {
+    constructor(address _timelockController, address _admin, address _multisigWallet) {
         if (_timelockController == address(0) || _admin == address(0)) {
             revert InvalidAddress();
         }
-        
+
         timelockController = TimelockController(payable(_timelockController));
         multisigWallet = _multisigWallet;
 
@@ -135,11 +128,11 @@ contract GovernanceManager is AccessControl {
             _grantRole(PROPOSER_ROLE, _multisigWallet);
         }
     }
-    
+
     // ========================================================================
     // SCHEDULE OPERATIONS (via TimelockController)
     // ========================================================================
-    
+
     /**
      * @notice Schedule operation via OpenZeppelin TimelockController
      * @param target Target contract
@@ -159,19 +152,17 @@ contract GovernanceManager is AccessControl {
         uint256 delay
     ) public onlyProposer returns (bytes32 id) {
         if (target == address(0)) revert InvalidAddress();
-        
+
         // Use minimum delay if not specified
-        uint256 actualDelay = delay == 0
-            ? timelockController.getMinDelay()
-            : delay;
+        uint256 actualDelay = delay == 0 ? timelockController.getMinDelay() : delay;
 
         // Schedule via TimelockController (low-level call to handle bytes memory -> calldata)
-        (bool success, ) = address(timelockController).call(
+        (bool success,) = address(timelockController).call(
             abi.encodeWithSignature(
                 "schedule(address,uint256,bytes,bytes32,bytes32,uint256)",
-            target,
-            value,
-            data,
+                target,
+                value,
+                data,
                 predecessor,
                 salt,
                 actualDelay
@@ -207,28 +198,13 @@ contract GovernanceManager is AccessControl {
         uint256 delay
     ) public onlyProposer returns (bytes32 id) {
         // Use minimum delay if not specified
-        uint256 actualDelay = delay == 0
-            ? timelockController.getMinDelay()
-            : delay;
+        uint256 actualDelay = delay == 0 ? timelockController.getMinDelay() : delay;
 
         // Schedule batch via TimelockController
-        timelockController.scheduleBatch(
-            targets,
-            values,
-            payloads,
-            predecessor,
-            salt,
-            actualDelay
-        );
+        timelockController.scheduleBatch(targets, values, payloads, predecessor, salt, actualDelay);
 
         // Calculate operation ID
-        id = timelockController.hashOperationBatch(
-            targets,
-            values,
-            payloads,
-            predecessor,
-            salt
-        );
+        id = timelockController.hashOperationBatch(targets, values, payloads, predecessor, salt);
 
         emit OperationScheduled(id, address(0), 0, "", salt, actualDelay);
 
@@ -255,12 +231,12 @@ contract GovernanceManager is AccessControl {
         bytes32 salt
     ) public onlyExecutor {
         // Execute via TimelockController (low-level call to handle bytes memory -> calldata)
-        (bool success, ) = address(timelockController).call(
+        (bool success,) = address(timelockController).call(
             abi.encodeWithSignature(
                 "execute(address,uint256,bytes,bytes32,bytes32)",
-            target,
-            value,
-            data,
+                target,
+                value,
+                data,
                 predecessor,
                 salt
             )
@@ -289,21 +265,10 @@ contract GovernanceManager is AccessControl {
         bytes32 salt
     ) public onlyExecutor {
         // Execute batch via TimelockController
-        timelockController.executeBatch(
-            targets,
-            values,
-            payloads,
-            predecessor,
-            salt
-        );
+        timelockController.executeBatch(targets, values, payloads, predecessor, salt);
 
-        bytes32 id = timelockController.hashOperationBatch(
-            targets,
-            values,
-            payloads,
-            predecessor,
-            salt
-        );
+        bytes32 id =
+            timelockController.hashOperationBatch(targets, values, payloads, predecessor, salt);
 
         emit OperationExecuted(id, address(0));
     }
@@ -321,11 +286,11 @@ contract GovernanceManager is AccessControl {
 
         emit OperationCancelled(id);
     }
-    
+
     // ========================================================================
     // VIEW FUNCTIONS (TimelockController queries)
     // ========================================================================
-    
+
     /**
      * @notice Check if operation is pending
      * @param id Operation ID
@@ -377,18 +342,16 @@ contract GovernanceManager is AccessControl {
     ) public pure returns (bytes32) {
         return keccak256(abi.encode(target, value, data, predecessor, salt));
     }
-    
+
     // ========================================================================
     // ROLE MANAGEMENT (via AccessControl)
     // ========================================================================
-    
+
     /**
      * @notice Grant proposer role
      * @param account Account address
      */
-    function grantProposer(
-        address account
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function grantProposer(address account) external onlyRole(DEFAULT_ADMIN_ROLE) {
         grantRole(PROPOSER_ROLE, account);
     }
 
@@ -396,9 +359,7 @@ contract GovernanceManager is AccessControl {
      * @notice Grant executor role
      * @param account Account address
      */
-    function grantExecutor(
-        address account
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function grantExecutor(address account) external onlyRole(DEFAULT_ADMIN_ROLE) {
         grantRole(EXECUTOR_ROLE, account);
     }
 
@@ -406,9 +367,7 @@ contract GovernanceManager is AccessControl {
      * @notice Grant canceller role
      * @param account Account address
      */
-    function grantCanceller(
-        address account
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function grantCanceller(address account) external onlyRole(DEFAULT_ADMIN_ROLE) {
         grantRole(CANCELLER_ROLE, account);
     }
 
@@ -416,9 +375,7 @@ contract GovernanceManager is AccessControl {
      * @notice Revoke proposer role
      * @param account Account address
      */
-    function revokeProposer(
-        address account
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function revokeProposer(address account) external onlyRole(DEFAULT_ADMIN_ROLE) {
         revokeRole(PROPOSER_ROLE, account);
     }
 
@@ -426,9 +383,7 @@ contract GovernanceManager is AccessControl {
      * @notice Revoke executor role
      * @param account Account address
      */
-    function revokeExecutor(
-        address account
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function revokeExecutor(address account) external onlyRole(DEFAULT_ADMIN_ROLE) {
         revokeRole(EXECUTOR_ROLE, account);
     }
 
@@ -436,24 +391,20 @@ contract GovernanceManager is AccessControl {
      * @notice Revoke canceller role
      * @param account Account address
      */
-    function revokeCanceller(
-        address account
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function revokeCanceller(address account) external onlyRole(DEFAULT_ADMIN_ROLE) {
         revokeRole(CANCELLER_ROLE, account);
     }
-    
+
     // ========================================================================
     // MULTISIG MANAGEMENT
     // ========================================================================
-    
+
     /**
      * @notice Update primary multisig wallet
      * @dev This only updates tracking variable, roles must be managed separately
      * @param _newMultisig New multisig wallet address
      */
-    function updateMultisigWallet(
-        address _newMultisig
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function updateMultisigWallet(address _newMultisig) external onlyRole(DEFAULT_ADMIN_ROLE) {
         address oldMultisig = multisigWallet;
         multisigWallet = _newMultisig;
 
@@ -487,4 +438,3 @@ contract GovernanceManager is AccessControl {
         return hasRole(CANCELLER_ROLE, account);
     }
 }
-

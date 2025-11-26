@@ -52,10 +52,7 @@ contract MockAdapter is ICLAggregatorAdapter, IChainlinkAggregatorV3 {
     {
         if (baseToken != address(0) && quoteToken != address(0)) {
             // Get price from MockRegistry
-            int256 price = MockRegistry(dataFeedStore).latestAnswer(
-                baseToken,
-                quoteToken
-            );
+            int256 price = MockRegistry(dataFeedStore).latestAnswer(baseToken, quoteToken);
             return (1, price, mockTimestamp, mockTimestamp, 1);
         }
         return (1, 100e18, mockTimestamp, mockTimestamp, 1);
@@ -83,9 +80,7 @@ contract MockAdapter is ICLAggregatorAdapter, IChainlinkAggregatorV3 {
         return 1;
     }
 
-    function getRoundData(
-        uint80
-    )
+    function getRoundData(uint80)
         external
         view
         override
@@ -93,10 +88,7 @@ contract MockAdapter is ICLAggregatorAdapter, IChainlinkAggregatorV3 {
     {
         if (baseToken != address(0) && quoteToken != address(0)) {
             // Get price from MockRegistry
-            int256 price = MockRegistry(dataFeedStore).latestAnswer(
-                baseToken,
-                quoteToken
-            );
+            int256 price = MockRegistry(dataFeedStore).latestAnswer(baseToken, quoteToken);
             return (1, price, mockTimestamp, mockTimestamp, 1);
         }
         return (1, 100e18, mockTimestamp, mockTimestamp, 1);
@@ -121,18 +113,11 @@ contract MockRegistry is ICLFeedRegistryAdapter {
         timestamps[base][quote] = block.timestamp;
     }
 
-    function setDecimals(
-        address base,
-        address quote,
-        uint8 _decimals
-    ) external {
+    function setDecimals(address base, address quote, uint8 _decimals) external {
         decimalsMap[base][quote] = _decimals;
     }
 
-    function latestRoundData(
-        address base,
-        address quote
-    )
+    function latestRoundData(address base, address quote)
         external
         view
         returns (
@@ -143,20 +128,10 @@ contract MockRegistry is ICLFeedRegistryAdapter {
             uint80 answeredInRound
         )
     {
-        return (
-            1,
-            prices[base][quote],
-            block.timestamp,
-            timestamps[base][quote],
-            1
-        );
+        return (1, prices[base][quote], block.timestamp, timestamps[base][quote], 1);
     }
 
-    function getRoundData(
-        address base,
-        address quote,
-        uint80
-    )
+    function getRoundData(address base, address quote, uint80)
         external
         view
         returns (
@@ -167,41 +142,23 @@ contract MockRegistry is ICLFeedRegistryAdapter {
             uint80 answeredInRound
         )
     {
-        return (
-            1,
-            prices[base][quote],
-            block.timestamp,
-            timestamps[base][quote],
-            1
-        );
+        return (1, prices[base][quote], block.timestamp, timestamps[base][quote], 1);
     }
 
-    function latestAnswer(
-        address base,
-        address quote
-    ) external view returns (int256) {
+    function latestAnswer(address base, address quote) external view returns (int256) {
         return prices[base][quote];
     }
 
-    function latestRound(
-        address,
-        address
-    ) external pure returns (uint256 roundId) {
+    function latestRound(address, address) external pure returns (uint256 roundId) {
         return 1;
     }
 
-    function decimals(
-        address base,
-        address quote
-    ) external view returns (uint8) {
+    function decimals(address base, address quote) external view returns (uint8) {
         uint8 dec = decimalsMap[base][quote];
         return dec == 0 ? 18 : dec;
     }
 
-    function description(
-        address,
-        address
-    ) external pure returns (string memory) {
+    function description(address, address) external pure returns (string memory) {
         return "Mock";
     }
 
@@ -220,11 +177,7 @@ contract MockERC20 is Test {
     mapping(address => mapping(address => uint256)) public allowance;
 
     event Transfer(address indexed from, address indexed to, uint256 value);
-    event Approval(
-        address indexed owner,
-        address indexed spender,
-        uint256 value
-    );
+    event Approval(address indexed owner, address indexed spender, uint256 value);
 
     constructor(string memory _name, string memory _symbol) {
         name = _name;
@@ -251,16 +204,9 @@ contract MockERC20 is Test {
         return true;
     }
 
-    function transferFrom(
-        address from,
-        address to,
-        uint256 amount
-    ) external returns (bool) {
+    function transferFrom(address from, address to, uint256 amount) external returns (bool) {
         require(balanceOf[from] >= amount, "Insufficient balance");
-        require(
-            allowance[from][msg.sender] >= amount,
-            "Insufficient allowance"
-        );
+        require(allowance[from][msg.sender] >= amount, "Insufficient allowance");
 
         balanceOf[from] -= amount;
         balanceOf[to] += amount;
@@ -280,7 +226,7 @@ contract BaseTest is Test {
     BlocksenseOracle public blocksenseOracle;
     ChainlinkOracle public chainlinkOracle;
     PriceFeedManager public priceFeedManager;
-    AssetVault public assetVault;
+    AssetVaultUpgradeable public assetVault;
 
     // Mock contracts
     MockRegistry public mockRegistry;
@@ -362,59 +308,35 @@ contract BaseTest is Test {
             owner,
             3600 // max price age
         );
-        ERC1967Proxy oracleProxy = new ERC1967Proxy(
-            address(oracleImpl),
-            oracleInitData
-        );
+        ERC1967Proxy oracleProxy = new ERC1967Proxy(address(oracleImpl), oracleInitData);
         blocksenseOracle = BlocksenseOracle(payable(address(oracleProxy)));
 
         // Deploy ChainlinkOracle (upgradeable via ERC1967Proxy)
         ChainlinkOracle chainlinkImpl = new ChainlinkOracle();
-        bytes memory chainlinkInitData = abi.encodeWithSelector(
-            ChainlinkOracle.initialize.selector,
-            3600
-        ); // max price age
-        ERC1967Proxy chainlinkProxy = new ERC1967Proxy(
-            address(chainlinkImpl),
-            chainlinkInitData
-        );
+        bytes memory chainlinkInitData =
+            abi.encodeWithSelector(ChainlinkOracle.initialize.selector, 3600); // max price age
+        ERC1967Proxy chainlinkProxy = new ERC1967Proxy(address(chainlinkImpl), chainlinkInitData);
         chainlinkOracle = ChainlinkOracle(address(chainlinkProxy));
 
         // Deploy PriceFeedManager (upgradeable via ERC1967Proxy) - V2.1
         PriceFeedManager priceFeedImpl = new PriceFeedManager();
-        bytes memory priceFeedInitData = abi.encodeWithSelector(
-            PriceFeedManager.initialize.selector,
-            owner
-        );
-        ERC1967Proxy priceFeedProxy = new ERC1967Proxy(
-            address(priceFeedImpl),
-            priceFeedInitData
-        );
+        bytes memory priceFeedInitData =
+            abi.encodeWithSelector(PriceFeedManager.initialize.selector, owner);
+        ERC1967Proxy priceFeedProxy = new ERC1967Proxy(address(priceFeedImpl), priceFeedInitData);
         priceFeedManager = PriceFeedManager(payable(address(priceFeedProxy)));
 
         // Deploy SettlementEngine (upgradeable via ERC1967Proxy)
         SettlementEngine settlementImpl = new SettlementEngine();
-        bytes memory settlementInitData = abi.encodeWithSelector(
-            SettlementEngine.initialize.selector,
-            owner
-        );
-        ERC1967Proxy settlementProxy = new ERC1967Proxy(
-            address(settlementImpl),
-            settlementInitData
-        );
+        bytes memory settlementInitData =
+            abi.encodeWithSelector(SettlementEngine.initialize.selector, owner);
+        ERC1967Proxy settlementProxy = new ERC1967Proxy(address(settlementImpl), settlementInitData);
         settlementEngine = SettlementEngine(payable(address(settlementProxy)));
 
         // Deploy PositionManager (upgradeable via ERC1967Proxy)
         PositionManager positionImpl = new PositionManager();
-        bytes memory positionInitData = abi.encodeWithSelector(
-            PositionManager.initialize.selector,
-            owner,
-            admin
-        );
-        ERC1967Proxy positionProxy = new ERC1967Proxy(
-            address(positionImpl),
-            positionInitData
-        );
+        bytes memory positionInitData =
+            abi.encodeWithSelector(PositionManager.initialize.selector, owner, admin);
+        ERC1967Proxy positionProxy = new ERC1967Proxy(address(positionImpl), positionInitData);
         positionManager = PositionManager(payable(address(positionProxy)));
 
         // Deploy VaultManager (upgradeable via ERC1967Proxy)
@@ -425,11 +347,8 @@ contract BaseTest is Test {
 
         // Deploy VaultBeacon for AssetVault (needed for createVaultWithBeacon)
         AssetVaultUpgradeable vaultImplementation = new AssetVaultUpgradeable();
-        VaultBeacon vaultBeaconContract = new VaultBeacon(
-            address(vaultImplementation),
-            owner,
-            mockOptInUpgradeManager
-        );
+        VaultBeacon vaultBeaconContract =
+            new VaultBeacon(address(vaultImplementation), owner, mockOptInUpgradeManager);
         address mockTimelockController = makeAddr("mockTimelockController");
         address mockMultisigWallet = makeAddr("mockMultisigWallet");
         address mockVaultGovernor = makeAddr("mockVaultGovernor");
@@ -443,10 +362,7 @@ contract BaseTest is Test {
             mockMultisigWallet,
             mockVaultGovernor
         );
-        ERC1967Proxy vaultProxy = new ERC1967Proxy(
-            address(vaultImpl),
-            vaultInitData
-        );
+        ERC1967Proxy vaultProxy = new ERC1967Proxy(address(vaultImpl), vaultInitData);
         vaultManager = VaultManager(payable(address(vaultProxy)));
 
         // Deploy VaultManagerHelper
@@ -481,47 +397,40 @@ contract BaseTest is Test {
 
         // Configure PriceFeedManager V2.1 with Oracle Registry
         // 1. Register providers (without feed - feed is per-token in config)
-        IPriceFeedManager.OracleProvider
-            memory chainlinkProvider = IPriceFeedManager.OracleProvider({
-                oracleContract: address(chainlinkOracle),
-                oracleType: IBaseOracle.OracleType.PUSH,
-                enabled: true
-            });
+        IPriceFeedManager.OracleProvider memory chainlinkProvider = IPriceFeedManager.OracleProvider({
+            oracleContract: address(chainlinkOracle),
+            oracleType: IBaseOracle.OracleType.PUSH,
+            enabled: true
+        });
         priceFeedManager.registerOracleProvider(
-            priceFeedManager.CHAINLINK_PROVIDER(),
-            chainlinkProvider
+            priceFeedManager.CHAINLINK_PROVIDER(), chainlinkProvider
         );
 
-        IPriceFeedManager.OracleProvider
-            memory blocksenseProvider = IPriceFeedManager.OracleProvider({
-                oracleContract: address(blocksenseOracle),
-                oracleType: IBaseOracle.OracleType.PUSH,
-                enabled: true
-            });
+        IPriceFeedManager.OracleProvider memory blocksenseProvider = IPriceFeedManager
+            .OracleProvider({
+            oracleContract: address(blocksenseOracle),
+            oracleType: IBaseOracle.OracleType.PUSH,
+            enabled: true
+        });
         priceFeedManager.registerOracleProvider(
-            priceFeedManager.BLOCKSENSE_PROVIDER(),
-            blocksenseProvider
+            priceFeedManager.BLOCKSENSE_PROVIDER(), blocksenseProvider
         );
 
         // 2. Configure token with feed addresses
-        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager
-            .PriceFeedConfig({
-                primaryProviderId: priceFeedManager.CHAINLINK_PROVIDER(),
-                secondaryProviderId: priceFeedManager.BLOCKSENSE_PROVIDER(),
-                primaryFeed: address(mockAdapter), // Feed for Chainlink
-                secondaryFeed: address(mockAdapter), // Feed for Blocksense
-                usePullMode: false
-            });
+        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
+            primaryProviderId: priceFeedManager.CHAINLINK_PROVIDER(),
+            secondaryProviderId: priceFeedManager.BLOCKSENSE_PROVIDER(),
+            primaryFeed: address(mockAdapter), // Feed for Chainlink
+            secondaryFeed: address(mockAdapter), // Feed for Blocksense
+            usePullMode: false
+        });
         priceFeedManager.setPriceFeedConfig(address(projectToken), config);
 
         // Create vault using BeaconProxy (proper way)
         address vaultAddr = vaultManager.createVaultWithBeacon(
-            address(projectToken),
-            DEFAULT_MIN_BET,
-            DEFAULT_MAX_BET,
-            DEFAULT_GRADUATION_THRESHOLD
+            address(projectToken), DEFAULT_MIN_BET, DEFAULT_MAX_BET, DEFAULT_GRADUATION_THRESHOLD
         );
-        assetVault = AssetVault(payable(vaultAddr));
+        assetVault = AssetVaultUpgradeable(payable(vaultAddr));
 
         // Transfer ownership to test contract for easier testing
         address currentOwner = assetVault.owner();
@@ -541,26 +450,21 @@ contract BaseTest is Test {
         mockRegistry.setPrice(base, quote, price);
     }
 
-    function _addLiquidity(
-        address provider,
-        uint256 amount
-    ) internal returns (uint256 shares) {
+    function _addLiquidity(address provider, uint256 amount) internal returns (uint256 shares) {
         vm.startPrank(provider);
         projectToken.approve(address(assetVault), amount);
         assetVault.addLiquidity(amount);
         vm.stopPrank();
 
         // Get shares from LP position
-        AssetVault.LPPosition memory lpPos = assetVault.getLPPosition(provider);
+        AssetVaultUpgradeable.LPPosition memory lpPos = assetVault.getLPPosition(provider);
         shares = lpPos.shares;
     }
 
-    function _openPosition(
-        address user,
-        uint256 amount,
-        uint8 leverage,
-        uint8 direction
-    ) internal returns (uint64 positionId) {
+    function _openPosition(address user, uint256 amount, uint8 leverage, uint8 direction)
+        internal
+        returns (uint64 positionId)
+    {
         vm.startPrank(user);
         projectToken.approve(address(positionManager), amount);
         positionId = positionManager.openPosition(
@@ -579,9 +483,7 @@ contract BaseTest is Test {
         vm.warp(block.timestamp + seconds_);
     }
 
-    function _getPosition(
-        uint64 positionId
-    ) internal view returns (PositionLib.Position memory) {
+    function _getPosition(uint64 positionId) internal view returns (PositionLib.Position memory) {
         return positionManager.getPosition(positionId);
     }
 }

@@ -370,9 +370,8 @@ contract PositionManager is
         uint256 positionSize = amount * leverage;
 
         // Check risk limits - get vault address and call AssetVault directly
-        (bool canOpen,) = IAssetVault(vaultAddress).checkPositionRisk(positionSize, leverage, direction);
-
-        if (!canOpen) revert RiskLimitExceeded();
+        // Will revert with specific error if risk check fails
+        IAssetVault(vaultAddress).checkPositionRisk(positionSize, leverage, direction);
 
         // Create position ID first
         positionId = nextPositionId++;

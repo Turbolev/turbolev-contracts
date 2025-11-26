@@ -47,25 +47,13 @@ contract VaultGovernor is GovernanceManager {
     // EVENTS
     // ========================================================================
 
-    event VaultManagerUpdated(
-        address indexed oldManager,
-        address indexed newManager
-    );
+    event VaultManagerUpdated(address indexed oldManager, address indexed newManager);
 
-    event VaultBeaconUpdated(
-        address indexed oldBeacon,
-        address indexed newBeacon
-    );
+    event VaultBeaconUpdated(address indexed oldBeacon, address indexed newBeacon);
 
-    event OptInUpgradeManagerUpdated(
-        address indexed oldManager,
-        address indexed newManager
-    );
+    event OptInUpgradeManagerUpdated(address indexed oldManager, address indexed newManager);
 
-    event EmergencyMultisigUpdated(
-        address indexed oldMultisig,
-        address indexed newMultisig
-    );
+    event EmergencyMultisigUpdated(address indexed oldMultisig, address indexed newMultisig);
 
     event GuardianAdded(address indexed guardian);
 
@@ -114,9 +102,8 @@ contract VaultGovernor is GovernanceManager {
         address _admin
     ) GovernanceManager(_timelockController, _admin, _multisigWallet) {
         if (
-            _vaultManager == address(0) ||
-            _vaultBeacon == address(0) ||
-            _optInUpgradeManager == address(0)
+            _vaultManager == address(0) || _vaultBeacon == address(0)
+                || _optInUpgradeManager == address(0)
         ) {
             revert InvalidAddress();
         }
@@ -143,16 +130,14 @@ contract VaultGovernor is GovernanceManager {
      * @param salt Salt for operation uniqueness
      * @return operationHash Operation hash
      */
-    function proposePauseVault(
-        address projectToken,
-        bytes32 salt
-    ) external onlyProposer returns (bytes32) {
+    function proposePauseVault(address projectToken, bytes32 salt)
+        external
+        onlyProposer
+        returns (bytes32)
+    {
         if (vaultManager == address(0)) revert VaultManagerNotSet();
 
-        bytes memory data = abi.encodeWithSignature(
-            "pauseVault(address)",
-            projectToken
-        );
+        bytes memory data = abi.encodeWithSignature("pauseVault(address)", projectToken);
 
         return scheduleOperation(vaultManager, 0, data, bytes32(0), salt, 0);
     }
@@ -163,16 +148,14 @@ contract VaultGovernor is GovernanceManager {
      * @param salt Salt for operation uniqueness
      * @return operationHash Operation hash
      */
-    function proposeUnpauseVault(
-        address projectToken,
-        bytes32 salt
-    ) external onlyProposer returns (bytes32) {
+    function proposeUnpauseVault(address projectToken, bytes32 salt)
+        external
+        onlyProposer
+        returns (bytes32)
+    {
         if (vaultManager == address(0)) revert VaultManagerNotSet();
 
-        bytes memory data = abi.encodeWithSignature(
-            "unpauseVault(address)",
-            projectToken
-        );
+        bytes memory data = abi.encodeWithSignature("unpauseVault(address)", projectToken);
 
         return scheduleOperation(vaultManager, 0, data, bytes32(0), salt, 0);
     }
@@ -183,16 +166,14 @@ contract VaultGovernor is GovernanceManager {
      * @param salt Salt for operation uniqueness
      * @return operationHash Operation hash
      */
-    function proposePauseVaultByAddress(
-        address vault,
-        bytes32 salt
-    ) external onlyProposer returns (bytes32) {
+    function proposePauseVaultByAddress(address vault, bytes32 salt)
+        external
+        onlyProposer
+        returns (bytes32)
+    {
         if (vaultManager == address(0)) revert VaultManagerNotSet();
 
-        bytes memory data = abi.encodeWithSignature(
-            "pauseVaultByAddress(address)",
-            vault
-        );
+        bytes memory data = abi.encodeWithSignature("pauseVaultByAddress(address)", vault);
 
         return scheduleOperation(vaultManager, 0, data, bytes32(0), salt, 0);
     }
@@ -203,16 +184,14 @@ contract VaultGovernor is GovernanceManager {
      * @param salt Salt
      * @return operationHash Operation hash
      */
-    function proposeBatchPauseVaults(
-        address[] calldata vaults,
-        bytes32 salt
-    ) external onlyProposer returns (bytes32) {
+    function proposeBatchPauseVaults(address[] calldata vaults, bytes32 salt)
+        external
+        onlyProposer
+        returns (bytes32)
+    {
         if (vaultManager == address(0)) revert VaultManagerNotSet();
 
-        bytes memory data = abi.encodeWithSignature(
-            "batchPauseVaults(address[])",
-            vaults
-        );
+        bytes memory data = abi.encodeWithSignature("batchPauseVaults(address[])", vaults);
 
         return scheduleOperation(vaultManager, 0, data, bytes32(0), salt, 0);
     }
@@ -223,16 +202,14 @@ contract VaultGovernor is GovernanceManager {
      * @param salt Salt
      * @return operationHash Operation hash
      */
-    function proposeBeaconUpgrade(
-        address newImplementation,
-        bytes32 salt
-    ) external onlyProposer returns (bytes32) {
+    function proposeBeaconUpgrade(address newImplementation, bytes32 salt)
+        external
+        onlyProposer
+        returns (bytes32)
+    {
         if (vaultBeacon == address(0)) revert InvalidAddress();
 
-        bytes memory data = abi.encodeWithSignature(
-            "upgradeTo(address)",
-            newImplementation
-        );
+        bytes memory data = abi.encodeWithSignature("upgradeTo(address)", newImplementation);
 
         return scheduleOperation(vaultBeacon, 0, data, bytes32(0), salt, 0);
     }
@@ -254,21 +231,10 @@ contract VaultGovernor is GovernanceManager {
         if (optInUpgradeManager == address(0)) revert InvalidAddress();
 
         bytes memory data = abi.encodeWithSignature(
-            "proposeUpgrade(address,address,uint256)",
-            vault,
-            newImplementation,
-            gracePeriod
+            "proposeUpgrade(address,address,uint256)", vault, newImplementation, gracePeriod
         );
 
-        return
-            scheduleOperation(
-                optInUpgradeManager,
-                0,
-                data,
-                bytes32(0),
-                salt,
-                0
-            );
+        return scheduleOperation(optInUpgradeManager, 0, data, bytes32(0), salt, 0);
     }
 
     // ========================================================================
@@ -305,9 +271,7 @@ contract VaultGovernor is GovernanceManager {
      * @notice Emergency batch pause (guardians only)
      * @param vaults Array of vault addresses
      */
-    function emergencyBatchPause(
-        address[] calldata vaults
-    ) external onlyGuardian {
+    function emergencyBatchPause(address[] calldata vaults) external onlyGuardian {
         if (vaultManager == address(0)) revert VaultManagerNotSet();
 
         IVaultManager(vaultManager).batchPauseVaults(vaults);
@@ -325,9 +289,7 @@ contract VaultGovernor is GovernanceManager {
      * @notice Update VaultManager address
      * @param _vaultManager New vault manager
      */
-    function updateVaultManager(
-        address _vaultManager
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function updateVaultManager(address _vaultManager) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (_vaultManager == address(0)) revert InvalidAddress();
 
         address oldManager = vaultManager;
@@ -340,9 +302,7 @@ contract VaultGovernor is GovernanceManager {
      * @notice Update VaultBeacon address
      * @param _vaultBeacon New beacon
      */
-    function updateVaultBeacon(
-        address _vaultBeacon
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function updateVaultBeacon(address _vaultBeacon) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (_vaultBeacon == address(0)) revert InvalidAddress();
 
         address oldBeacon = vaultBeacon;
@@ -355,9 +315,10 @@ contract VaultGovernor is GovernanceManager {
      * @notice Update OptInUpgradeManager address
      * @param _optInUpgradeManager New manager
      */
-    function updateOptInUpgradeManager(
-        address _optInUpgradeManager
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function updateOptInUpgradeManager(address _optInUpgradeManager)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
         if (_optInUpgradeManager == address(0)) revert InvalidAddress();
 
         address oldManager = optInUpgradeManager;
@@ -370,9 +331,10 @@ contract VaultGovernor is GovernanceManager {
      * @notice Update emergency multisig
      * @param _emergencyMultisig New emergency multisig
      */
-    function updateEmergencyMultisig(
-        address _emergencyMultisig
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function updateEmergencyMultisig(address _emergencyMultisig)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
         address oldMultisig = emergencyMultisig;
         emergencyMultisig = _emergencyMultisig;
 
@@ -383,9 +345,7 @@ contract VaultGovernor is GovernanceManager {
      * @notice Add pause guardian
      * @param guardian Guardian address
      */
-    function addGuardian(
-        address guardian
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function addGuardian(address guardian) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (guardian == address(0)) revert InvalidGuardian();
 
         grantRole(GUARDIAN_ROLE, guardian);
@@ -397,9 +357,7 @@ contract VaultGovernor is GovernanceManager {
      * @notice Remove pause guardian
      * @param guardian Guardian address
      */
-    function removeGuardian(
-        address guardian
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function removeGuardian(address guardian) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (guardian == address(0)) revert InvalidGuardian();
 
         revokeRole(GUARDIAN_ROLE, guardian);
@@ -411,9 +369,10 @@ contract VaultGovernor is GovernanceManager {
      * @notice Batch add guardians
      * @param guardians Array of guardian addresses
      */
-    function batchAddGuardians(
-        address[] calldata guardians
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function batchAddGuardians(address[] calldata guardians)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
         for (uint256 i = 0; i < guardians.length; i++) {
             if (guardians[i] != address(0)) {
                 grantRole(GUARDIAN_ROLE, guardians[i]);

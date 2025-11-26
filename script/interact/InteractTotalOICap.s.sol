@@ -57,16 +57,16 @@ contract InteractTotalOICap is Script {
         console.log("Current Risk Multiplier:", currentMultiplierBps, "bps");
         console.log(
             "  -> Multiplier: %s.%sx",
-            (currentMultiplierBps * 100) / 10000,
-            (currentMultiplierBps % 10000) / 100
+            (currentMultiplierBps * 100) / 10_000,
+            (currentMultiplierBps % 10_000) / 100
         );
         console.log("Max Total OI:", maxTotalOI);
         console.log("Current Total OI:", currentTotalOI);
         console.log("Utilization:", utilizationBps, "bps");
         console.log(
             "  -> Utilization: %s.%s%%",
-            (utilizationBps * 100) / 10000,
-            (utilizationBps % 10000) / 100
+            (utilizationBps * 100) / 10_000,
+            (utilizationBps % 10_000) / 100
         );
         console.log("Can Open More:", canOpenMore);
 
@@ -184,10 +184,7 @@ contract InteractTotalOICap is Script {
         if (!canOpen) {
             console.logString(reason);
         } else {
-            console.log(
-                "After opening, remaining capacity:",
-                remainingCapacity
-            );
+            console.log("After opening, remaining capacity:", remainingCapacity);
         }
     }
 
@@ -213,10 +210,7 @@ contract InteractTotalOICap is Script {
         if (wouldExceedCap) {
             console.log("WARNING: Current positions would exceed new cap!");
             console.log(
-                "Excess:",
-                currentTotalOI > newMaxTotalOI
-                    ? currentTotalOI - newMaxTotalOI
-                    : 0
+                "Excess:", currentTotalOI > newMaxTotalOI ? currentTotalOI - newMaxTotalOI : 0
             );
         }
     }
@@ -250,11 +244,7 @@ contract InteractTotalOICap is Script {
     /**
      * @notice Enable tier system với thresholds
      */
-    function enableTierSystem(
-        uint256 tier1,
-        uint256 tier2,
-        uint256 tier3
-    ) public {
+    function enableTierSystem(uint256 tier1, uint256 tier2, uint256 tier3) public {
         console.log("\n=== ENABLE TIER SYSTEM ===");
         console.log("Tier 1 Threshold:", tier1);
         console.log("Tier 2 Threshold:", tier2);
@@ -273,12 +263,9 @@ contract InteractTotalOICap is Script {
     /**
      * @notice Set tier multipliers
      */
-    function setTierMultipliers(
-        uint16 tier1Bps,
-        uint16 tier2Bps,
-        uint16 tier3Bps,
-        uint16 tier4Bps
-    ) public {
+    function setTierMultipliers(uint16 tier1Bps, uint16 tier2Bps, uint16 tier3Bps, uint16 tier4Bps)
+        public
+    {
         console.log("\n=== SET TIER MULTIPLIERS ===");
         console.log("Tier 1 Multiplier:", tier1Bps, "bps");
         console.log("Tier 2 Multiplier:", tier2Bps, "bps");
@@ -307,20 +294,15 @@ contract InteractTotalOICap is Script {
         uint256 tier2 = 100_000 * 1e18; // 100K
         uint256 tier3 = 200_000 * 1e18; // 200K
 
-        uint16 tier1Mult = 15000; // 1.5x
-        uint16 tier2Mult = 20000; // 2.0x
-        uint16 tier3Mult = 25000; // 2.5x
-        uint16 tier4Mult = 30000; // 3.0x
+        uint16 tier1Mult = 15_000; // 1.5x
+        uint16 tier2Mult = 20_000; // 2.0x
+        uint16 tier3Mult = 25_000; // 2.5x
+        uint16 tier4Mult = 30_000; // 3.0x
 
         vm.startBroadcast();
 
         vault.setTotalOITierThresholds(tier1, tier2, tier3);
-        vault.setTotalOITierMultipliers(
-            tier1Mult,
-            tier2Mult,
-            tier3Mult,
-            tier4Mult
-        );
+        vault.setTotalOITierMultipliers(tier1Mult, tier2Mult, tier3Mult, tier4Mult);
 
         vm.stopBroadcast();
 
@@ -344,9 +326,7 @@ contract InteractTotalOICap is Script {
         console.log("Number of vaults:", vaultAddresses.length);
 
         for (uint256 i = 0; i < vaultAddresses.length; i++) {
-            AssetVaultUpgradeable v = AssetVaultUpgradeable(
-                payable(vaultAddresses[i])
-            );
+            AssetVaultUpgradeable v = AssetVaultUpgradeable(payable(vaultAddresses[i]));
 
             console.log("\n--- Vault %s ---", i + 1);
             console.log("Address:");

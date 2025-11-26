@@ -29,13 +29,9 @@ contract MockAdapter is ICLAggregatorAdapter, IChainlinkAggregatorV3 {
         mockTimestamp = block.timestamp;
     }
 
-    function setLatestRoundData(
-        uint80,
-        int256 price,
-        uint256,
-        uint256 timestamp,
-        uint80
-    ) external {
+    function setLatestRoundData(uint80, int256 price, uint256, uint256 timestamp, uint80)
+        external
+    {
         _price = price;
         mockTimestamp = timestamp;
     }
@@ -67,9 +63,11 @@ contract MockAdapter is ICLAggregatorAdapter, IChainlinkAggregatorV3 {
         return "Mock Adapter";
     }
 
-    function getRoundData(
-        uint80
-    ) external view returns (uint80, int256, uint256, uint256, uint80) {
+    function getRoundData(uint80)
+        external
+        view
+        returns (uint80, int256, uint256, uint256, uint80)
+    {
         return (1, _price, mockTimestamp, mockTimestamp, 1);
     }
 
@@ -106,10 +104,7 @@ contract SettlementEngineTest is Test {
     uint64 public constant TEST_POSITION_ID = 1;
 
     event SettlementPriceRetrieved(
-        address indexed projectToken,
-        uint256 price,
-        uint256 publishTime,
-        string source
+        address indexed projectToken, uint256 price, uint256 publishTime, string source
     );
 
     function setUp() public {
@@ -119,39 +114,23 @@ contract SettlementEngineTest is Test {
 
         // Deploy BlocksenseOracle
         BlocksenseOracle blocksenseImpl = new BlocksenseOracle();
-        bytes memory blocksenseInitData = abi.encodeWithSelector(
-            BlocksenseOracle.initialize.selector,
-            owner,
-            3600
-        );
-        ERC1967Proxy blocksenseProxy = new ERC1967Proxy(
-            address(blocksenseImpl),
-            blocksenseInitData
-        );
+        bytes memory blocksenseInitData =
+            abi.encodeWithSelector(BlocksenseOracle.initialize.selector, owner, 3600);
+        ERC1967Proxy blocksenseProxy = new ERC1967Proxy(address(blocksenseImpl), blocksenseInitData);
         blocksenseOracle = BlocksenseOracle(payable(address(blocksenseProxy)));
 
         // Deploy ChainlinkOracle
         ChainlinkOracle chainlinkImpl = new ChainlinkOracle();
-        bytes memory chainlinkInitData = abi.encodeWithSelector(
-            ChainlinkOracle.initialize.selector,
-            3600
-        );
-        ERC1967Proxy chainlinkProxy = new ERC1967Proxy(
-            address(chainlinkImpl),
-            chainlinkInitData
-        );
+        bytes memory chainlinkInitData =
+            abi.encodeWithSelector(ChainlinkOracle.initialize.selector, 3600);
+        ERC1967Proxy chainlinkProxy = new ERC1967Proxy(address(chainlinkImpl), chainlinkInitData);
         chainlinkOracle = ChainlinkOracle(address(chainlinkProxy));
 
         // Deploy PriceFeedManager V2.1
         PriceFeedManager priceFeedImpl = new PriceFeedManager();
-        bytes memory priceFeedInitData = abi.encodeWithSelector(
-            PriceFeedManager.initialize.selector,
-            owner
-        );
-        ERC1967Proxy priceFeedProxy = new ERC1967Proxy(
-            address(priceFeedImpl),
-            priceFeedInitData
-        );
+        bytes memory priceFeedInitData =
+            abi.encodeWithSelector(PriceFeedManager.initialize.selector, owner);
+        ERC1967Proxy priceFeedProxy = new ERC1967Proxy(address(priceFeedImpl), priceFeedInitData);
         priceFeedManager = PriceFeedManager(payable(address(priceFeedProxy)));
 
         // Register oracle providers
@@ -176,10 +155,8 @@ contract SettlementEngineTest is Test {
             mockMultisigWallet,
             mockVaultGovernor
         );
-        ERC1967Proxy vaultManagerProxy = new ERC1967Proxy(
-            address(vaultManagerImpl),
-            vaultManagerInitData
-        );
+        ERC1967Proxy vaultManagerProxy =
+            new ERC1967Proxy(address(vaultManagerImpl), vaultManagerInitData);
         vaultManager = VaultManager(payable(address(vaultManagerProxy)));
 
         // Deploy PositionManager
@@ -189,27 +166,17 @@ contract SettlementEngineTest is Test {
             owner,
             owner // admin
         );
-        ERC1967Proxy positionManagerProxy = new ERC1967Proxy(
-            address(positionManagerImpl),
-            positionManagerInitData
-        );
-        positionManager = PositionManager(
-            payable(address(positionManagerProxy))
-        );
+        ERC1967Proxy positionManagerProxy =
+            new ERC1967Proxy(address(positionManagerImpl), positionManagerInitData);
+        positionManager = PositionManager(payable(address(positionManagerProxy)));
 
         // Deploy SettlementEngine
         SettlementEngine settlementEngineImpl = new SettlementEngine();
-        bytes memory settlementEngineInitData = abi.encodeWithSelector(
-            SettlementEngine.initialize.selector,
-            owner
-        );
-        ERC1967Proxy settlementEngineProxy = new ERC1967Proxy(
-            address(settlementEngineImpl),
-            settlementEngineInitData
-        );
-        settlementEngine = SettlementEngine(
-            payable(address(settlementEngineProxy))
-        );
+        bytes memory settlementEngineInitData =
+            abi.encodeWithSelector(SettlementEngine.initialize.selector, owner);
+        ERC1967Proxy settlementEngineProxy =
+            new ERC1967Proxy(address(settlementEngineImpl), settlementEngineInitData);
+        settlementEngine = SettlementEngine(payable(address(settlementEngineProxy)));
 
         // Update config after initialization
         settlementEngine.updateConfig(
@@ -231,38 +198,34 @@ contract SettlementEngineTest is Test {
 
     function _setupOracleProviders() internal {
         // Register Chainlink Provider
-        IPriceFeedManager.OracleProvider
-            memory chainlinkProvider = IPriceFeedManager.OracleProvider({
-                oracleContract: address(chainlinkOracle),
-                oracleType: IBaseOracle.OracleType.PUSH,
-                enabled: true
-            });
+        IPriceFeedManager.OracleProvider memory chainlinkProvider = IPriceFeedManager.OracleProvider({
+            oracleContract: address(chainlinkOracle),
+            oracleType: IBaseOracle.OracleType.PUSH,
+            enabled: true
+        });
         priceFeedManager.registerOracleProvider(
-            priceFeedManager.CHAINLINK_PROVIDER(),
-            chainlinkProvider
+            priceFeedManager.CHAINLINK_PROVIDER(), chainlinkProvider
         );
 
         // Register Blocksense Provider
-        IPriceFeedManager.OracleProvider
-            memory blocksenseProvider = IPriceFeedManager.OracleProvider({
-                oracleContract: address(blocksenseOracle),
-                oracleType: IBaseOracle.OracleType.PUSH,
-                enabled: true
-            });
+        IPriceFeedManager.OracleProvider memory blocksenseProvider = IPriceFeedManager
+            .OracleProvider({
+            oracleContract: address(blocksenseOracle),
+            oracleType: IBaseOracle.OracleType.PUSH,
+            enabled: true
+        });
         priceFeedManager.registerOracleProvider(
-            priceFeedManager.BLOCKSENSE_PROVIDER(),
-            blocksenseProvider
+            priceFeedManager.BLOCKSENSE_PROVIDER(), blocksenseProvider
         );
 
         // Configure price feed for projectToken (feed addresses are per-token now)
-        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager
-            .PriceFeedConfig({
-                primaryProviderId: priceFeedManager.CHAINLINK_PROVIDER(),
-                secondaryProviderId: priceFeedManager.BLOCKSENSE_PROVIDER(),
-                primaryFeed: address(mockAdapter),
-                secondaryFeed: address(mockAdapter),
-                usePullMode: false
-            });
+        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
+            primaryProviderId: priceFeedManager.CHAINLINK_PROVIDER(),
+            secondaryProviderId: priceFeedManager.BLOCKSENSE_PROVIDER(),
+            primaryFeed: address(mockAdapter),
+            secondaryFeed: address(mockAdapter),
+            usePullMode: false
+        });
         priceFeedManager.setPriceFeedConfig(projectToken, config);
     }
 
@@ -276,10 +239,7 @@ contract SettlementEngineTest is Test {
         assertEq(settlementEngine.winMultiplierBps(), 19_500); // Updated after init
         assertEq(settlementEngine.minBetAmount(), 0.01 ether); // Updated after init
         assertEq(settlementEngine.maxBetAmount(), 100 ether); // Updated after init
-        assertEq(
-            settlementEngine.priceFeedManager(),
-            address(priceFeedManager)
-        );
+        assertEq(settlementEngine.priceFeedManager(), address(priceFeedManager));
     }
 
     // ========================================================================
@@ -287,16 +247,16 @@ contract SettlementEngineTest is Test {
     // ========================================================================
 
     function testGetSettlementPrice() public view {
-        (uint256 price, uint256 publishTime) = settlementEngine
-            .getSettlementPrice(projectToken, 3600);
+        (uint256 price, uint256 publishTime) =
+            settlementEngine.getSettlementPrice(projectToken, 3600);
 
         assertEq(price, 2000e18);
         assertGt(publishTime, 0);
     }
 
     function testGetSettlementPriceWithFallback() public {
-        (uint256 price, uint256 publishTime) = settlementEngine
-            .getSettlementPriceWithFallback(projectToken, 3600);
+        (uint256 price, uint256 publishTime) =
+            settlementEngine.getSettlementPriceWithFallback(projectToken, 3600);
 
         assertEq(price, 2000e18);
         assertGt(publishTime, 0);
@@ -306,10 +266,7 @@ contract SettlementEngineTest is Test {
         // Set different prices for primary and secondary
         mockAdapter.setLatestRoundData(1, 2100e18, 0, block.timestamp, 1);
 
-        (uint256 price, ) = settlementEngine.getSettlementPrice(
-            projectToken,
-            3600
-        );
+        (uint256 price,) = settlementEngine.getSettlementPrice(projectToken, 3600);
 
         // Should get price from primary (Chainlink)
         assertEq(price, 2100e18);
@@ -337,23 +294,17 @@ contract SettlementEngineTest is Test {
 
     function testFallbackToSecondaryProvider() public {
         // Disable primary provider
-        IPriceFeedManager.OracleProvider
-            memory disabledProvider = priceFeedManager.getOracleProvider(
-                priceFeedManager.CHAINLINK_PROVIDER()
-            );
+        IPriceFeedManager.OracleProvider memory disabledProvider =
+            priceFeedManager.getOracleProvider(priceFeedManager.CHAINLINK_PROVIDER());
         disabledProvider.enabled = false;
         priceFeedManager.updateOracleProvider(
-            priceFeedManager.CHAINLINK_PROVIDER(),
-            disabledProvider
+            priceFeedManager.CHAINLINK_PROVIDER(), disabledProvider
         );
 
         // Set different price for secondary
         mockAdapter.setLatestRoundData(1, 1900e18, 0, block.timestamp, 1);
 
-        (uint256 price, ) = settlementEngine.getSettlementPriceWithFallback(
-            projectToken,
-            3600
-        );
+        (uint256 price,) = settlementEngine.getSettlementPriceWithFallback(projectToken, 3600);
 
         // Should fallback to secondary (Blocksense)
         assertEq(price, 1900e18);
@@ -439,15 +390,8 @@ contract SettlementEngineTest is Test {
         uint256 closePrice = 1900e18; // -5% = -10% with 2x leverage
 
         vm.prank(address(positionManager));
-        (
-            bool won,
-            uint256 payout,
-            ,
-            int256 pnl,
-            int256 vaultPnL,
-            uint8 finalState,
-
-        ) = settlementEngine.processSettlement(position, closePrice, false);
+        (bool won, uint256 payout,, int256 pnl, int256 vaultPnL, uint8 finalState,) =
+            settlementEngine.processSettlement(position, closePrice, false);
 
         assertFalse(won);
         assertLt(payout, position.amount); // Should get less than collateral
@@ -485,15 +429,8 @@ contract SettlementEngineTest is Test {
         uint256 closePrice = 1900e18; // -5% = -50% with 10x leverage
 
         vm.prank(address(positionManager));
-        (
-            bool won,
-            uint256 payout,
-            uint256 fee,
-            int256 pnl,
-            ,
-            uint8 finalState,
-
-        ) = settlementEngine.processSettlement(position, closePrice, true);
+        (bool won, uint256 payout, uint256 fee, int256 pnl,, uint8 finalState,) =
+            settlementEngine.processSettlement(position, closePrice, true);
 
         assertFalse(won);
         assertLt(pnl, 0); // Negative P&L
@@ -530,8 +467,8 @@ contract SettlementEngineTest is Test {
         uint256 closePrice = 2400e18; // +20% = +200% with 10x leverage = 2 ether profit
 
         vm.prank(address(positionManager));
-        (bool won, , , int256 pnl, , , uint256 excessProfit) = settlementEngine
-            .processSettlement(position, closePrice, false);
+        (bool won,,, int256 pnl,,, uint256 excessProfit) =
+            settlementEngine.processSettlement(position, closePrice, false);
 
         assertTrue(won);
         assertEq(uint256(pnl), 2 ether); // Full profit calculated
@@ -686,17 +623,9 @@ contract SettlementEngineTest is Test {
     function testRevertWhenPriceFeedManagerNotSet() public {
         // Deploy new SettlementEngine without PriceFeedManager
         SettlementEngine newSettlementEngineImpl = new SettlementEngine();
-        bytes memory initData = abi.encodeWithSelector(
-            SettlementEngine.initialize.selector,
-            owner
-        );
-        ERC1967Proxy newProxy = new ERC1967Proxy(
-            address(newSettlementEngineImpl),
-            initData
-        );
-        SettlementEngine newSettlementEngine = SettlementEngine(
-            payable(address(newProxy))
-        );
+        bytes memory initData = abi.encodeWithSelector(SettlementEngine.initialize.selector, owner);
+        ERC1967Proxy newProxy = new ERC1967Proxy(address(newSettlementEngineImpl), initData);
+        SettlementEngine newSettlementEngine = SettlementEngine(payable(address(newProxy)));
 
         vm.expectRevert();
         newSettlementEngine.getSettlementPrice(projectToken, 3600);
@@ -722,23 +651,14 @@ contract SettlementEngineTest is Test {
         mockAdapter.setLatestRoundData(1, 2100e18, 0, block.timestamp, 1);
 
         // Get price from primary (Chainlink)
-        (uint256 price1, ) = settlementEngine.getSettlementPrice(
-            projectToken,
-            3600
-        );
+        (uint256 price1,) = settlementEngine.getSettlementPrice(projectToken, 3600);
         assertEq(price1, 2100e18);
 
         // Switch primary to Blocksense
-        priceFeedManager.setPrimaryProvider(
-            projectToken,
-            priceFeedManager.BLOCKSENSE_PROVIDER()
-        );
+        priceFeedManager.setPrimaryProvider(projectToken, priceFeedManager.BLOCKSENSE_PROVIDER());
 
         // Should get same price (same mock adapter)
-        (uint256 price2, ) = settlementEngine.getSettlementPrice(
-            projectToken,
-            3600
-        );
+        (uint256 price2,) = settlementEngine.getSettlementPrice(projectToken, 3600);
         assertEq(price2, 2100e18);
     }
 
@@ -746,22 +666,18 @@ contract SettlementEngineTest is Test {
         address token2 = address(0x456);
 
         // Configure token2 with only Blocksense
-        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager
-            .PriceFeedConfig({
-                primaryProviderId: priceFeedManager.BLOCKSENSE_PROVIDER(),
-                secondaryProviderId: bytes32(0),
-                primaryFeed: address(mockAdapter),
-                secondaryFeed: address(0),
-                usePullMode: false
-            });
+        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
+            primaryProviderId: priceFeedManager.BLOCKSENSE_PROVIDER(),
+            secondaryProviderId: bytes32(0),
+            primaryFeed: address(mockAdapter),
+            secondaryFeed: address(0),
+            usePullMode: false
+        });
         priceFeedManager.setPriceFeedConfig(token2, config);
 
         // Both should work
-        (uint256 price1, ) = settlementEngine.getSettlementPrice(
-            projectToken,
-            3600
-        );
-        (uint256 price2, ) = settlementEngine.getSettlementPrice(token2, 3600);
+        (uint256 price1,) = settlementEngine.getSettlementPrice(projectToken, 3600);
+        (uint256 price2,) = settlementEngine.getSettlementPrice(token2, 3600);
 
         assertGt(price1, 0);
         assertGt(price2, 0);
@@ -769,23 +685,18 @@ contract SettlementEngineTest is Test {
 
     function testOracleProviderUpdate() public {
         // Update provider configuration
-        IPriceFeedManager.OracleProvider
-            memory updatedProvider = IPriceFeedManager.OracleProvider({
-                oracleContract: address(chainlinkOracle),
-                oracleType: IBaseOracle.OracleType.PUSH,
-                enabled: true
-            });
+        IPriceFeedManager.OracleProvider memory updatedProvider = IPriceFeedManager.OracleProvider({
+            oracleContract: address(chainlinkOracle),
+            oracleType: IBaseOracle.OracleType.PUSH,
+            enabled: true
+        });
 
         priceFeedManager.updateOracleProvider(
-            priceFeedManager.CHAINLINK_PROVIDER(),
-            updatedProvider
+            priceFeedManager.CHAINLINK_PROVIDER(), updatedProvider
         );
 
         // Should still work after update
-        (uint256 price, ) = settlementEngine.getSettlementPrice(
-            projectToken,
-            3600
-        );
+        (uint256 price,) = settlementEngine.getSettlementPrice(projectToken, 3600);
         assertGt(price, 0);
     }
 }

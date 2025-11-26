@@ -104,8 +104,9 @@ contract InteractVaultManager is DeployHelper {
 
         vm.startBroadcast(deployer);
 
-        address vaultAddr =
-            vaultMgr.createVaultWithBeacon(projectToken, minBetAmount, maxBetAmount, graduationThreshold);
+        address vaultAddr = vaultMgr.createVaultWithBeacon(
+            projectToken, minBetAmount, maxBetAmount, graduationThreshold
+        );
         console.log("Vault created at:", vaultAddr);
         vm.stopBroadcast();
     }

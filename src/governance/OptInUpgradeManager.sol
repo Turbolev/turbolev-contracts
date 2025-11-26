@@ -6,9 +6,7 @@ import "../interfaces/IVaultBeacon.sol";
 
 interface IVault {
     function totalShares() external view returns (uint256);
-    function lpPositions(
-        address user
-    )
+    function lpPositions(address user)
         external
         view
         returns (
@@ -94,9 +92,7 @@ contract OptInUpgradeManager is Ownable {
     );
 
     event UpgradeExecuted(
-        address indexed vault,
-        address indexed newImplementation,
-        uint256 timestamp
+        address indexed vault, address indexed newImplementation, uint256 timestamp
     );
 
     event UpgradeCancelled(address indexed vault, uint256 timestamp);
@@ -104,10 +100,7 @@ contract OptInUpgradeManager is Ownable {
     event EmergencyOverrideEnabled(uint256 timestamp, uint256 expiresAt);
     event EmergencyOverrideDisabled(uint256 timestamp);
     event BeaconUpdated(address indexed oldBeacon, address indexed newBeacon);
-    event TimelockUpdated(
-        address indexed oldTimelock,
-        address indexed newTimelock
-    );
+    event TimelockUpdated(address indexed oldTimelock, address indexed newTimelock);
     event GracePeriodUpdated(uint256 oldPeriod, uint256 newPeriod);
 
     // ========================================================================
@@ -137,11 +130,7 @@ contract OptInUpgradeManager is Ownable {
     // CONSTRUCTOR
     // ========================================================================
 
-    constructor(
-        address _beacon,
-        address _timelockController,
-        address _owner
-    ) Ownable(_owner) {
+    constructor(address _beacon, address _timelockController, address _owner) Ownable(_owner) {
         if (_beacon == address(0) || _timelockController == address(0)) {
             revert InvalidAddress();
         }
@@ -160,11 +149,10 @@ contract OptInUpgradeManager is Ownable {
      * @param newImplementation New implementation address
      * @param customGracePeriod Custom grace period (0 = use default 48h)
      */
-    function proposeUpgrade(
-        address vault,
-        address newImplementation,
-        uint256 customGracePeriod
-    ) external onlyTimelock {
+    function proposeUpgrade(address vault, address newImplementation, uint256 customGracePeriod)
+        external
+        onlyTimelock
+    {
         if (vault == address(0) || newImplementation == address(0)) {
             revert InvalidAddress();
         }
@@ -172,16 +160,12 @@ contract OptInUpgradeManager is Ownable {
         UpgradeProposal storage proposal = upgradeProposals[vault];
 
         // Check if there's an active proposal
-        if (
-            proposal.proposedAt > 0 && !proposal.executed && !proposal.cancelled
-        ) {
+        if (proposal.proposedAt > 0 && !proposal.executed && !proposal.cancelled) {
             revert ProposalAlreadyExists();
         }
 
         // Use custom or default grace period
-        uint256 gracePeriod = customGracePeriod > 0
-            ? customGracePeriod
-            : defaultGracePeriod;
+        uint256 gracePeriod = customGracePeriod > 0 ? customGracePeriod : defaultGracePeriod;
 
         // Validate grace period
         if (gracePeriod < MIN_GRACE_PERIOD || gracePeriod > MAX_GRACE_PERIOD) {
@@ -198,10 +182,7 @@ contract OptInUpgradeManager is Ownable {
         });
 
         emit UpgradeProposed(
-            vault,
-            newImplementation,
-            block.timestamp,
-            block.timestamp + gracePeriod
+            vault, newImplementation, block.timestamp, block.timestamp + gracePeriod
         );
     }
 
@@ -247,16 +228,9 @@ contract OptInUpgradeManager is Ownable {
         proposal.executed = true;
 
         // Call beacon to upgrade vault
-        IVaultBeacon(beacon).setVaultImplementation(
-            vault,
-            proposal.newImplementation
-        );
+        IVaultBeacon(beacon).setVaultImplementation(vault, proposal.newImplementation);
 
-        emit UpgradeExecuted(
-            vault,
-            proposal.newImplementation,
-            block.timestamp
-        );
+        emit UpgradeExecuted(vault, proposal.newImplementation, block.timestamp);
     }
 
     // ========================================================================
@@ -271,8 +245,7 @@ contract OptInUpgradeManager is Ownable {
         emergencyOverrideTimestamp = block.timestamp;
 
         emit EmergencyOverrideEnabled(
-            block.timestamp,
-            block.timestamp + EMERGENCY_OVERRIDE_DURATION
+            block.timestamp, block.timestamp + EMERGENCY_OVERRIDE_DURATION
         );
     }
 
@@ -296,10 +269,7 @@ contract OptInUpgradeManager is Ownable {
     function canVaultUpgrade(address vault) external view returns (bool) {
         // Check emergency override first
         if (emergencyOverride) {
-            if (
-                block.timestamp <=
-                emergencyOverrideTimestamp + EMERGENCY_OVERRIDE_DURATION
-            ) {
+            if (block.timestamp <= emergencyOverrideTimestamp + EMERGENCY_OVERRIDE_DURATION) {
                 return true;
             }
         }
@@ -319,9 +289,7 @@ contract OptInUpgradeManager is Ownable {
      * @param vault Vault address
      * @return proposal Upgrade proposal
      */
-    function getUpgradeProposal(
-        address vault
-    ) external view returns (UpgradeProposal memory) {
+    function getUpgradeProposal(address vault) external view returns (UpgradeProposal memory) {
         return upgradeProposals[vault];
     }
 
@@ -331,9 +299,11 @@ contract OptInUpgradeManager is Ownable {
      * @return ready True if ready
      * @return reason Reason if not ready
      */
-    function isUpgradeReady(
-        address vault
-    ) external view returns (bool ready, string memory reason) {
+    function isUpgradeReady(address vault)
+        external
+        view
+        returns (bool ready, string memory reason)
+    {
         UpgradeProposal storage proposal = upgradeProposals[vault];
 
         if (proposal.proposedAt == 0) {
@@ -360,14 +330,10 @@ contract OptInUpgradeManager is Ownable {
      * @param vault Vault address
      * @return remaining Time remaining in seconds (0 if ended)
      */
-    function getGracePeriodRemaining(
-        address vault
-    ) external view returns (uint256) {
+    function getGracePeriodRemaining(address vault) external view returns (uint256) {
         UpgradeProposal storage proposal = upgradeProposals[vault];
 
-        if (
-            proposal.proposedAt == 0 || proposal.executed || proposal.cancelled
-        ) {
+        if (proposal.proposedAt == 0 || proposal.executed || proposal.cancelled) {
             return 0;
         }
 
@@ -384,9 +350,7 @@ contract OptInUpgradeManager is Ownable {
      */
     function isEmergencyOverrideActive() external view returns (bool) {
         if (!emergencyOverride) return false;
-        return
-            block.timestamp <=
-            emergencyOverrideTimestamp + EMERGENCY_OVERRIDE_DURATION;
+        return block.timestamp <= emergencyOverrideTimestamp + EMERGENCY_OVERRIDE_DURATION;
     }
 
     // ========================================================================
@@ -420,9 +384,7 @@ contract OptInUpgradeManager is Ownable {
      * @param _gracePeriod New grace period
      */
     function updateDefaultGracePeriod(uint256 _gracePeriod) external onlyOwner {
-        if (
-            _gracePeriod < MIN_GRACE_PERIOD || _gracePeriod > MAX_GRACE_PERIOD
-        ) {
+        if (_gracePeriod < MIN_GRACE_PERIOD || _gracePeriod > MAX_GRACE_PERIOD) {
             revert InvalidGracePeriod();
         }
         uint256 oldPeriod = defaultGracePeriod;

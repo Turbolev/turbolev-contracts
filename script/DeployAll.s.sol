@@ -272,7 +272,8 @@ contract DeployAll is DeployHelper {
             console.log("Deploying new proxy...");
 
             // Prepare initialization data
-            bytes memory initData = abi.encodeWithSelector(VaultManager.initializeV2.selector, owner);
+            bytes memory initData =
+                abi.encodeWithSelector(VaultManager.initializeV2.selector, owner);
 
             // Deploy proxy
             vaultManagerProxy = address(new ERC1967Proxy(vaultManagerImpl, initData));

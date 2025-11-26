@@ -92,26 +92,11 @@ contract VaultManager is
         uint256 timestamp
     );
 
-    event VaultBeaconUpdated(
-        address indexed oldBeacon,
-        address indexed newBeacon
-    );
-    event OptInUpgradeManagerUpdated(
-        address indexed oldManager,
-        address indexed newManager
-    );
-    event TimelockControllerUpdated(
-        address indexed oldController,
-        address indexed newController
-    );
-    event MultisigWalletUpdated(
-        address indexed oldWallet,
-        address indexed newWallet
-    );
-    event VaultGovernorUpdated(
-        address indexed oldGovernor,
-        address indexed newGovernor
-    );
+    event VaultBeaconUpdated(address indexed oldBeacon, address indexed newBeacon);
+    event OptInUpgradeManagerUpdated(address indexed oldManager, address indexed newManager);
+    event TimelockControllerUpdated(address indexed oldController, address indexed newController);
+    event MultisigWalletUpdated(address indexed oldWallet, address indexed newWallet);
+    event VaultGovernorUpdated(address indexed oldGovernor, address indexed newGovernor);
     event VaultDeactivated(address indexed vaultAddress, uint256 timestamp);
     event VaultReactivated(address indexed vaultAddress, uint256 timestamp);
 
@@ -280,9 +265,9 @@ contract VaultManager is
         uint256[] calldata graduationThresholds
     ) external onlyOwner returns (address[] memory vaultAddresses) {
         require(
-            projectTokens.length == minBetAmounts.length &&
-                projectTokens.length == maxBetAmounts.length &&
-                projectTokens.length == graduationThresholds.length,
+            projectTokens.length == minBetAmounts.length
+                && projectTokens.length == maxBetAmounts.length
+                && projectTokens.length == graduationThresholds.length,
             "Length mismatch"
         );
 
@@ -290,10 +275,7 @@ contract VaultManager is
 
         for (uint256 i = 0; i < projectTokens.length; i++) {
             vaultAddresses[i] = createVaultWithBeacon(
-                projectTokens[i],
-                minBetAmounts[i],
-                maxBetAmounts[i],
-                graduationThresholds[i]
+                projectTokens[i], minBetAmounts[i], maxBetAmounts[i], graduationThresholds[i]
             );
         }
 
@@ -322,41 +304,23 @@ contract VaultManager is
         uint8 direction
     ) external payable onlyPositionManager {
         address vaultAddress = _getVault(_projectToken);
-        IERC20(_projectToken).transferFrom(
-            positionManager,
-            vaultAddress,
-            amount
-        );
+        IERC20(_projectToken).transferFrom(positionManager, vaultAddress, amount);
         IAssetVault(vaultAddress).depositFromBet(
-            positionId,
-            amount,
-            positionSize,
-            isMarginAdd,
-            direction
+            positionId, amount, positionSize, isMarginAdd, direction
         );
         emit CollateralDepositedFromBet(
-            vaultAddress,
-            _projectToken,
-            amount,
-            positionSize,
-            block.timestamp
+            vaultAddress, _projectToken, amount, positionSize, block.timestamp
         );
     }
 
     /**
      * @notice Execute payout to user
      */
-    function executePayout(
-        address _projectToken,
-        address user,
-        uint256 amount,
-        uint64 positionId
-    ) external onlyPositionManager {
-        IAssetVault(_getVault(_projectToken)).executePayout(
-            user,
-            amount,
-            positionId
-        );
+    function executePayout(address _projectToken, address user, uint256 amount, uint64 positionId)
+        external
+        onlyPositionManager
+    {
+        IAssetVault(_getVault(_projectToken)).executePayout(user, amount, positionId);
     }
 
     /**
@@ -373,12 +337,7 @@ contract VaultManager is
         uint8 direction
     ) external onlyPositionManager {
         IAssetVault(_getVault(_projectToken)).updateVaultPnL(
-            positionId,
-            collateral,
-            vaultPnL,
-            fee,
-            positionSize,
-            direction
+            positionId, collateral, vaultPnL, fee, positionSize, direction
         );
     }
 
@@ -401,9 +360,7 @@ contract VaultManager is
      * @param _projectToken Project token address
      * @dev Chỉ TimelockController hoặc VaultGovernor có thể gọi
      */
-    function unpauseVault(
-        address _projectToken
-    ) external onlyTimelockOrGovernor {
+    function unpauseVault(address _projectToken) external onlyTimelockOrGovernor {
         address vault = _getVault(_projectToken);
         IAssetVault(vault).unpause();
     }
@@ -422,9 +379,7 @@ contract VaultManager is
      * @param vault Vault address
      * @dev For governance operations directly on vault address
      */
-    function unpauseVaultByAddress(
-        address vault
-    ) public onlyTimelockOrGovernor {
+    function unpauseVaultByAddress(address vault) public onlyTimelockOrGovernor {
         IAssetVault(vault).unpause();
     }
 
@@ -432,9 +387,7 @@ contract VaultManager is
      * @notice Batch pause nhiều vaults
      * @param vaults Array of vault addresses
      */
-    function batchPauseVaults(
-        address[] calldata vaults
-    ) external onlyTimelockOrGovernor {
+    function batchPauseVaults(address[] calldata vaults) external onlyTimelockOrGovernor {
         for (uint256 i = 0; i < vaults.length; i++) {
             pauseVaultByAddress(vaults[i]);
         }
@@ -444,9 +397,7 @@ contract VaultManager is
      * @notice Batch unpause nhiều vaults
      * @param vaults Array of vault addresses
      */
-    function batchUnpauseVaults(
-        address[] calldata vaults
-    ) external onlyTimelockOrGovernor {
+    function batchUnpauseVaults(address[] calldata vaults) external onlyTimelockOrGovernor {
         for (uint256 i = 0; i < vaults.length; i++) {
             unpauseVaultByAddress(vaults[i]);
         }
@@ -497,9 +448,7 @@ contract VaultManager is
     /**
      * @notice Set VaultManagerHelper contract address
      */
-    function setVaultManagerHelper(
-        address _vaultManagerHelper
-    ) external onlyOwner {
+    function setVaultManagerHelper(address _vaultManagerHelper) external onlyOwner {
         if (_vaultManagerHelper == address(0)) revert InvalidAddress();
         vaultManagerHelper = _vaultManagerHelper;
     }
@@ -521,9 +470,7 @@ contract VaultManager is
      * @notice Set OptInUpgradeManager address
      * @param _optInUpgradeManager New manager address
      */
-    function setOptInUpgradeManager(
-        address _optInUpgradeManager
-    ) external onlyOwner {
+    function setOptInUpgradeManager(address _optInUpgradeManager) external onlyOwner {
         if (_optInUpgradeManager == address(0)) revert InvalidAddress();
 
         address oldManager = optInUpgradeManager;
@@ -536,9 +483,7 @@ contract VaultManager is
      * @notice Set TimelockController address
      * @param _timelockController New timelock controller address
      */
-    function setTimelockController(
-        address _timelockController
-    ) external onlyOwner {
+    function setTimelockController(address _timelockController) external onlyOwner {
         if (_timelockController == address(0)) revert InvalidAddress();
 
         address oldController = timelockController;
@@ -590,9 +535,7 @@ contract VaultManager is
     /**
      * @notice Authorize upgrade (UUPS pattern)
      */
-    function _authorizeUpgrade(
-        address newImplementation
-    ) internal override onlyOwner {}
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner { }
 
     // ========================================================================
     // VIEW FUNCTIONS
@@ -602,9 +545,7 @@ contract VaultManager is
         return vaultsByProjectToken[_projectToken];
     }
 
-    function isVaultSupported(
-        address _projectToken
-    ) external view returns (bool) {
+    function isVaultSupported(address _projectToken) external view returns (bool) {
         return vaultsByProjectToken[_projectToken] != address(0);
     }
 
@@ -612,9 +553,7 @@ contract VaultManager is
         return allVaults;
     }
 
-    function vaultProjectToken(
-        address vaultAddress
-    ) external view returns (address projectToken) {
+    function vaultProjectToken(address vaultAddress) external view returns (address projectToken) {
         return vaultInfos[vaultAddress].projectToken;
     }
 
@@ -678,16 +617,19 @@ contract VaultManager is
      * @param vault Vault address
      * @return info VaultInfo struct
      */
-    function getVaultInfo(
-        address vault
-    ) external view returns (IVaultManager.VaultInfo memory info) {
+    function getVaultInfo(address vault)
+        external
+        view
+        returns (IVaultManager.VaultInfo memory info)
+    {
         return vaultInfos[vault];
     }
 
     function _getVault(address _projectToken) internal view returns (address) {
         address vault = vaultsByProjectToken[_projectToken];
-        if (vault == address(0) || vault.code.length == 0)
+        if (vault == address(0) || vault.code.length == 0) {
             revert VaultNotFound();
+        }
         return vault;
     }
 

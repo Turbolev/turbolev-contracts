@@ -125,16 +125,14 @@ interface IAssetVault {
 
     /**
      * @notice Check position risk
+     * @dev Reverts with specific custom error if position cannot be opened
      * @param positionSize Position size
      * @param leverage Leverage multiplier
      * @param direction Position direction (1 = LONG, 2 = SHORT)
-     * @return canOpen Whether position can be opened
-     * @return reason Reason if cannot open
      */
     function checkPositionRisk(uint256 positionSize, uint8 leverage, uint8 direction)
         external
-        view
-        returns (bool canOpen, string memory reason);
+        view;
 
     /**
      * @notice Get vault info

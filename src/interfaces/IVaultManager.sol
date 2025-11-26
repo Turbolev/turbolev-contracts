@@ -23,6 +23,7 @@ interface IVaultManager {
      * @param _projectToken Project token address
      * @return vaultAddress Vault contract address
      */
+
     function getVault(address _projectToken) external view returns (address vaultAddress);
 
     /**
