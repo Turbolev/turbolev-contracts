@@ -1718,9 +1718,9 @@ contract AssetVaultUpgradeable is
     /**
      * @notice Pause vault
      * @dev Can be called by:
-     *      - Owner (with timelock delay)
-     *      - VaultGovernor (with timelock + multisig)
-     *      - Pause guardians (emergency, no delay)
+     *      - Owner
+     *      - VaultManager (được gọi bởi multisig)
+     *      - UpgradeManager
      */
     function pause() external {
         // Allow owner, vaultManager, or upgradeManager
@@ -1732,7 +1732,7 @@ contract AssetVaultUpgradeable is
 
     /**
      * @notice Unpause vault
-     * @dev Requires timelock + multisig approval (no emergency unpause)
+     * @dev Chỉ Owner hoặc VaultManager (được gọi bởi multisig) có thể unpause
      */
     function unpause() external {
         // Only owner or vaultManager (not upgradeManager for security)

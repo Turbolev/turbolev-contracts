@@ -242,6 +242,8 @@ contract BaseTest is Test {
     address public liquidityProvider;
     address public priceUpdater;
     address public backend;
+    address public mockMultisigWallet;
+    address public mockTimelockController;
 
     // Constants
     uint256 public constant INITIAL_BALANCE = 1_000_000 ether;
@@ -349,8 +351,8 @@ contract BaseTest is Test {
         AssetVaultUpgradeable vaultImplementation = new AssetVaultUpgradeable();
         VaultBeacon vaultBeaconContract =
             new VaultBeacon(address(vaultImplementation), owner, mockOptInUpgradeManager);
-        address mockTimelockController = makeAddr("mockTimelockController");
-        address mockMultisigWallet = makeAddr("mockMultisigWallet");
+        mockTimelockController = makeAddr("mockTimelockController");
+        mockMultisigWallet = makeAddr("mockMultisigWallet");
         address mockVaultGovernor = makeAddr("mockVaultGovernor");
 
         bytes memory vaultInitData = abi.encodeWithSelector(

@@ -179,6 +179,12 @@ interface IAssetVault {
     function unpause() external;
 
     /**
+     * @notice Check if vault is paused
+     * @return True if vault is paused
+     */
+    function paused() external view returns (bool);
+
+    /**
      * @notice Set upgrade manager for opt-in upgrades
      * @param _upgradeManager OptInUpgradeManager address
      */

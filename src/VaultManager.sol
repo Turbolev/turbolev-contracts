@@ -22,7 +22,7 @@ import "./governance/OptInUpgradeManager.sol";
  * - Deploy vaults qua BeaconProxy (upgradeable)
  * - Tích hợp Timelock (24-48h) + Multisig (3/5 or 4/7)
  * - Opt-in upgrade cho LPs (GMX/Hyperliquid style)
- * - Pause/unpause vaults qua governance
+ * - Pause/unpause vaults qua Multisig (không cần timelock delay)
  * - UUPS upgradeable
  */
 contract VaultManager is
@@ -123,6 +123,13 @@ contract VaultManager is
 
     modifier onlyTimelockOrGovernor() {
         if (msg.sender != timelockController && msg.sender != vaultGovernor) {
+            revert NotAuthorized();
+        }
+        _;
+    }
+
+    modifier onlyMultisig() {
+        if (msg.sender != multisigWallet) {
             revert NotAuthorized();
         }
         _;
@@ -348,9 +355,9 @@ contract VaultManager is
     /**
      * @notice Pause vault by project token (IVaultManager interface)
      * @param _projectToken Project token address
-     * @dev Chỉ TimelockController hoặc VaultGovernor có thể gọi
+     * @dev Chỉ MultisigWallet có thể gọi
      */
-    function pauseVault(address _projectToken) external onlyTimelockOrGovernor {
+    function pauseVault(address _projectToken) external onlyMultisig {
         address vault = _getVault(_projectToken);
         IAssetVault(vault).pause();
     }
@@ -358,9 +365,9 @@ contract VaultManager is
     /**
      * @notice Unpause vault by project token (IVaultManager interface)
      * @param _projectToken Project token address
-     * @dev Chỉ TimelockController hoặc VaultGovernor có thể gọi
+     * @dev Chỉ MultisigWallet có thể gọi
      */
-    function unpauseVault(address _projectToken) external onlyTimelockOrGovernor {
+    function unpauseVault(address _projectToken) external onlyMultisig {
         address vault = _getVault(_projectToken);
         IAssetVault(vault).unpause();
     }
@@ -368,26 +375,27 @@ contract VaultManager is
     /**
      * @notice Pause vault by vault address directly
      * @param vault Vault address
-     * @dev For governance operations directly on vault address
+     * @dev Chỉ MultisigWallet có thể gọi
      */
-    function pauseVaultByAddress(address vault) public onlyTimelockOrGovernor {
+    function pauseVaultByAddress(address vault) public onlyMultisig {
         IAssetVault(vault).pause();
     }
 
     /**
      * @notice Unpause vault by vault address directly
      * @param vault Vault address
-     * @dev For governance operations directly on vault address
+     * @dev Chỉ MultisigWallet có thể gọi
      */
-    function unpauseVaultByAddress(address vault) public onlyTimelockOrGovernor {
+    function unpauseVaultByAddress(address vault) public onlyMultisig {
         IAssetVault(vault).unpause();
     }
 
     /**
      * @notice Batch pause nhiều vaults
      * @param vaults Array of vault addresses
+     * @dev Chỉ MultisigWallet có thể gọi
      */
-    function batchPauseVaults(address[] calldata vaults) external onlyTimelockOrGovernor {
+    function batchPauseVaults(address[] calldata vaults) external onlyMultisig {
         for (uint256 i = 0; i < vaults.length; i++) {
             pauseVaultByAddress(vaults[i]);
         }
@@ -396,8 +404,9 @@ contract VaultManager is
     /**
      * @notice Batch unpause nhiều vaults
      * @param vaults Array of vault addresses
+     * @dev Chỉ MultisigWallet có thể gọi
      */
-    function batchUnpauseVaults(address[] calldata vaults) external onlyTimelockOrGovernor {
+    function batchUnpauseVaults(address[] calldata vaults) external onlyMultisig {
         for (uint256 i = 0; i < vaults.length; i++) {
             unpauseVaultByAddress(vaults[i]);
         }
