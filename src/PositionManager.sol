@@ -192,6 +192,14 @@ contract PositionManager is
 
     event PendingCloseProcessed(uint64 indexed positionId, bool success, PendingCloseReason reason);
 
+    event FundingSettled( // Positive = paid, Negative = received
+        uint64 indexed positionId,
+        address indexed user,
+        int256 fundingAmount,
+        uint8 direction,
+        uint256 timestamp
+    );
+
     // ========================================================================
     // ERRORS
     // ========================================================================
@@ -411,6 +419,13 @@ contract PositionManager is
         pos.minCloseTime = block.timestamp + minPositionHoldTime;
         pos.initialMargin = amount;
         pos.addedMargin = 0;
+
+        // Store entry funding rates for funding calculation
+        (int256 entryLongRate, int256 entryShortRate) =
+            IAssetVault(vaultAddress).getCumulativeFundingRates();
+        pos.entryFundingRateLong = entryLongRate;
+        pos.entryFundingRateShort = entryShortRate;
+        pos.lastFundingSettlement = block.timestamp;
 
         emit PositionOpened(
             positionId,
@@ -928,8 +943,8 @@ contract PositionManager is
     // ========================================================================
 
     /**
-     * @notice Process settlement logic with synthetic leverage
-     * @dev Delegates to SettlementEngine for settlement calculation
+     * @notice Process settlement logic with synthetic leverage and funding
+     * @dev Delegates to SettlementEngine for settlement calculation, then adjusts for funding
      */
     function _processSettlement(
         uint64 positionId,
@@ -947,7 +962,48 @@ contract PositionManager is
         (bool won, uint256 payout, uint256 fee, int256 pnl, int256 vaultPnL, uint8 finalState,) =
             ISettlementEngine(settlementEngine).processSettlement(pos, closePrice, isLiquidation);
 
-        // Update vault P&L
+        // Calculate funding adjustment
+        int256 fundingOwed = 0;
+        if (vaultManager != address(0)) {
+            address vaultAddress = IVaultManager(vaultManager).getVault(pos.projectToken);
+            if (vaultAddress != address(0)) {
+                fundingOwed = IAssetVault(vaultAddress).calculatePositionFunding(
+                    pos.entryFundingRateLong,
+                    pos.entryFundingRateShort,
+                    pos.positionSize,
+                    pos.direction
+                );
+            }
+        }
+
+        // Adjust payout by funding
+        // If fundingOwed > 0: position owes funding, reduce payout
+        // If fundingOwed < 0: position receives funding, increase payout
+        uint256 adjustedPayout = payout;
+        if (fundingOwed > 0) {
+            // Position owes funding - deduct from payout
+            uint256 fundingDeduction = uint256(fundingOwed);
+            if (fundingDeduction >= adjustedPayout) {
+                adjustedPayout = 0;
+            } else {
+                adjustedPayout -= fundingDeduction;
+            }
+            // Funding goes to vault (for distribution to counterparty)
+            vaultPnL += fundingOwed; // Vault gains from funding
+        } else if (fundingOwed < 0) {
+            // Position receives funding - add to payout
+            uint256 fundingReceived = uint256(-fundingOwed);
+            adjustedPayout += fundingReceived;
+            // Funding comes from vault
+            vaultPnL += fundingOwed; // Vault loses (negative value)
+        }
+
+        // Emit funding event if applicable
+        if (fundingOwed != 0) {
+            emit FundingSettled(positionId, pos.user, fundingOwed, pos.direction, block.timestamp);
+        }
+
+        // Update vault P&L (includes funding adjustment)
         if (vaultManager != address(0)) {
             IVaultManager(vaultManager).updateVaultPnLWithLeverage(
                 pos.projectToken, // Project token
@@ -961,11 +1017,11 @@ contract PositionManager is
         }
 
         // Execute payout if user has any payout (v1: always project token)
-        if (payout > 0 && vaultManager != address(0)) {
+        if (adjustedPayout > 0 && vaultManager != address(0)) {
             IVaultManager(vaultManager).executePayout(
                 pos.projectToken, // Project token
                 pos.user,
-                payout,
+                adjustedPayout,
                 positionId
             );
         }
@@ -980,7 +1036,7 @@ contract PositionManager is
             pos.user,
             pos.projectToken,
             won,
-            payout,
+            adjustedPayout, // Use adjusted payout in event
             closePrice,
             pnl,
             block.timestamp,
@@ -1122,7 +1178,10 @@ contract PositionManager is
     }
 
     /**
-     * @notice Check if position can be liquidated
+     * @notice Check if position can be liquidated (includes funding)
+     * @param positionId Position ID
+     * @param currentPrice Current market price
+     * @return isLiquidatable True if position should be liquidated
      */
     function checkLiquidation(uint64 positionId, uint256 currentPrice)
         external
@@ -1130,7 +1189,77 @@ contract PositionManager is
         returns (bool)
     {
         PositionLib.Position storage pos = positions[positionId];
-        return PositionLib.isLiquidated(pos, currentPrice);
+
+        // Check price-based liquidation first
+        if (PositionLib.isLiquidated(pos, currentPrice)) {
+            return true;
+        }
+
+        // Check funding-based liquidation
+        if (vaultManager != address(0)) {
+            address vaultAddress = IVaultManager(vaultManager).getVault(pos.projectToken);
+            if (vaultAddress != address(0)) {
+                (bool fundingLiquidatable,,) = IAssetVault(vaultAddress).checkFundingLiquidation(
+                    pos.amount,
+                    pos.entryFundingRateLong,
+                    pos.entryFundingRateShort,
+                    pos.positionSize,
+                    pos.direction,
+                    maintenanceMarginRatio
+                );
+                if (fundingLiquidatable) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @notice Check liquidation with detailed funding info
+     * @param positionId Position ID
+     * @param currentPrice Current market price
+     * @return isLiquidatable True if position should be liquidated
+     * @return reason Liquidation reason (0=not liquidatable, 1=price, 2=funding)
+     * @return fundingOwed Amount of funding owed
+     * @return effectiveCollateral Collateral after funding
+     */
+    function checkLiquidationDetailed(uint64 positionId, uint256 currentPrice)
+        external
+        view
+        returns (bool isLiquidatable, uint8 reason, int256 fundingOwed, uint256 effectiveCollateral)
+    {
+        PositionLib.Position storage pos = positions[positionId];
+
+        // Check price-based liquidation first
+        if (PositionLib.isLiquidated(pos, currentPrice)) {
+            return (true, 1, 0, pos.amount); // reason 1 = price
+        }
+
+        // Check funding-based liquidation
+        if (vaultManager != address(0)) {
+            address vaultAddress = IVaultManager(vaultManager).getVault(pos.projectToken);
+            if (vaultAddress != address(0)) {
+                (bool fundingLiquidatable, int256 _fundingOwed, uint256 _effectiveCollateral) =
+                IAssetVault(vaultAddress).checkFundingLiquidation(
+                    pos.amount,
+                    pos.entryFundingRateLong,
+                    pos.entryFundingRateShort,
+                    pos.positionSize,
+                    pos.direction,
+                    maintenanceMarginRatio
+                );
+
+                if (fundingLiquidatable) {
+                    return (true, 2, _fundingOwed, _effectiveCollateral); // reason 2 = funding
+                }
+
+                return (false, 0, _fundingOwed, _effectiveCollateral);
+            }
+        }
+
+        return (false, 0, 0, pos.amount);
     }
 
     /**
@@ -1167,6 +1296,58 @@ contract PositionManager is
     {
         PositionLib.Position storage pos = positions[positionId];
         return PositionLib.calculateUnrealizedPnL(pos, currentPrice);
+    }
+
+    /**
+     * @notice Get position funding information
+     * @param positionId Position ID
+     * @return fundingOwed Amount of funding owed (positive) or to receive (negative)
+     * @return effectiveCollateral Collateral after funding deduction
+     * @return hourlyFundingRate Current hourly funding rate in bps
+     * @return isLongPaying True if longs are currently paying
+     */
+    function getPositionFundingInfo(uint64 positionId)
+        external
+        view
+        returns (
+            int256 fundingOwed,
+            uint256 effectiveCollateral,
+            uint256 hourlyFundingRate,
+            bool isLongPaying
+        )
+    {
+        PositionLib.Position storage pos = positions[positionId];
+        if (pos.user == address(0)) revert PositionNotFound();
+
+        if (vaultManager == address(0)) {
+            return (0, pos.amount, 0, false);
+        }
+
+        address vaultAddress = IVaultManager(vaultManager).getVault(pos.projectToken);
+        if (vaultAddress == address(0)) {
+            return (0, pos.amount, 0, false);
+        }
+
+        // Calculate funding owed
+        fundingOwed = IAssetVault(vaultAddress).calculatePositionFunding(
+            pos.entryFundingRateLong, pos.entryFundingRateShort, pos.positionSize, pos.direction
+        );
+
+        // Calculate effective collateral
+        if (fundingOwed > 0) {
+            uint256 deduction = uint256(fundingOwed);
+            effectiveCollateral = pos.amount > deduction ? pos.amount - deduction : 0;
+        } else {
+            effectiveCollateral = pos.amount + uint256(-fundingOwed);
+        }
+
+        // Get current funding rate
+        uint256 imbalanceBps;
+        bool hasCounterparty;
+        (hourlyFundingRate, isLongPaying, imbalanceBps, hasCounterparty) =
+            IAssetVault(vaultAddress).getCurrentHourlyFundingRate();
+
+        return (fundingOwed, effectiveCollateral, hourlyFundingRate, isLongPaying);
     }
 
     /**

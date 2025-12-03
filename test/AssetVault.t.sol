@@ -100,13 +100,12 @@ contract AssetVaultTest is BaseTest {
     function test_UpdateVaultParams_Success() public {
         assetVault.updateVaultParams(
             0.01 ether, // minBetAmount
-            100 ether, // maxBetAmount
-            1000 // maxPositionSizePercentBps
+            100 ether // maxBetAmount
         );
 
         AssetVaultUpgradeable.VaultParams memory params = assetVault.getVaultParams();
-        assertEq(params.maxPositionSizePercentBps, 1000, "Max position size should be updated");
         assertEq(params.minBetAmount, 0.01 ether, "Min bet should be updated");
+        assertEq(params.maxBetAmount, 100 ether, "Max bet should be updated");
     }
 
     function test_SetPositionManager_Success() public {
@@ -152,30 +151,17 @@ contract AssetVaultTest is BaseTest {
         assetVault.addLiquidity(amount);
         vm.stopPrank();
 
-        (
-            uint256 longExposure,
-            uint256 shortExposure,
-            uint256 netExposure,
-            uint256 maxExposure,
-            uint256 netUtilization,
-            bool isLongBias
-        ) = assetVault.getDirectionalExposure();
+        (uint256 longExposure, uint256 shortExposure) =
+            (assetVault.totalLongExposure(), assetVault.totalShortExposure());
 
         assertEq(longExposure, 0, "Initial long exposure should be 0");
         assertEq(shortExposure, 0, "Initial short exposure should be 0");
-        assertEq(netExposure, 0, "Initial net exposure should be 0");
-        assertGt(maxExposure, 0, "Max exposure should be set");
-        assertEq(netUtilization, 0, "Initial utilization should be 0");
-        assertFalse(isLongBias, "Should not be long bias initially");
     }
 
     function test_SetMaxDirectionalExposure_Success() public {
         // Set new max exposure (30% instead of 50%)
         uint16 newMaxBps = 3000; // 30%
         assetVault.setMaxDirectionalExposure(newMaxBps);
-
-        // Verify it was updated
-        (,,, uint256 maxExposure,,) = assetVault.getDirectionalExposure();
 
         // Add liquidity to calculate expected max
         uint256 liquidityAmount = 1000 ether;
@@ -186,7 +172,7 @@ contract AssetVaultTest is BaseTest {
         vm.stopPrank();
 
         // Check max exposure = 30% of liquidity
-        (,,, uint256 newMaxExposure,,) = assetVault.getDirectionalExposure();
+        uint256 newMaxExposure = (assetVault.getVaultInfo().totalLiquidity * newMaxBps) / 10_000;
         uint256 expectedMax = (liquidityAmount * newMaxBps) / 10_000;
         assertEq(newMaxExposure, expectedMax, "Max exposure should be 30% of TVL");
     }
@@ -209,8 +195,7 @@ contract AssetVaultTest is BaseTest {
         // Update vault params to allow larger bets
         assetVault.updateVaultParams(
             0.01 ether, // minBetAmount
-            2000 ether, // maxBetAmount (increased to allow our test)
-            3000 // maxPositionSizePercentBps (30% of TVL)
+            2000 ether // maxBetAmount (increased to allow our test)
         );
 
         // Enable trading through VaultManagerHelper (which has authority)
@@ -249,8 +234,7 @@ contract AssetVaultTest is BaseTest {
         // Update vault params to allow larger bets
         assetVault.updateVaultParams(
             0.01 ether, // minBetAmount
-            2000 ether, // maxBetAmount
-            3000 // maxPositionSizePercentBps (30% of TVL)
+            2000 ether // maxBetAmount
         );
 
         // Enable trading through VaultManagerHelper

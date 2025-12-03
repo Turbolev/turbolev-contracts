@@ -3,7 +3,7 @@ pragma solidity ^0.8.22;
 
 import "./GovernanceManager.sol";
 import "../interfaces/IVaultManager.sol";
-import "../interfaces/IVaultBeacon.sol";
+import "../interfaces/IVersionedBeacon.sol";
 
 /**
  * @title VaultGovernor
@@ -14,7 +14,12 @@ import "../interfaces/IVaultBeacon.sol";
  * - Inherits generic governance logic từ GovernanceManager (OZ TimelockController + AccessControl)
  * - Adds vault-specific helpers (pause, unpause, upgrade)
  * - Emergency pause guardians (no timelock delay)
- * - Integration với VaultBeacon và OptInUpgradeManager
+ * - Integration với VersionedBeacon (upgrade with version tracking + rollback)
+ *
+ * V2 Changes:
+ * - Removed OptInUpgradeManager (opt-in mechanism removed)
+ * - Uses VersionedBeacon for upgrade management with version tracking
+ * - Timelock delay serves as grace period for LPs
  *
  * Architecture:
  * GovernanceManager (base - OZ)
@@ -34,11 +39,11 @@ contract VaultGovernor is GovernanceManager {
     /// @notice VaultManager contract
     address public vaultManager;
 
-    /// @notice VaultBeacon contract
+    /// @notice VersionedBeacon contract (replaces VaultBeacon in V2)
     address public vaultBeacon;
 
-    /// @notice OptInUpgradeManager contract
-    address public optInUpgradeManager;
+    /// @dev DEPRECATED: optInUpgradeManager removed in V2
+    address private __deprecated_optInUpgradeManager;
 
     /// @notice Emergency multisig (higher threshold)
     address public emergencyMultisig;
@@ -51,9 +56,13 @@ contract VaultGovernor is GovernanceManager {
 
     event VaultBeaconUpdated(address indexed oldBeacon, address indexed newBeacon);
 
-    event OptInUpgradeManagerUpdated(address indexed oldManager, address indexed newManager);
+    // DEPRECATED: OptInUpgradeManagerUpdated removed in V2
 
     event EmergencyMultisigUpdated(address indexed oldMultisig, address indexed newMultisig);
+
+    event BeaconUpgradeProposed(
+        address indexed newImplementation, bytes32 infoHash, bytes32 operationHash
+    );
 
     event GuardianAdded(address indexed guardian);
 
@@ -87,8 +96,7 @@ contract VaultGovernor is GovernanceManager {
      * @param _timelockController Timelock address
      * @param _multisigWallet Multisig address
      * @param _vaultManager VaultManager address
-     * @param _vaultBeacon VaultBeacon address
-     * @param _optInUpgradeManager OptInUpgradeManager address
+     * @param _vaultBeacon VersionedBeacon address
      * @param _guardians Array of pause guardians
      * @param _admin Admin address
      */
@@ -97,20 +105,15 @@ contract VaultGovernor is GovernanceManager {
         address _multisigWallet,
         address _vaultManager,
         address _vaultBeacon,
-        address _optInUpgradeManager,
         address[] memory _guardians,
         address _admin
     ) GovernanceManager(_timelockController, _admin, _multisigWallet) {
-        if (
-            _vaultManager == address(0) || _vaultBeacon == address(0)
-                || _optInUpgradeManager == address(0)
-        ) {
+        if (_vaultManager == address(0) || _vaultBeacon == address(0)) {
             revert InvalidAddress();
         }
 
         vaultManager = _vaultManager;
         vaultBeacon = _vaultBeacon;
-        optInUpgradeManager = _optInUpgradeManager;
 
         // Set guardians via AccessControl
         for (uint256 i = 0; i < _guardians.length; i++) {
@@ -197,45 +200,51 @@ contract VaultGovernor is GovernanceManager {
     }
 
     /**
-     * @notice Propose beacon upgrade
+     * @notice Propose beacon upgrade with version tracking
      * @param newImplementation New implementation address
+     * @param infoHash IPFS hash or keccak256 of changelog (optional)
      * @param salt Salt
      * @return operationHash Operation hash
+     * @dev Uses VersionedBeacon.upgradeToVersion for version tracking and rollback support
      */
-    function proposeBeaconUpgrade(address newImplementation, bytes32 salt)
+    function proposeBeaconUpgrade(address newImplementation, bytes32 infoHash, bytes32 salt)
         external
         onlyProposer
         returns (bytes32)
     {
         if (vaultBeacon == address(0)) revert InvalidAddress();
 
-        bytes memory data = abi.encodeWithSignature("upgradeTo(address)", newImplementation);
+        bytes memory data = abi.encodeWithSignature(
+            "upgradeToVersion(address,bytes32)", newImplementation, infoHash
+        );
+
+        bytes32 opHash = scheduleOperation(vaultBeacon, 0, data, bytes32(0), salt, 0);
+
+        emit BeaconUpgradeProposed(newImplementation, infoHash, opHash);
+
+        return opHash;
+    }
+
+    /**
+     * @notice Propose beacon rollback to previous version
+     * @param targetVersion Version to rollback to
+     * @param salt Salt
+     * @return operationHash Operation hash
+     */
+    function proposeBeaconRollback(uint256 targetVersion, bytes32 salt)
+        external
+        onlyProposer
+        returns (bytes32)
+    {
+        if (vaultBeacon == address(0)) revert InvalidAddress();
+
+        bytes memory data = abi.encodeWithSignature("rollbackTo(uint256)", targetVersion);
 
         return scheduleOperation(vaultBeacon, 0, data, bytes32(0), salt, 0);
     }
 
-    /**
-     * @notice Propose opt-in upgrade
-     * @param vault Vault address
-     * @param newImplementation New implementation
-     * @param gracePeriod Grace period
-     * @param salt Salt
-     * @return operationHash Operation hash
-     */
-    function proposeOptInUpgrade(
-        address vault,
-        address newImplementation,
-        uint256 gracePeriod,
-        bytes32 salt
-    ) external onlyProposer returns (bytes32) {
-        if (optInUpgradeManager == address(0)) revert InvalidAddress();
-
-        bytes memory data = abi.encodeWithSignature(
-            "proposeUpgrade(address,address,uint256)", vault, newImplementation, gracePeriod
-        );
-
-        return scheduleOperation(optInUpgradeManager, 0, data, bytes32(0), salt, 0);
-    }
+    // DEPRECATED: proposeOptInUpgrade removed in V2
+    // Opt-in mechanism has been removed. Timelock delay serves as grace period.
 
     // ========================================================================
     // EMERGENCY FUNCTIONS (NO TIMELOCK)
@@ -311,21 +320,7 @@ contract VaultGovernor is GovernanceManager {
         emit VaultBeaconUpdated(oldBeacon, _vaultBeacon);
     }
 
-    /**
-     * @notice Update OptInUpgradeManager address
-     * @param _optInUpgradeManager New manager
-     */
-    function updateOptInUpgradeManager(address _optInUpgradeManager)
-        external
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {
-        if (_optInUpgradeManager == address(0)) revert InvalidAddress();
-
-        address oldManager = optInUpgradeManager;
-        optInUpgradeManager = _optInUpgradeManager;
-
-        emit OptInUpgradeManagerUpdated(oldManager, _optInUpgradeManager);
-    }
+    // DEPRECATED: updateOptInUpgradeManager removed in V2
 
     /**
      * @notice Update emergency multisig

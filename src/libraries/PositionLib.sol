@@ -97,6 +97,10 @@ library PositionLib {
         uint256 minCloseTime; // Flash loan protection: earliest close time
         uint256 initialMargin; // Original collateral (before any add margin)
         uint256 addedMargin; // Total margin added after position open
+        // ========== FUNDING RATE FIELDS ==========
+        int256 entryFundingRateLong; // Cumulative funding rate for Longs at position open
+        int256 entryFundingRateShort; // Cumulative funding rate for Shorts at position open
+        uint256 lastFundingSettlement; // Timestamp of last funding settlement
     }
 
     // ========================================================================

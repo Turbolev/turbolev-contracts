@@ -7,6 +7,15 @@ pragma solidity ^0.8.22;
  * @dev Separates risk validation logic from AssetVault for contract size optimization
  *      Used by AssetVaultUpgradeable to check if positions can be opened
  *      Uses custom errors for gas efficiency
+ *
+ * Risk Controls:
+ * 1. Vault paused check
+ * 2. Trading enabled check
+ * 3. Minimum bet amount check
+ * 4. Maximum bet amount check (fixed amount, no % of TVL)
+ * 5. Maximum leverage check (includes utilization-based adjustment)
+ * 6. Directional exposure check (50% of TVL default)
+ * 7. Total OI cap check (TVL × risk multiplier)
  */
 library VaultRiskLib {
     // ========================================================================
@@ -27,6 +36,17 @@ library VaultRiskLib {
 
     uint256 constant BASIS_POINTS = 10_000;
 
+    // Utilization-based leverage tiers (in basis points)
+    uint256 constant UTILIZATION_TIER1_BPS = 3000; // 30%
+    uint256 constant UTILIZATION_TIER2_BPS = 6000; // 60%
+    uint256 constant UTILIZATION_TIER3_BPS = 8000; // 80%
+
+    // Leverage reduction factors (in basis points, relative to base leverage)
+    uint256 constant LEVERAGE_FACTOR_TIER1_BPS = 10_000; // 100% - Full leverage
+    uint256 constant LEVERAGE_FACTOR_TIER2_BPS = 5000; // 50% - Half leverage
+    uint256 constant LEVERAGE_FACTOR_TIER3_BPS = 2000; // 20% - 1/5 leverage
+    uint256 constant LEVERAGE_FACTOR_EMERGENCY_BPS = 400; // 4% - Emergency mode (20x max from 500x)
+
     // ========================================================================
     // STRUCTS
     // ========================================================================
@@ -34,6 +54,7 @@ library VaultRiskLib {
     /**
      * @notice Parameters for risk check
      * @dev Packed struct to minimize memory usage
+     *      Removed maxPositionSizePercentBps - replaced by Total OI Cap + Directional Exposure Cap
      */
     struct RiskCheckParams {
         // Vault state
@@ -47,13 +68,12 @@ library VaultRiskLib {
         // Vault limits
         uint256 minBetAmount;
         uint256 maxBetAmount;
-        uint16 maxPositionSizePercentBps;
         // Exposure tracking
         uint256 totalLongExposure;
         uint256 totalShortExposure;
         uint16 maxDirectionalExposureBps;
         // Leverage & OI cap
-        uint16 vaultMaxLeverage;
+        uint16 vaultMaxLeverage; // Base max leverage (before utilization adjustment)
         uint16 totalOIRiskMultiplierBps;
     }
 
@@ -68,9 +88,9 @@ library VaultRiskLib {
      *      2. Trading enabled check → TradingDisabled()
      *      3. Minimum bet amount check → BelowMinimumBet()
      *      4. Maximum bet amount check → ExceedsMaximumBet()
-     *      5. Maximum leverage check (Control Lever 1) → ExceedsMaxLeverage()
+     *      5. Maximum leverage check (with utilization adjustment) → ExceedsMaxLeverage()
      *      6. Directional exposure check → ExceedsDirectionalExposure()
-     *      7. Total OI cap check (Control Lever 2) → ExceedsTotalOICap()
+     *      7. Total OI cap check → ExceedsTotalOICap()
      * @param params Struct containing all risk parameters
      */
     function checkPositionRisk(RiskCheckParams memory params) external pure {
@@ -93,17 +113,20 @@ library VaultRiskLib {
             revert BelowMinimumBet();
         }
 
-        // 4. Check max bet amount
-        uint256 maxAllowedBet = _calculateMaxBet(
-            params.totalLiquidity, params.maxBetAmount, params.maxPositionSizePercentBps
-        );
-
-        if (collateral > maxAllowedBet) {
+        // 4. Check max bet amount (fixed amount, no % of TVL)
+        if (collateral > params.maxBetAmount) {
             revert ExceedsMaximumBet();
         }
 
-        // 5. Check maximum leverage (Control Lever 1)
-        if (params.leverage > params.vaultMaxLeverage) {
+        // 5. Check maximum leverage with utilization-based adjustment
+        uint16 effectiveMaxLeverage = _calculateEffectiveMaxLeverage(
+            params.totalLiquidity,
+            params.totalLongExposure,
+            params.totalShortExposure,
+            params.vaultMaxLeverage
+        );
+
+        if (params.leverage > effectiveMaxLeverage) {
             revert ExceedsMaxLeverage();
         }
 
@@ -117,7 +140,7 @@ library VaultRiskLib {
             params.maxDirectionalExposureBps
         );
 
-        // 7. Check total OI cap (Control Lever 2)
+        // 7. Check total OI cap
         _checkTotalOICap(
             params.totalLiquidity,
             params.totalLongExposure,
@@ -134,29 +157,69 @@ library VaultRiskLib {
     // ========================================================================
 
     /**
-     * @notice Calculate maximum allowed bet based on vault params
-     * @dev Returns min(maxBetAmount, TVL * maxPositionSizePercent)
+     * @notice Calculate effective max leverage based on vault utilization
+     * @dev Utilization-Based Leverage Reduction:
+     *      - Utilization 0-30%: Full leverage (100%)
+     *      - Utilization 30-60%: 50% of base leverage
+     *      - Utilization 60-80%: 20% of base leverage
+     *      - Utilization 80%+: Emergency mode - 4% of base leverage (e.g., 500x → 20x)
+     *
+     * @param totalLiquidity Total vault liquidity (TVL)
+     * @param totalLongExposure Total long open interest
+     * @param totalShortExposure Total short open interest
+     * @param baseMaxLeverage Base maximum leverage (e.g., 100x, 200x, 500x based on maturity)
+     * @return effectiveMaxLeverage Adjusted max leverage based on utilization
      */
-    function _calculateMaxBet(
+    function _calculateEffectiveMaxLeverage(
         uint256 totalLiquidity,
-        uint256 maxBetAmount,
-        uint16 maxPositionSizePercentBps
-    ) internal pure returns (uint256) {
-        uint256 maxAllowedBet = maxBetAmount;
-
-        // Calculate max bet based on vault rate per trade
-        if (totalLiquidity > 0 && maxPositionSizePercentBps > 0) {
-            uint256 maxBetByVaultRate = (totalLiquidity * maxPositionSizePercentBps) / BASIS_POINTS;
-
-            // Use the minimum of the two limits
-            maxAllowedBet = maxAllowedBet < maxBetByVaultRate ? maxAllowedBet : maxBetByVaultRate;
+        uint256 totalLongExposure,
+        uint256 totalShortExposure,
+        uint16 baseMaxLeverage
+    ) internal pure returns (uint16 effectiveMaxLeverage) {
+        // If no liquidity, return minimum leverage
+        if (totalLiquidity == 0) {
+            return 1;
         }
 
-        return maxAllowedBet;
+        // Calculate current utilization
+        uint256 totalOI = totalLongExposure + totalShortExposure;
+        uint256 utilizationBps = (totalOI * BASIS_POINTS) / totalLiquidity;
+
+        // Determine leverage factor based on utilization tier
+        uint256 leverageFactorBps;
+
+        if (utilizationBps < UTILIZATION_TIER1_BPS) {
+            // 0-30%: Full leverage
+            leverageFactorBps = LEVERAGE_FACTOR_TIER1_BPS; // 100%
+        } else if (utilizationBps < UTILIZATION_TIER2_BPS) {
+            // 30-60%: 50% leverage
+            leverageFactorBps = LEVERAGE_FACTOR_TIER2_BPS; // 50%
+        } else if (utilizationBps < UTILIZATION_TIER3_BPS) {
+            // 60-80%: 20% leverage
+            leverageFactorBps = LEVERAGE_FACTOR_TIER3_BPS; // 20%
+        } else {
+            // 80%+: Emergency mode - 4%
+            leverageFactorBps = LEVERAGE_FACTOR_EMERGENCY_BPS; // 4%
+        }
+
+        // Calculate effective max leverage
+        uint256 calculatedLeverage = (uint256(baseMaxLeverage) * leverageFactorBps) / BASIS_POINTS;
+
+        // Ensure minimum leverage of 1
+        if (calculatedLeverage < 1) {
+            calculatedLeverage = 1;
+        }
+
+        // Ensure max leverage fits in uint16
+        if (calculatedLeverage > type(uint16).max) {
+            calculatedLeverage = type(uint16).max;
+        }
+
+        return uint16(calculatedLeverage);
     }
 
     /**
-     * @notice Check directional exposure cap (50% of TVL)
+     * @notice Check directional exposure cap (50% of TVL default)
      * @dev Logic: Calculate Net Exposure = |Long OI - Short OI|
      *      Example: Long OI: $180K + Short OI: $120K => Net Exposure: $60K long
      *      Compare Net Exposure with Maximum Directional Exposure (50% of vault TVL)
@@ -204,7 +267,7 @@ library VaultRiskLib {
     }
 
     /**
-     * @notice Check total OI cap (Control Lever 2)
+     * @notice Check total OI cap
      * @dev Max Total OI = TVL × Risk Multiplier
      *      Risk multiplier ranges from 1.5x to 3x based on vault size
      *      Reverts with ExceedsTotalOICap() if check fails
@@ -276,5 +339,70 @@ library VaultRiskLib {
         return longExposure > shortExposure
             ? longExposure - shortExposure
             : shortExposure - longExposure;
+    }
+
+    /**
+     * @notice Calculate vault utilization in basis points
+     * @dev Utilization = (Total OI / TVL) * 10000
+     * @param totalLiquidity Total vault liquidity
+     * @param totalLongExposure Total long open interest
+     * @param totalShortExposure Total short open interest
+     * @return utilizationBps Utilization in basis points (0-10000+)
+     */
+    function calculateUtilization(
+        uint256 totalLiquidity,
+        uint256 totalLongExposure,
+        uint256 totalShortExposure
+    ) external pure returns (uint256 utilizationBps) {
+        if (totalLiquidity == 0) {
+            return 0;
+        }
+        uint256 totalOI = totalLongExposure + totalShortExposure;
+        return (totalOI * BASIS_POINTS) / totalLiquidity;
+    }
+
+    /**
+     * @notice Get effective max leverage based on utilization (external view)
+     * @param totalLiquidity Total vault liquidity
+     * @param totalLongExposure Total long open interest
+     * @param totalShortExposure Total short open interest
+     * @param baseMaxLeverage Base maximum leverage
+     * @return effectiveMaxLeverage Adjusted max leverage
+     * @return utilizationBps Current utilization in basis points
+     * @return leverageTier Current leverage tier (1-4)
+     */
+    function getEffectiveMaxLeverage(
+        uint256 totalLiquidity,
+        uint256 totalLongExposure,
+        uint256 totalShortExposure,
+        uint16 baseMaxLeverage
+    )
+        external
+        pure
+        returns (uint16 effectiveMaxLeverage, uint256 utilizationBps, uint8 leverageTier)
+    {
+        if (totalLiquidity == 0) {
+            return (1, 0, 4); // Emergency tier if no liquidity
+        }
+
+        uint256 totalOI = totalLongExposure + totalShortExposure;
+        utilizationBps = (totalOI * BASIS_POINTS) / totalLiquidity;
+
+        // Determine tier
+        if (utilizationBps < UTILIZATION_TIER1_BPS) {
+            leverageTier = 1; // Full leverage
+        } else if (utilizationBps < UTILIZATION_TIER2_BPS) {
+            leverageTier = 2; // 50% leverage
+        } else if (utilizationBps < UTILIZATION_TIER3_BPS) {
+            leverageTier = 3; // 20% leverage
+        } else {
+            leverageTier = 4; // Emergency mode
+        }
+
+        effectiveMaxLeverage = _calculateEffectiveMaxLeverage(
+            totalLiquidity, totalLongExposure, totalShortExposure, baseMaxLeverage
+        );
+
+        return (effectiveMaxLeverage, utilizationBps, leverageTier);
     }
 }

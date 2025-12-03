@@ -6,211 +6,76 @@ import "forge-std/console.sol";
 import "../DeployHelper.s.sol";
 import "../../src/SettlementEngine.sol";
 
-/**
- * @title InteractSettlementEngine
- * @notice Script to interact with SettlementEngine contract
- * @dev Includes view functions and admin functions
- */
 contract InteractSettlementEngine is DeployHelper {
-    SettlementEngine public settlement;
+    SettlementEngine public se;
 
     function setUp() public override {
         super.setUp();
-
-        // Load settlement engine address from env or deployment file
-        address settlementAddr = vm.envOr("SETTLEMENT_ENGINE_ADDRESS", settlementEngine);
-        require(settlementAddr != address(0), "Settlement Engine address not set");
-        settlement = SettlementEngine(payable(settlementAddr));
-
-        console.log("Settlement Engine Address:", address(settlement));
+        se = SettlementEngine(payable(settlementEngine));
+        console.log("SettlementEngine Address:", address(se));
     }
 
-    // ========================================================================
-    // VIEW FUNCTIONS
-    // ========================================================================
-
-    /**
-     * @notice View settlement configuration
-     */
     function viewConfig() public view {
-        console.log("\n=== Settlement Engine Configuration ===");
-
-        (
-            uint16 houseEdgeBps,
-            uint16 winMultiplierBps,
-            uint256 minBetAmount,
-            uint256 maxBetAmount,
-            bool isPaused
-        ) = settlement.getSettlementConfig();
-
-        console.log("House Edge BPS:", houseEdgeBps);
-        console.log("Win Multiplier BPS:", winMultiplierBps);
-        console.log("Min Bet Amount:", minBetAmount);
-        console.log("Max Bet Amount:", maxBetAmount);
-        console.log("Max Profit Cap BPS:", settlement.maxProfitCapBps());
-        console.log("Paused:", isPaused);
-        console.log("Owner:", settlement.owner());
-        console.log("Position Manager:", settlement.positionManager());
-        console.log("Vault Manager:", settlement.vaultManager());
-        // DEPRECATED: console.log("Blocksense Oracle:", settlement.blocksenseOracle());
-        console.log("Version:", settlement.version());
+        console.log("\n=== Settlement Engine Config ===");
+        console.log("House Edge BPS:", se.houseEdgeBps());
+        console.log("Win Multiplier BPS:", se.winMultiplierBps());
+        console.log("Min Bet Amount:", se.minBetAmount());
+        console.log("Max Bet Amount:", se.maxBetAmount());
+        console.log("Max Profit Cap BPS:", se.maxProfitCapBps());
     }
 
-    /**
-     * @notice View settlement price for a project token
-     */
-    function viewSettlementPrice(address projectToken) public view {
-        console.log("\n=== Settlement Price ===");
-        console.log("Project Token:", projectToken);
-
-        (uint256 closePrice, uint256 publishTime) =
-            settlement.getSettlementPrice(projectToken, 3600); // maxAge = 1 hour
-        console.log("Close Price:", closePrice);
-        console.log("Publish Time:", publishTime);
+    function viewConnectedContracts() public view {
+        console.log("\n=== Connected Contracts ===");
+        console.log("Position Manager:", se.positionManager());
+        console.log("Vault Manager:", se.vaultManager());
+        console.log("Price Feed Manager:", se.priceFeedManager());
     }
 
-    function viewSettlementPrice(address base, address quote, uint256 maxAge) public view {
-        console.log("\n=== Settlement Price ===");
-        console.log("Base:", base);
-        console.log("Quote:", quote);
-        console.log("Max Age:", maxAge);
-
-        (uint256 closePrice, uint256 publishTime) = settlement.getSettlementPrice(base, maxAge);
-        console.log("Close Price:", closePrice);
-        console.log("Publish Time:", publishTime);
-    }
-
-    /**
-     * @notice Calculate potential payout for an amount
-     */
-    function calculatePotentialPayout(uint256 amount) public view {
-        console.log("\n=== Calculate Potential Payout ===");
-        console.log("Amount:", amount);
-
-        uint256 payout = settlement.calculatePotentialPayout(amount);
-        console.log("Potential Payout:", payout);
-        console.log("Profit:", payout > amount ? payout - amount : 0);
-    }
-
-    /**
-     * @notice Check if bet amount is valid
-     */
     function isValidBetAmount(uint256 amount) public view {
-        console.log("\n=== Check Bet Amount Validity ===");
+        console.log("\n=== Bet Amount Validation ===");
         console.log("Amount:", amount);
-
-        bool valid = settlement.isValidBetAmount(amount);
-        console.log("Is Valid:", valid);
+        console.log("Is Valid:", se.isValidBetAmount(amount));
     }
 
-    // ========================================================================
-    // ADMIN FUNCTIONS
-    // ========================================================================
-
-    /**
-     * @notice Update settlement config
-     */
-    function updateConfig(
-        uint16 houseEdgeBps,
-        uint16 winMultiplierBps,
-        uint256 minBetAmount,
-        uint256 maxBetAmount
-    ) public {
-        console.log("\n=== Update Settlement Config ===");
-        console.log("House Edge BPS:", houseEdgeBps);
-        console.log("Win Multiplier BPS:", winMultiplierBps);
-        console.log("Min Bet Amount:", minBetAmount);
-        console.log("Max Bet Amount:", maxBetAmount);
-
+    function setPositionManager(address _positionManager) public {
         vm.startBroadcast(deployer);
-        settlement.updateConfig(houseEdgeBps, winMultiplierBps, minBetAmount, maxBetAmount);
-        console.log("Config updated successfully");
+        se.setPositionManager(_positionManager);
+        console.log("Position Manager set:", _positionManager);
         vm.stopBroadcast();
     }
 
-    /**
-     * @notice Set max profit cap in basis points
-     */
-    function setMaxProfitCapBps(uint16 newMaxProfitCapBps) public {
-        console.log("\n=== Set Max Profit Cap BPS ===");
-        console.log("New Max Profit Cap BPS:", newMaxProfitCapBps);
-
+    function setVaultManager(address _vaultManager) public {
         vm.startBroadcast(deployer);
-        settlement.setMaxProfitCapBps(newMaxProfitCapBps);
-        console.log("Max profit cap BPS updated successfully");
+        se.setVaultManager(_vaultManager);
+        console.log("Vault Manager set:", _vaultManager);
         vm.stopBroadcast();
     }
 
-    /**
-     * @notice Set Position Manager address
-     */
-    function setPositionManager(address newPositionManager) public {
-        console.log("\n=== Set Position Manager ===");
-        console.log("New Position Manager:", newPositionManager);
-
+    function setPriceFeedManager(address _priceFeedManager) public {
         vm.startBroadcast(deployer);
-        settlement.setPositionManager(newPositionManager);
-        console.log("Position Manager updated successfully");
+        se.setPriceFeedManager(_priceFeedManager);
+        console.log("Price Feed Manager set:", _priceFeedManager);
         vm.stopBroadcast();
     }
 
-    /**
-     * @notice Set Vault Manager address
-     */
-    function setVaultManager(address newVaultManager) public {
-        console.log("\n=== Set Vault Manager ===");
-        console.log("New Vault Manager:", newVaultManager);
-
+    function setMaxProfitCapBps(uint16 _maxProfitCapBps) public {
         vm.startBroadcast(deployer);
-        settlement.setVaultManager(newVaultManager);
-        console.log("Vault Manager updated successfully");
+        se.setMaxProfitCapBps(_maxProfitCapBps);
+        console.log("Max Profit Cap BPS set:", _maxProfitCapBps);
         vm.stopBroadcast();
     }
 
-    /**
-     * @notice Set Blocksense Oracle address
-     */
-    // DEPRECATED: Direct oracle configuration removed - use PriceFeedManager
-    // function setBlocksenseOracle(address newOracle) public {
-    //     console.log("\n=== Set Blocksense Oracle ===");
-    //     console.log("New Oracle:", newOracle);
-    //     vm.startBroadcast(deployer);
-    //     settlement.setBlocksenseOracle(payable(newOracle));
-    //     console.log("Blocksense Oracle updated successfully");
-    //     vm.stopBroadcast();
-    // }
-
-    // DEPRECATED: Direct oracle configuration removed - use PriceFeedManager
-    // function setChainlinkOracle(address newOracle) public {
-    //     console.log("\n=== Set Chainlink Oracle ===");
-    //     console.log("New Oracle:", newOracle);
-    //     vm.startBroadcast(deployer);
-    //     settlement.setChainlinkOracle(payable(newOracle));
-    //     console.log("Chainlink Oracle updated successfully");
-    //     vm.stopBroadcast();
-    // }
-
-    /**
-     * @notice Pause settlement engine
-     */
-    function pauseSettlement() public {
-        console.log("\n=== Pause Settlement Engine ===");
-
+    function pauseEngine() public {
         vm.startBroadcast(deployer);
-        settlement.pause();
-        console.log("Settlement Engine paused successfully");
+        se.pause();
+        console.log("SettlementEngine paused");
         vm.stopBroadcast();
     }
 
-    /**
-     * @notice Unpause settlement engine
-     */
-    function unpauseSettlement() public {
-        console.log("\n=== Unpause Settlement Engine ===");
-
+    function unpauseEngine() public {
         vm.startBroadcast(deployer);
-        settlement.unpause();
-        console.log("Settlement Engine unpaused successfully");
+        se.unpause();
+        console.log("SettlementEngine unpaused");
         vm.stopBroadcast();
     }
 }

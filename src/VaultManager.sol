@@ -10,8 +10,7 @@ import "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "./interfaces/IVaultManager.sol";
 import "./interfaces/IAssetVault.sol";
-import "./governance/VaultBeacon.sol";
-import "./governance/OptInUpgradeManager.sol";
+import "./governance/VersionedBeacon.sol";
 
 /**
  * @title VaultManager
@@ -43,11 +42,11 @@ contract VaultManager is
     /// @notice VaultManagerHelper contract address
     address public vaultManagerHelper;
 
-    /// @notice Vault Beacon address
+    /// @notice VersionedBeacon address (replaces VaultBeacon in V2)
     address public vaultBeacon;
 
-    /// @notice OptInUpgradeManager address
-    address public optInUpgradeManager;
+    /// @dev DEPRECATED: optInUpgradeManager removed in V2
+    address private __deprecated_optInUpgradeManager;
 
     /// @notice TimelockController address
     address public timelockController;
@@ -93,7 +92,7 @@ contract VaultManager is
     );
 
     event VaultBeaconUpdated(address indexed oldBeacon, address indexed newBeacon);
-    event OptInUpgradeManagerUpdated(address indexed oldManager, address indexed newManager);
+    // DEPRECATED: OptInUpgradeManagerUpdated removed in V2
     event TimelockControllerUpdated(address indexed oldController, address indexed newController);
     event MultisigWalletUpdated(address indexed oldWallet, address indexed newWallet);
     event VaultGovernorUpdated(address indexed oldGovernor, address indexed newGovernor);
@@ -147,24 +146,21 @@ contract VaultManager is
     /**
      * @notice Initialize contract V2
      * @param initialOwner Owner address
-     * @param _vaultBeacon Vault Beacon address
-     * @param _optInUpgradeManager OptInUpgradeManager address
+     * @param _vaultBeacon VersionedBeacon address
      * @param _timelockController TimelockController address
      * @param _multisigWallet MultisigWallet address
      * @param _vaultGovernor VaultGovernor address
+     * @dev V2: Removed optInUpgradeManager parameter
      */
     function initializeV2(
         address initialOwner,
         address _vaultBeacon,
-        address _optInUpgradeManager,
         address _timelockController,
         address _multisigWallet,
         address _vaultGovernor
     ) public reinitializer(2) {
         if (initialOwner == address(0)) revert InvalidAddress();
-        if (_vaultBeacon == address(0) || _optInUpgradeManager == address(0)) {
-            revert InvalidAddress();
-        }
+        if (_vaultBeacon == address(0)) revert InvalidAddress();
 
         // Initialize base contracts (for first-time deploy)
         __Ownable_init(initialOwner);
@@ -173,7 +169,6 @@ contract VaultManager is
         __UUPSUpgradeable_init();
 
         vaultBeacon = _vaultBeacon;
-        optInUpgradeManager = _optInUpgradeManager;
         timelockController = _timelockController;
         multisigWallet = _multisigWallet;
         vaultGovernor = _vaultGovernor;
@@ -246,12 +241,7 @@ contract VaultManager is
             isBeaconProxy: true
         });
 
-        // Set upgrade manager for vault (if implemented)
-        try IAssetVault(vaultAddress).setUpgradeManager(optInUpgradeManager) {
-            // Successfully set upgrade manager
-        } catch {
-            // Don't revert if fails (backward compatibility)
-        }
+        // V2: Removed setUpgradeManager call (opt-in mechanism removed)
         emit VaultCreated(_projectToken, vaultAddress, true, block.timestamp);
 
         return vaultAddress;
@@ -475,18 +465,7 @@ contract VaultManager is
         emit VaultBeaconUpdated(oldBeacon, _vaultBeacon);
     }
 
-    /**
-     * @notice Set OptInUpgradeManager address
-     * @param _optInUpgradeManager New manager address
-     */
-    function setOptInUpgradeManager(address _optInUpgradeManager) external onlyOwner {
-        if (_optInUpgradeManager == address(0)) revert InvalidAddress();
-
-        address oldManager = optInUpgradeManager;
-        optInUpgradeManager = _optInUpgradeManager;
-
-        emit OptInUpgradeManagerUpdated(oldManager, _optInUpgradeManager);
-    }
+    // DEPRECATED: setOptInUpgradeManager removed in V2
 
     /**
      * @notice Set TimelockController address

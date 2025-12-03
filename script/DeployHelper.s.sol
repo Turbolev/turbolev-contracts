@@ -30,6 +30,8 @@ contract DeployHelper is Script {
     address payable public vaultManager;
     address payable public vaultManagerHelper;
     address payable public priceFeedManager;
+    address payable public pythOracle;
+    address payable public tokenFaucet;
 
     // ========================================================================
     // CONFIGURATION CONSTANTS
@@ -53,6 +55,60 @@ contract DeployHelper is Script {
 
     // Vault config
     uint256 public constant GRADUATION_THRESHOLD = 10_000 ether;
+
+    // ========================================================================
+    // VAULT RISK CONTROLS
+    // ========================================================================
+
+    // Directional exposure limits
+    uint16 public constant MAX_DIRECTIONAL_EXPOSURE_BPS = 5000; // 50% of TVL
+
+    // Total OI Risk Multipliers per tier
+    uint16 public constant TIER1_OI_MULTIPLIER_BPS = 15_000; // 1.5x for small vaults
+    uint16 public constant TIER2_OI_MULTIPLIER_BPS = 20_000; // 2.0x for medium vaults
+    uint16 public constant TIER3_OI_MULTIPLIER_BPS = 25_000; // 2.5x for large vaults
+    uint16 public constant TIER4_OI_MULTIPLIER_BPS = 30_000; // 3.0x for very large vaults
+
+    // TVL thresholds for OI tiers
+    uint256 public constant TIER1_OI_THRESHOLD = 50_000 ether;
+    uint256 public constant TIER2_OI_THRESHOLD = 200_000 ether;
+    uint256 public constant TIER3_OI_THRESHOLD = 500_000 ether;
+
+    // ========================================================================
+    // LEVERAGE TIER SYSTEM
+    // ========================================================================
+
+    // TVL thresholds for leverage tiers
+    uint256 public constant LEVERAGE_TIER1_THRESHOLD = 100_000 ether; // 100K
+    uint256 public constant LEVERAGE_TIER2_THRESHOLD = 500_000 ether; // 500K
+
+    // Max leverage per tier
+    uint16 public constant TIER1_MAX_LEVERAGE = 100; // Launch Phase: 100x
+    uint16 public constant TIER2_MAX_LEVERAGE = 200; // Growth Phase: 200x
+    uint16 public constant TIER3_MAX_LEVERAGE = 500; // Mature Phase: 500x
+
+    // ========================================================================
+    // POSITION FEES
+    // ========================================================================
+
+    uint16 public constant OPEN_POSITION_FEE_BPS = 5; // 0.05%
+    uint16 public constant CLOSE_POSITION_FEE_BPS = 5; // 0.05%
+    uint16 public constant STAKING_FEE_BPS = 50; // 0.5%
+    uint16 public constant EARLY_WITHDRAWAL_FEE_BPS = 50; // 0.5%
+
+    // ========================================================================
+    // FUNDING RATE CONFIG
+    // ========================================================================
+
+    bool public constant FUNDING_ENABLED = true;
+    uint256 public constant FUNDING_INTERVAL = 1 hours;
+
+    // Funding rate tiers (in basis points per hour)
+    int256 public constant FUNDING_TIER1_RATE = 1; // 0.01% for <20% imbalance
+    int256 public constant FUNDING_TIER2_RATE = 3; // 0.03% for 20-40% imbalance
+    int256 public constant FUNDING_TIER3_RATE = 5; // 0.05% for 40-60% imbalance
+    int256 public constant FUNDING_TIER4_RATE = 8; // 0.08% for 60-80% imbalance
+    int256 public constant FUNDING_TIER5_RATE = 10; // 0.10% for >80% imbalance
 
     // ========================================================================
     // NETWORK CONFIG
@@ -91,9 +147,12 @@ contract DeployHelper is Script {
         console.log("Backend:", backend);
         console.log("BlocksenseOracle:", blocksenseOracle);
         console.log("ChainlinkOracle:", chainlinkOracle);
+        console.log("PythOracle:", pythOracle);
         console.log("SettlementEngine:", settlementEngine);
         console.log("PositionManager:", positionManager);
         console.log("VaultManager:", vaultManager);
+        console.log("VaultManagerHelper:", vaultManagerHelper);
+        console.log("PriceFeedManager:", priceFeedManager);
     }
 
     // ========================================================================
@@ -109,11 +168,13 @@ contract DeployHelper is Script {
         backend = vm.envOr("BACKEND_ADDRESS", address(0));
         blocksenseOracle = payable(vm.envOr("BLOCKSENSE_ORACLE_ADDRESS", address(0)));
         chainlinkOracle = payable(vm.envOr("CHAINLINK_ORACLE_ADDRESS", address(0)));
+        pythOracle = payable(vm.envOr("PYTH_ORACLE_ADDRESS", address(0)));
         settlementEngine = payable(vm.envOr("SETTLEMENT_ENGINE_ADDRESS", address(0)));
         positionManager = payable(vm.envOr("POSITION_MANAGER_ADDRESS", address(0)));
         vaultManager = payable(vm.envOr("VAULT_MANAGER_ADDRESS", address(0)));
         vaultManagerHelper = payable(vm.envOr("VAULT_MANAGER_HELPER_ADDRESS", address(0)));
         priceFeedManager = payable(vm.envOr("PRICE_FEED_MANAGER_ADDRESS", address(0)));
+        tokenFaucet = payable(vm.envOr("TOKEN_FAUCET_ADDRESS", address(0)));
     }
 
     /**
@@ -183,13 +244,15 @@ contract DeployHelper is Script {
         json = string.concat(json, '  "backend": "', vm.toString(backend), '",\n');
         json = string.concat(json, '  "blocksenseOracle": "', vm.toString(blocksenseOracle), '",\n');
         json = string.concat(json, '  "chainlinkOracle": "', vm.toString(chainlinkOracle), '",\n');
+        json = string.concat(json, '  "pythOracle": "', vm.toString(pythOracle), '",\n');
         json = string.concat(json, '  "settlementEngine": "', vm.toString(settlementEngine), '",\n');
         json = string.concat(json, '  "positionManager": "', vm.toString(positionManager), '",\n');
         json = string.concat(json, '  "vaultManager": "', vm.toString(vaultManager), '",\n');
         json = string.concat(
             json, '  "vaultManagerHelper": "', vm.toString(vaultManagerHelper), '",\n'
         );
-        json = string.concat(json, '  "priceFeedManager": "', vm.toString(priceFeedManager), '"\n');
+        json = string.concat(json, '  "priceFeedManager": "', vm.toString(priceFeedManager), '",\n');
+        json = string.concat(json, '  "tokenFaucet": "', vm.toString(tokenFaucet), '"\n');
         json = string.concat(json, "}");
 
         vm.writeFile(file, json);
@@ -211,11 +274,13 @@ contract DeployHelper is Script {
         backend = vm.parseJsonAddress(json, ".backend");
         blocksenseOracle = payable(vm.parseJsonAddress(json, ".blocksenseOracle"));
         chainlinkOracle = payable(vm.parseJsonAddress(json, ".chainlinkOracle"));
+        pythOracle = payable(vm.parseJsonAddress(json, ".pythOracle"));
         settlementEngine = payable(vm.parseJsonAddress(json, ".settlementEngine"));
         positionManager = payable(vm.parseJsonAddress(json, ".positionManager"));
         vaultManager = payable(vm.parseJsonAddress(json, ".vaultManager"));
         vaultManagerHelper = payable(vm.parseJsonAddress(json, ".vaultManagerHelper"));
         priceFeedManager = payable(vm.parseJsonAddress(json, ".priceFeedManager"));
+        tokenFaucet = payable(vm.parseJsonAddress(json, ".tokenFaucet"));
 
         console.log("Deployment addresses loaded from:", file);
     }

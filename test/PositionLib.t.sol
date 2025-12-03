@@ -516,7 +516,10 @@ contract PositionLibTest is Test {
             lastModifiedTimestamp: block.timestamp,
             minCloseTime: block.timestamp + 60,
             initialMargin: 1e18,
-            addedMargin: 0
+            addedMargin: 0,
+            entryFundingRateLong: 0,
+            entryFundingRateShort: 0,
+            lastFundingSettlement: block.timestamp
         });
     }
 }

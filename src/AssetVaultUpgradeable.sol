@@ -9,6 +9,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./libraries/AdminAccessControl.sol";
 import "./libraries/VaultRiskLib.sol";
+import "./libraries/FundingRateLib.sol";
 import "./interfaces/IVaultManagerHelper.sol";
 
 /**
@@ -125,23 +126,47 @@ contract AssetVaultUpgradeable is
     uint16 public tier3MaxLeverage; // Mature Phase max leverage
 
     // ========================================================================
-    // NEW STATE VARIABLES FOR UPGRADE
+    // DEPRECATED STATE VARIABLES (kept for storage layout compatibility)
     // ========================================================================
 
-    /// @notice Opt-in upgrade flag - vault có thể chọn upgrade hay không
-    bool public optInUpgrade;
+    /// @dev DEPRECATED: Opt-in mechanism removed in V2
+    bool private __deprecated_optInUpgrade;
 
-    /// @notice Timestamp khi vault opt-in upgrade
-    uint256 public optInTimestamp;
+    /// @dev DEPRECATED: Opt-in mechanism removed in V2
+    uint256 private __deprecated_optInTimestamp;
 
-    /// @notice Address của upgrade manager
-    address public upgradeManager;
+    /// @dev DEPRECATED: Opt-in mechanism removed in V2
+    address private __deprecated_upgradeManager;
+
+    // ========================================================================
+    // FUNDING RATE STATE VARIABLES
+    // ========================================================================
+
+    /// @notice Cumulative funding rate for Long positions (scaled by FUNDING_PRECISION)
+    /// @dev Positive value means longs have paid funding over time
+    int256 public cumulativeFundingRateLong;
+
+    /// @notice Cumulative funding rate for Short positions (scaled by FUNDING_PRECISION)
+    /// @dev Positive value means shorts have paid funding over time
+    int256 public cumulativeFundingRateShort;
+
+    /// @notice Last timestamp when funding was updated
+    uint256 public lastFundingUpdateTime;
+
+    /// @notice Last hour number when funding was updated
+    uint256 public lastFundingUpdateHour;
+
+    /// @notice Funding rate configuration
+    FundingRateLib.FundingConfig public fundingConfig;
+
+    /// @notice Whether funding rate is enabled
+    bool public fundingEnabled;
 
     // ========================================================================
     // STORAGE GAP
     // ========================================================================
 
-    uint256[29] private __gap; // Reduced from 32 to 29 (added 3 slots for leverage tiers)
+    uint256[22] private __gap; // Reduced from 29 to 22 (added 7 slots for funding)
 
     // ========================================================================
     // STRUCTS (copy từ AssetVault)
@@ -169,7 +194,6 @@ contract AssetVaultUpgradeable is
     struct VaultParams {
         uint256 minBetAmount;
         uint256 maxBetAmount;
-        uint16 maxPositionSizePercentBps;
         uint256 minLiquidityAmount;
     }
 
@@ -206,7 +230,6 @@ contract AssetVaultUpgradeable is
     uint256 public constant DEFAULT_OPEN_POSITION_FEE_BPS = 5; // 0.05%
     uint256 public constant DEFAULT_CLOSE_POSITION_FEE_BPS = 5; // 0.05%
     uint256 public constant DEFAULT_MAX_DIRECTIONAL_EXPOSURE_BPS = 5000; // 50% of TVL
-    uint256 public constant DEFAULT_MAX_POSITION_SIZE_PERCENT_BPS = 3000;
     uint256 public constant DEFAULT_TOTAL_OI_RISK_MULTIPLIER_BPS = 20_000; // 2.0x default
     uint256 public constant DEFAULT_TIER1_MULTIPLIER_BPS = 15_000; // 1.5x for small vaults
     uint256 public constant DEFAULT_TIER2_MULTIPLIER_BPS = 20_000; // 2.0x for medium vaults
@@ -243,9 +266,10 @@ contract AssetVaultUpgradeable is
     // EVENTS
     // ========================================================================
 
-    event OptInUpgradeEnabled(address indexed vault, uint256 timestamp);
-    event OptInUpgradeDisabled(address indexed vault, uint256 timestamp);
-    event UpgradeManagerUpdated(address indexed oldManager, address indexed newManager);
+    // DEPRECATED: OptIn events removed in V2
+    // - OptInUpgradeEnabled
+    // - OptInUpgradeDisabled
+    // - UpgradeManagerUpdated
 
     // Events từ AssetVault (copy tất cả)
     event VaultInitialized(
@@ -370,6 +394,27 @@ contract AssetVaultUpgradeable is
         uint16 tier1MaxLeverage, uint16 tier2MaxLeverage, uint16 tier3MaxLeverage
     );
 
+    // ========== FUNDING RATE EVENTS ==========
+    event HourlyFundingUpdated(
+        int256 cumulativeLongRate,
+        int256 cumulativeShortRate,
+        uint256 imbalanceBps,
+        uint16 hourlyRateBps,
+        bool longsPayShorts,
+        bool hasCounterparty,
+        uint256 timestamp
+    );
+
+    event FundingConfigUpdated(
+        uint16 tier1RateBps,
+        uint16 tier2RateBps,
+        uint16 tier3RateBps,
+        uint16 tier4RateBps,
+        uint16 tier5RateBps
+    );
+
+    event FundingEnabledUpdated(bool enabled);
+
     // ========================================================================
     // ERRORS
     // ========================================================================
@@ -396,8 +441,8 @@ contract AssetVaultUpgradeable is
     error DirectTransferNotAllowed();
     error VaultManagerHelperNotSet();
     error NativeTokenNotAllowed();
-    error UpgradeNotOptedIn();
-    error OnlyUpgradeManager();
+    // DEPRECATED: UpgradeNotOptedIn removed in V2
+    // DEPRECATED: OnlyUpgradeManager removed in V2
     error TotalOICapExceeded();
 
     // ========================================================================
@@ -429,10 +474,7 @@ contract AssetVaultUpgradeable is
         _;
     }
 
-    modifier onlyUpgradeManager() {
-        if (msg.sender != upgradeManager) revert OnlyUpgradeManager();
-        _;
-    }
+    // DEPRECATED: onlyUpgradeManager modifier removed in V2
 
     // ========================================================================
     // INITIALIZER (thay thế constructor)
@@ -487,7 +529,6 @@ contract AssetVaultUpgradeable is
         vaultParams = VaultParams({
             minBetAmount: _minBetAmount,
             maxBetAmount: _maxBetAmount,
-            maxPositionSizePercentBps: uint16(DEFAULT_MAX_POSITION_SIZE_PERCENT_BPS),
             minLiquidityAmount: _minBetAmount
         });
 
@@ -522,8 +563,13 @@ contract AssetVaultUpgradeable is
         tier2MaxLeverage = DEFAULT_TIER2_MAX_LEVERAGE;
         tier3MaxLeverage = DEFAULT_TIER3_MAX_LEVERAGE;
 
-        // Default: opt-in upgrade disabled (vault owner phải enable)
-        optInUpgrade = false;
+        // V2: Opt-in mechanism removed - upgrades managed via Timelock
+
+        // Initialize funding rate with default config
+        fundingConfig = FundingRateLib.getDefaultConfig();
+        fundingEnabled = true;
+        lastFundingUpdateTime = block.timestamp;
+        lastFundingUpdateHour = block.timestamp / FundingRateLib.SECONDS_PER_HOUR;
 
         emit VaultInitialized(
             _projectToken, bytes32(0), address(0), address(0), address(0), false, block.timestamp
@@ -534,45 +580,14 @@ contract AssetVaultUpgradeable is
     // UPGRADE MANAGEMENT FUNCTIONS
     // ========================================================================
 
-    /**
-     * @notice Enable opt-in upgrade - vault owner cho phép upgrade
-     * @dev Chỉ owner của vault có thể enable
-     */
-    function enableOptInUpgrade() external onlyOwner {
-        optInUpgrade = true;
-        optInTimestamp = block.timestamp;
-        emit OptInUpgradeEnabled(address(this), block.timestamp);
-    }
-
-    /**
-     * @notice Disable opt-in upgrade - vault owner từ chối upgrade
-     * @dev Chỉ owner của vault có thể disable
-     */
-    function disableOptInUpgrade() external onlyOwner {
-        optInUpgrade = false;
-        emit OptInUpgradeDisabled(address(this), block.timestamp);
-    }
-
-    /**
-     * @notice Set upgrade manager address
-     * @param _upgradeManager Address của upgrade manager
-     */
-    function setUpgradeManager(address _upgradeManager) external onlyVaultManagerOrHelper {
-        if (_upgradeManager == address(0)) revert InvalidAddress();
-
-        address oldManager = upgradeManager;
-        upgradeManager = _upgradeManager;
-
-        emit UpgradeManagerUpdated(oldManager, _upgradeManager);
-    }
-
-    /**
-     * @notice Check nếu vault có thể upgrade
-     * @return canUpgrade True nếu vault đã opt-in upgrade
-     */
-    function canUpgrade() external view returns (bool) {
-        return optInUpgrade;
-    }
+    // ========================================================================
+    // DEPRECATED OPT-IN FUNCTIONS (Removed in V2)
+    // ========================================================================
+    // Opt-in mechanism has been removed. Upgrades are now managed through:
+    // 1. VersionedBeacon - tracks versions, allows rollback
+    // 2. Timelock - provides grace period for LP review
+    // 3. VaultGovernor - proposal/vote system with multisig
+    // ========================================================================
 
     // ========================================================================
     // RECEIVE / FALLBACK
@@ -1099,7 +1114,6 @@ contract AssetVaultUpgradeable is
             // Vault limits
             minBetAmount: vaultParams.minBetAmount,
             maxBetAmount: vaultParams.maxBetAmount,
-            maxPositionSizePercentBps: vaultParams.maxPositionSizePercentBps,
             // Exposure tracking
             totalLongExposure: totalLongExposure,
             totalShortExposure: totalShortExposure,
@@ -1566,42 +1580,8 @@ contract AssetVaultUpgradeable is
         _processPendingPayouts();
     }
 
-    /**
-     * @notice Get the pending payout queue
-     * @return queue Array of position IDs in FIFO order
-     */
-    function getPendingPayoutQueue() external view returns (uint64[] memory) {
-        return pendingPayoutQueue;
-    }
-
-    /**
-     * @notice Calculate pending rewards for a staker
-     * @param user Address of staker
-     * @return pendingRewards Total pending rewards
-     * @return lastProcessedDay Last day that was processed in this calculation
-     */
-    function calculatePendingRewards(address user)
-        external
-        view
-        returns (uint256 pendingRewards, uint256 lastProcessedDay)
-    {
-        LPPosition storage lpPos = lpPositions[user];
-        if (lpPos.shares == 0) {
-            return (0, 0);
-        }
-        // check vault balance
-        uint256 vaultBalance = 0;
-        if (projectToken == address(0)) {
-            vaultBalance = address(this).balance;
-        } else {
-            vaultBalance = IERC20(projectToken).balanceOf(address(this));
-        }
-        if (claimableRewards[user] > vaultBalance) {
-            return (vaultBalance, lpPos.lastProcessedDay);
-        }
-
-        return (claimableRewards[user], lpPos.lastProcessedDay);
-    }
+    // REMOVED: getPendingPayoutQueue() - Access pendingPayoutQueue array directly
+    // REMOVED: calculatePendingRewards() - Access claimableRewards[user] directly or use VaultViewer
 
     // ========================================================================
     // ADMIN FUNCTIONS
@@ -1678,21 +1658,12 @@ contract AssetVaultUpgradeable is
     /**
      * @notice Update vault parameters
      */
-    function updateVaultParams(
-        uint256 _minBetAmount,
-        uint256 _maxBetAmount,
-        uint16 _maxPositionSizePercentBps
-    ) external onlyOwner {
-        if (_maxPositionSizePercentBps > BASIS_POINTS) {
-            revert InvalidParameters();
-        }
-
+    function updateVaultParams(uint256 _minBetAmount, uint256 _maxBetAmount) external onlyOwner {
         if (_minBetAmount >= _maxBetAmount) revert InvalidParameters();
         if (_minBetAmount == 0) revert InvalidAmount();
 
         vaultParams.minBetAmount = _minBetAmount;
         vaultParams.maxBetAmount = _maxBetAmount;
-        vaultParams.maxPositionSizePercentBps = _maxPositionSizePercentBps;
 
         emit VaultParamsUpdated(_minBetAmount, _maxBetAmount, block.timestamp);
     }
@@ -1720,11 +1691,10 @@ contract AssetVaultUpgradeable is
      * @dev Can be called by:
      *      - Owner
      *      - VaultManager (được gọi bởi multisig)
-     *      - UpgradeManager
      */
     function pause() external {
-        // Allow owner, vaultManager, or upgradeManager
-        if (msg.sender != owner() && msg.sender != vaultManager && msg.sender != upgradeManager) {
+        // Allow owner or vaultManager only
+        if (msg.sender != owner() && msg.sender != vaultManager) {
             revert NotAuthorized();
         }
         _pause();
@@ -1798,192 +1768,17 @@ contract AssetVaultUpgradeable is
         return vaultParams;
     }
 
-    /**
-     * @notice Get all LPs
-     */
-    function getAllLPs() external view returns (address[] memory) {
-        return vaultLPs;
-    }
-
-    /**
-     * @notice Get treasury address
-     * @return Treasury address (address(0) if not set, fees go to owner)
-     */
-    function getTreasury() external view returns (address) {
-        return treasury;
-    }
-
-    /**
-     * @notice Calculate share value
-     * @param shares Number of shares
-     * @return value Value in combined tokens (project + MON)
-     */
-    function calculateShareValue(uint256 shares) external view returns (uint256 value) {
-        if (vaultInfo.totalShares == 0) return 0;
-        uint256 totalLiquidity = vaultInfo.totalLiquidity;
-        return (shares * totalLiquidity) / vaultInfo.totalShares;
-    }
-
-    /**
-     * @notice Get daily snapshot details
-     * @param day Day number
-     * @return snapshot Daily snapshot data
-     */
-    function getDailySnapshot(uint256 day) external view returns (DailySnapshot memory) {
-        return dailySnapshots[day];
-    }
-
-    /**
-     * @notice Get position IDs settled in a specific day
-     * @param day Day number
-     * @return positionIds Array of position IDs
-     */
-    function getDailyPositionIds(uint256 day) external view returns (uint64[] memory) {
-        return dailySnapshots[day].positionIds;
-    }
-
-    /**
-     * @notice Get current day's position IDs (before snapshot)
-     * @return positionIds Array of position IDs settled today
-     */
-    function getCurrentDailyPositionIds() external view returns (uint64[] memory) {
-        return dailyPositionIds;
-    }
-
-    // ========================================================================
-    // FEE-RELATED VIEW FUNCTIONS
-    // ========================================================================
-
-    /**
-     * @notice Get remaining lock time for a user
-     * @param user User address
-     * @return remainingTime Remaining lock time in seconds (0 if lock period passed)
-     */
-    function getRemainingLockTime(address user) external view returns (uint256) {
-        LPPosition storage lpPos = lpPositions[user];
-        if (lpPos.user == address(0)) return 0;
-
-        uint256 lockEndTime = lpPos.stakedAt + MIN_LOCK_PERIOD;
-        if (block.timestamp >= lockEndTime) return 0;
-
-        return lockEndTime - block.timestamp;
-    }
-
-    /**
-     * @notice Calculate withdrawal amount with potential early withdrawal fee
-     * @param user User address
-     * @param shares Amount of shares to withdraw
-     * @return grossAmount Gross withdrawal amount (before fee)
-     * @return fee Early withdrawal fee (0 if after lock period)
-     * @return netAmount Net amount user will receive
-     * @return isEarlyWithdrawal Whether this would be an early withdrawal
-     */
-    function calculateWithdrawalAmount(address user, uint256 shares)
-        external
-        view
-        returns (uint256 grossAmount, uint256 fee, uint256 netAmount, bool isEarlyWithdrawal)
-    {
-        LPPosition storage lpPos = lpPositions[user];
-        if (lpPos.shares < shares) revert InsufficientShares();
-
-        // Calculate gross amount
-        uint256 totalLiquidity = vaultInfo.totalLiquidity;
-        grossAmount = (shares * totalLiquidity) / vaultInfo.totalShares;
-
-        // Check if early withdrawal
-        uint256 lockEndTime = lpPos.stakedAt + MIN_LOCK_PERIOD;
-        isEarlyWithdrawal = block.timestamp < lockEndTime;
-
-        // Early withdrawal fee only applies if vault has graduated
-        if (isEarlyWithdrawal && vaultInfo.isGraduated) {
-            fee = (grossAmount * earlyWithdrawalFeeBps) / BASIS_POINTS;
-            netAmount = grossAmount - fee;
-        } else {
-            fee = 0;
-            netAmount = grossAmount;
-        }
-
-        return (grossAmount, fee, netAmount, isEarlyWithdrawal);
-    }
-
-    /**
-     * @notice Get fee configuration
-     * @return _stakingFeeBps Staking fee in basis points
-     * @return _earlyWithdrawalFeeBps Early withdrawal fee in basis points
-     * @return _minLockPeriod Minimum lock period in seconds
-     */
-    function getFeeConfig()
-        external
-        view
-        returns (uint16 _stakingFeeBps, uint16 _earlyWithdrawalFeeBps, uint256 _minLockPeriod)
-    {
-        return (stakingFeeBps, earlyWithdrawalFeeBps, MIN_LOCK_PERIOD);
-    }
-
-    /**
-     * @notice Get position fee configuration (open and close fees)
-     * @return _openPositionFeeBps Open position fee in basis points
-     * @return _closePositionFeeBps Close position fee in basis points
-     */
-    function getPositionFeeConfig()
-        external
-        view
-        returns (uint16 _openPositionFeeBps, uint16 _closePositionFeeBps)
-    {
-        return (openPositionFeeBps, closePositionFeeBps);
-    }
-
-    /**
-     * @notice Get all fee configuration (including position fees)
-     * @return _stakingFeeBps Staking fee in basis points
-     * @return _earlyWithdrawalFeeBps Early withdrawal fee in basis points
-     * @return _openPositionFeeBps Open position fee in basis points
-     * @return _closePositionFeeBps Close position fee in basis points
-     * @return _minLockPeriod Minimum lock period in seconds
-     */
-    function getAllFeeConfig()
-        external
-        view
-        returns (
-            uint16 _stakingFeeBps,
-            uint16 _earlyWithdrawalFeeBps,
-            uint16 _openPositionFeeBps,
-            uint16 _closePositionFeeBps,
-            uint256 _minLockPeriod
-        )
-    {
-        return (
-            stakingFeeBps,
-            earlyWithdrawalFeeBps,
-            openPositionFeeBps,
-            closePositionFeeBps,
-            MIN_LOCK_PERIOD
-        );
-    }
-
-    /**
-     * @notice Get total fees collected
-     * @return total Total fees collected (all types)
-     * @return staking Total staking fees
-     * @return withdrawal Total early withdrawal fees
-     */
-    function getFeesCollected()
-        external
-        view
-        returns (uint256 total, uint256 staking, uint256 withdrawal)
-    {
-        return (
-            vaultInfo.totalFeesCollected, vaultInfo.totalStakingFees, vaultInfo.totalWithdrawalFees
-        );
-    }
-
-    /**
-     * @notice Get withdrawable fees available for admin
-     * @return amount Amount of fees that can be withdrawn by admin
-     */
-    function getWithdrawableFees() external view returns (uint256 amount) {
-        return withdrawableFees;
-    }
+    // REMOVED: getAllLPs() - Access vaultLPs directly
+    // REMOVED: getTreasury() - Access treasury directly
+    // REMOVED: calculateShareValue() - Use (shares * getVaultInfo().totalLiquidity) / getVaultInfo().totalShares
+    // REMOVED: getDailySnapshot(), getDailyPositionIds(), getCurrentDailyPositionIds() - Use mapping directly
+    // REMOVED: getRemainingLockTime() - Use getLPPosition().stakedAt + MIN_LOCK_PERIOD
+    // REMOVED: calculateWithdrawalAmount() - Use VaultViewer.calculateWithdrawalAmount()
+    // REMOVED: getFeeConfig() - Access stakingFeeBps, earlyWithdrawalFeeBps, MIN_LOCK_PERIOD directly
+    // REMOVED: getPositionFeeConfig() - Access openPositionFeeBps, closePositionFeeBps directly
+    // REMOVED: getAllFeeConfig() - Use getFeeConfig() + getPositionFeeConfig() instead
+    // REMOVED: getFeesCollected() - Use getVaultInfo().totalFeesCollected instead
+    // REMOVED: getWithdrawableFees() - Access withdrawableFees directly
 
     // ========================================================================
     // FEE ADMIN FUNCTIONS
@@ -2100,51 +1895,7 @@ contract AssetVaultUpgradeable is
         maxDirectionalExposureBps = _maxDirectionalExposureBps;
     }
 
-    /**
-     * @notice Get current directional exposure stats
-     * @return longExposure Total LONG exposure
-     * @return shortExposure Total SHORT exposure
-     * @return netExposure Net exposure (|Long OI - Short OI|)
-     * @return maxExposure Maximum allowed directional exposure (based on TVL)
-     * @return netUtilization Net exposure utilization in basis points (netExposure / maxExposure * 10000)
-     * @return isLongBias True if long bias (longExposure > shortExposure), false if short bias
-     */
-    function getDirectionalExposure()
-        external
-        view
-        returns (
-            uint256 longExposure,
-            uint256 shortExposure,
-            uint256 netExposure,
-            uint256 maxExposure,
-            uint256 netUtilization,
-            bool isLongBias
-        )
-    {
-        longExposure = totalLongExposure;
-        shortExposure = totalShortExposure;
-
-        // Calculate net exposure
-        if (longExposure > shortExposure) {
-            netExposure = longExposure - shortExposure;
-            isLongBias = true;
-        } else {
-            netExposure = shortExposure - longExposure;
-            isLongBias = false;
-        }
-
-        if (vaultInfo.totalLiquidity > 0 && maxDirectionalExposureBps > 0) {
-            maxExposure = (vaultInfo.totalLiquidity * maxDirectionalExposureBps) / BASIS_POINTS;
-
-            // Calculate net utilization percentage (in basis points)
-            netUtilization = (netExposure * BASIS_POINTS) / maxExposure;
-        } else {
-            maxExposure = 0;
-            netUtilization = 0;
-        }
-
-        return (longExposure, shortExposure, netExposure, maxExposure, netUtilization, isLongBias);
-    }
+    // REMOVED: getDirectionalExposure() - Use VaultViewer.getDirectionalExposure(vault) instead
 
     // ========================================================================
     // TOTAL OPEN INTEREST CAP MANAGEMENT
@@ -2312,366 +2063,299 @@ contract AssetVaultUpgradeable is
         );
     }
 
-    /**
-     * @notice Get total OI cap configuration and current status
-     * @return currentMultiplierBps Current active risk multiplier based on vault TVL
-     * @return maxTotalOI Maximum allowed total open interest
-     * @return currentTotalOI Current total open interest (long + short)
-     * @return utilizationBps Total OI utilization in basis points (current / max * 10000)
-     * @return canOpenMore Whether vault can accept more positions
-     */
-    function getTotalOICapStatus()
-        external
-        view
-        returns (
-            uint16 currentMultiplierBps,
-            uint256 maxTotalOI,
-            uint256 currentTotalOI,
-            uint256 utilizationBps,
-            bool canOpenMore
-        )
-    {
-        uint256 tvl = vaultInfo.totalLiquidity;
-        currentMultiplierBps = _calculateRiskMultiplier(tvl);
+    // REMOVED: getTotalOICapStatus() - Use VaultViewer.getTotalOICapStatus(vault) instead
+    // REMOVED: getTotalOITierConfig() - Access state variables directly or use VaultViewer
+    // REMOVED: checkTotalOICap() - Use VaultViewer.checkTotalOICap(vault, positionSize) instead
 
-        if (tvl > 0) {
-            maxTotalOI = (tvl * currentMultiplierBps) / BASIS_POINTS;
-            currentTotalOI = totalLongExposure + totalShortExposure;
+    // REMOVED: simulateTVLChange() - Use VaultViewer.simulateTVLChange(vault, newTVL) instead
 
-            if (maxTotalOI > 0) {
-                utilizationBps = (currentTotalOI * BASIS_POINTS) / maxTotalOI;
-            } else {
-                utilizationBps = 0;
-            }
-
-            canOpenMore = currentTotalOI < maxTotalOI;
-        } else {
-            maxTotalOI = 0;
-            currentTotalOI = 0;
-            utilizationBps = 0;
-            canOpenMore = false;
-        }
-
-        return (currentMultiplierBps, maxTotalOI, currentTotalOI, utilizationBps, canOpenMore);
-    }
-
-    /**
-     * @notice Get total OI tier configuration
-     * @return fixedMultiplierBps Fixed multiplier used when tier system disabled
-     * @return _tier1Threshold TVL threshold for tier 1
-     * @return _tier2Threshold TVL threshold for tier 2
-     * @return _tier3Threshold TVL threshold for tier 3
-     * @return _tier1MultiplierBps Multiplier for tier 1
-     * @return _tier2MultiplierBps Multiplier for tier 2
-     * @return _tier3MultiplierBps Multiplier for tier 3
-     * @return _tier4MultiplierBps Multiplier for tier 4
-     */
-    function getTotalOITierConfig()
-        external
-        view
-        returns (
-            uint16 fixedMultiplierBps,
-            uint256 _tier1Threshold,
-            uint256 _tier2Threshold,
-            uint256 _tier3Threshold,
-            uint16 _tier1MultiplierBps,
-            uint16 _tier2MultiplierBps,
-            uint16 _tier3MultiplierBps,
-            uint16 _tier4MultiplierBps
-        )
-    {
-        return (
-            totalOIRiskMultiplierBps,
-            tier1Threshold,
-            tier2Threshold,
-            tier3Threshold,
-            tier1MultiplierBps,
-            tier2MultiplierBps,
-            tier3MultiplierBps,
-            tier4MultiplierBps
-        );
-    }
-
-    /**
-     * @notice Check if a new position can be opened based on Total OI Cap
-     * @param positionSize Size of the position to open
-     * @return canOpen Whether the position can be opened
-     * @return maxTotalOI Maximum total OI allowed
-     * @return currentTotalOI Current total OI
-     * @return remainingCapacity Remaining capacity before hitting cap
-     * @return reason Reason if cannot open (empty if can open)
-     */
-    function checkTotalOICap(uint256 positionSize)
-        external
-        view
-        returns (
-            bool canOpen,
-            uint256 maxTotalOI,
-            uint256 currentTotalOI,
-            uint256 remainingCapacity,
-            string memory reason
-        )
-    {
-        uint256 tvl = vaultInfo.totalLiquidity;
-
-        if (tvl == 0) {
-            return (false, 0, 0, 0, "Vault has no liquidity");
-        }
-
-        // Calculate current risk multiplier
-        uint16 currentMultiplier = _calculateRiskMultiplier(tvl);
-
-        // Calculate maximum allowed total OI
-        maxTotalOI = (tvl * currentMultiplier) / BASIS_POINTS;
-
-        // Calculate current total OI
-        currentTotalOI = totalLongExposure + totalShortExposure;
-
-        // Calculate new total OI after adding this position
-        uint256 newTotalOI = currentTotalOI + positionSize;
-
-        // Check if new total OI exceeds maximum
-        if (newTotalOI > maxTotalOI) {
-            uint256 available = maxTotalOI > currentTotalOI ? maxTotalOI - currentTotalOI : 0;
-            return (
-                false,
-                maxTotalOI,
-                currentTotalOI,
-                available,
-                "Exceeds maximum total open interest cap"
-            );
-        }
-
-        // Calculate remaining capacity
-        remainingCapacity = maxTotalOI - newTotalOI;
-
-        return (true, maxTotalOI, currentTotalOI, remainingCapacity, "");
-    }
-
-    /**
-     * @notice Simulate what would happen if vault TVL changes
-     * @param newTVL New TVL to simulate
-     * @return newMultiplierBps New risk multiplier that would apply
-     * @return newMaxTotalOI New maximum total OI that would be allowed
-     * @return currentTotalOI Current total OI
-     * @return wouldExceedCap Whether current positions would exceed new cap
-     */
-    function simulateTVLChange(uint256 newTVL)
-        external
-        view
-        returns (
-            uint16 newMultiplierBps,
-            uint256 newMaxTotalOI,
-            uint256 currentTotalOI,
-            bool wouldExceedCap
-        )
-    {
-        // Calculate what multiplier would apply with new TVL
-        newMultiplierBps = _calculateRiskMultiplier(newTVL);
-
-        // Calculate new max total OI
-        if (newTVL > 0) {
-            newMaxTotalOI = (newTVL * newMultiplierBps) / BASIS_POINTS;
-        } else {
-            newMaxTotalOI = 0;
-        }
-
-        // Get current total OI
-        currentTotalOI = totalLongExposure + totalShortExposure;
-
-        // Check if current positions would exceed new cap
-        wouldExceedCap = currentTotalOI > newMaxTotalOI;
-
-        return (newMultiplierBps, newMaxTotalOI, currentTotalOI, wouldExceedCap);
-    }
-
-    /**
-     * @notice Get detailed breakdown of OI utilization
-     * @return tvl Current vault TVL
-     * @return longOI Total long open interest
-     * @return shortOI Total short open interest
-     * @return totalOI Total open interest (long + short)
-     * @return maxOI Maximum allowed total OI
-     * @return utilizationBps Utilization in basis points (0-10000)
-     * @return remainingCapacity Remaining capacity before hitting cap
-     * @return currentTier Current TVL tier (0-4, 0 = fixed multiplier)
-     * @return currentMultiplierBps Current risk multiplier
-     */
-    function getTotalOIBreakdown()
-        external
-        view
-        returns (
-            uint256 tvl,
-            uint256 longOI,
-            uint256 shortOI,
-            uint256 totalOI,
-            uint256 maxOI,
-            uint256 utilizationBps,
-            uint256 remainingCapacity,
-            uint8 currentTier,
-            uint16 currentMultiplierBps
-        )
-    {
-        tvl = vaultInfo.totalLiquidity;
-        longOI = totalLongExposure;
-        shortOI = totalShortExposure;
-        totalOI = longOI + shortOI;
-
-        currentMultiplierBps = _calculateRiskMultiplier(tvl);
-
-        if (tvl > 0) {
-            maxOI = (tvl * currentMultiplierBps) / BASIS_POINTS;
-
-            if (maxOI > 0) {
-                utilizationBps = (totalOI * BASIS_POINTS) / maxOI;
-            } else {
-                utilizationBps = 0;
-            }
-
-            if (totalOI < maxOI) {
-                remainingCapacity = maxOI - totalOI;
-            } else {
-                remainingCapacity = 0;
-            }
-        } else {
-            maxOI = 0;
-            utilizationBps = 0;
-            remainingCapacity = 0;
-        }
-
-        // Determine current tier
-        if (tier1Threshold == 0 && tier2Threshold == 0 && tier3Threshold == 0) {
-            currentTier = 0; // Fixed multiplier mode
-        } else if (tvl < tier1Threshold) {
-            currentTier = 1;
-        } else if (tvl < tier2Threshold) {
-            currentTier = 2;
-        } else if (tvl < tier3Threshold) {
-            currentTier = 3;
-        } else {
-            currentTier = 4;
-        }
-
-        return (
-            tvl,
-            longOI,
-            shortOI,
-            totalOI,
-            maxOI,
-            utilizationBps,
-            remainingCapacity,
-            currentTier,
-            currentMultiplierBps
-        );
-    }
+    // REMOVED: getTotalOIBreakdown() - Use VaultViewer.getTotalOIBreakdown(vault) instead
 
     // ========================================================================
     // MAXIMUM LEVERAGE TIER SYSTEM - VIEW FUNCTIONS (Control Lever 1)
     // ========================================================================
 
-    /**
-     * @notice Get vault's current maximum leverage based on TVL
-     * @return maxLeverage Current maximum leverage allowed
-     * @return currentTVL Current vault TVL
-     * @return currentPhase Phase name: "Launch", "Growth", or "Mature"
-     */
-    function getVaultMaxLeverage()
-        external
-        view
-        returns (uint16 maxLeverage, uint256 currentTVL, string memory currentPhase)
-    {
-        currentTVL = vaultInfo.totalLiquidity;
-        maxLeverage = _calculateMaxLeverage(currentTVL);
+    // REMOVED: getVaultMaxLeverage() - Use VaultViewer.getVaultMaxLeverage(vault) instead
+    // REMOVED: getEffectiveMaxLeverage() - Use VaultViewer.getEffectiveMaxLeverage(vault) instead
+    // REMOVED: getVaultUtilization() - Use VaultViewer.getVaultUtilization(vault) instead
 
-        // Determine current phase
-        if (currentTVL < leverageTier1Threshold) {
-            currentPhase = "Launch";
-        } else if (currentTVL < leverageTier2Threshold) {
-            currentPhase = "Growth";
-        } else {
-            currentPhase = "Mature";
+    // REMOVED: getLeverageTierConfig() - Use VaultViewer.getLeverageTierConfig(vault) instead or access state directly
+    // REMOVED: checkLeverageAllowed() - Use VaultViewer.checkLeverageAllowed(vault, leverage) instead
+    // REMOVED: simulateLeverageAtTVL() - Use VaultViewer.simulateLeverageAtTVL(vault, targetTVL) instead
+
+    // ========================================================================
+    // FUNDING RATE FUNCTIONS
+    // ========================================================================
+
+    /**
+     * @notice Update hourly funding rates (called by keeper every hour)
+     * @return newLongRate New cumulative long rate
+     * @return newShortRate New cumulative short rate
+     * @return imbalanceBps Current imbalance in basis points
+     * @return hasCounterparty True if both Long and Short have OI
+     * @dev Can only be called once per hour. If no counterparty exists, rates are updated
+     *      but no actual funding is charged (display only).
+     */
+    function updateHourlyFunding()
+        external
+        onlyAdmin
+        returns (
+            int256 newLongRate,
+            int256 newShortRate,
+            uint256 imbalanceBps,
+            bool hasCounterparty
+        )
+    {
+        if (!fundingEnabled) {
+            return (cumulativeFundingRateLong, cumulativeFundingRateShort, 0, false);
         }
 
-        return (maxLeverage, currentTVL, currentPhase);
+        uint256 currentHour = block.timestamp / FundingRateLib.SECONDS_PER_HOUR;
+
+        // Calculate hours elapsed since last update
+        uint256 hoursElapsed = currentHour - lastFundingUpdateHour;
+
+        if (hoursElapsed == 0) {
+            // Already updated this hour
+            return (cumulativeFundingRateLong, cumulativeFundingRateShort, 0, true);
+        }
+
+        // Calculate current imbalance
+        bool isLongDominant;
+        (imbalanceBps, isLongDominant, hasCounterparty) =
+            FundingRateLib.calculateImbalance(totalLongExposure, totalShortExposure);
+
+        // Get hourly rate based on imbalance tier
+        uint16 hourlyRateBps = FundingRateLib.getHourlyRate(imbalanceBps, fundingConfig);
+
+        // Calculate rate delta for each hour elapsed
+        // Only apply funding if there's a counterparty to receive it
+        if (hasCounterparty && hoursElapsed > 0) {
+            (int256 longDelta, int256 shortDelta) =
+                FundingRateLib.calculateHourlyRateDelta(hourlyRateBps, isLongDominant);
+
+            // Apply for each hour elapsed
+            cumulativeFundingRateLong += longDelta * int256(hoursElapsed);
+            cumulativeFundingRateShort += shortDelta * int256(hoursElapsed);
+        }
+
+        // Update timestamp
+        lastFundingUpdateTime = block.timestamp;
+        lastFundingUpdateHour = currentHour;
+
+        newLongRate = cumulativeFundingRateLong;
+        newShortRate = cumulativeFundingRateShort;
+
+        emit HourlyFundingUpdated(
+            newLongRate,
+            newShortRate,
+            imbalanceBps,
+            hourlyRateBps,
+            isLongDominant,
+            hasCounterparty,
+            block.timestamp
+        );
+
+        return (newLongRate, newShortRate, imbalanceBps, hasCounterparty);
     }
 
     /**
-     * @notice Get complete leverage tier configuration
-     * @return _tier1Threshold TVL threshold for Growth Phase
-     * @return _tier2Threshold TVL threshold for Mature Phase
-     * @return _tier1Max Max leverage for Launch Phase
-     * @return _tier2Max Max leverage for Growth Phase
-     * @return _tier3Max Max leverage for Mature Phase
+     * @notice Get cumulative funding rates
+     * @return cumulativeLongRate Cumulative funding rate for Longs
+     * @return cumulativeShortRate Cumulative funding rate for Shorts
      */
-    function getLeverageTierConfig()
+    function getCumulativeFundingRates()
         external
         view
-        returns (
-            uint256 _tier1Threshold,
-            uint256 _tier2Threshold,
-            uint16 _tier1Max,
-            uint16 _tier2Max,
-            uint16 _tier3Max
-        )
+        returns (int256 cumulativeLongRate, int256 cumulativeShortRate)
     {
-        return (
-            leverageTier1Threshold,
-            leverageTier2Threshold,
-            tier1MaxLeverage,
-            tier2MaxLeverage,
-            tier3MaxLeverage
+        return (cumulativeFundingRateLong, cumulativeFundingRateShort);
+    }
+
+    /**
+     * @notice Calculate funding owed by a position
+     * @param entryRateLong Position's entry cumulative long rate
+     * @param entryRateShort Position's entry cumulative short rate
+     * @param positionSize Position size
+     * @param direction Position direction (1 = LONG, 2 = SHORT)
+     * @return fundingOwed Funding amount (positive = owes, negative = receives)
+     */
+    function calculatePositionFunding(
+        int256 entryRateLong,
+        int256 entryRateShort,
+        uint256 positionSize,
+        uint8 direction
+    ) external view returns (int256 fundingOwed) {
+        if (!fundingEnabled) {
+            return 0;
+        }
+
+        return FundingRateLib.calculatePositionFunding(
+            entryRateLong,
+            entryRateShort,
+            cumulativeFundingRateLong,
+            cumulativeFundingRateShort,
+            positionSize,
+            direction
         );
     }
 
     /**
-     * @notice Check if a specific leverage is allowed for current vault size
-     * @param requestedLeverage Leverage to check
-     * @return isAllowed Whether the leverage is allowed
-     * @return currentMaxLeverage Current max leverage for vault
-     * @return reason Reason if not allowed
+     * @notice Get current hourly funding rate based on imbalance
+     * @return rateBps Funding rate in basis points per hour
+     * @return longsPayShorts True if longs pay shorts
+     * @return imbalanceBps Current imbalance in basis points
+     * @return hasCounterparty True if both sides have OI
      */
-    function checkLeverageAllowed(uint16 requestedLeverage)
+    function getCurrentHourlyFundingRate()
         external
         view
-        returns (bool isAllowed, uint16 currentMaxLeverage, string memory reason)
+        returns (uint256 rateBps, bool longsPayShorts, uint256 imbalanceBps, bool hasCounterparty)
     {
-        currentMaxLeverage = _calculateMaxLeverage(vaultInfo.totalLiquidity);
+        (imbalanceBps, longsPayShorts, hasCounterparty) =
+            FundingRateLib.calculateImbalance(totalLongExposure, totalShortExposure);
 
-        if (requestedLeverage > currentMaxLeverage) {
-            return (false, currentMaxLeverage, "Exceeds vault's maximum leverage limit");
+        rateBps = FundingRateLib.getHourlyRate(imbalanceBps, fundingConfig);
+
+        return (rateBps, longsPayShorts, imbalanceBps, hasCounterparty);
+    }
+
+    // REMOVED: getFundingStats() - Use VaultViewer.getFundingStats(vault) instead
+
+    /**
+     * @notice Check if position is liquidatable due to funding
+     * @param collateral Position collateral
+     * @param entryRateLong Entry funding rate for long
+     * @param entryRateShort Entry funding rate for short
+     * @param positionSize Position size
+     * @param direction Position direction
+     * @param maintenanceMarginRatio Maintenance margin ratio in bps
+     * @return isLiquidatable True if position should be liquidated
+     * @return fundingOwed Amount of funding owed
+     * @return effectiveCollateral Collateral after funding deduction
+     */
+    function checkFundingLiquidation(
+        uint256 collateral,
+        int256 entryRateLong,
+        int256 entryRateShort,
+        uint256 positionSize,
+        uint8 direction,
+        uint256 maintenanceMarginRatio
+    )
+        external
+        view
+        returns (bool isLiquidatable, int256 fundingOwed, uint256 effectiveCollateral)
+    {
+        if (!fundingEnabled) {
+            return (false, 0, collateral);
         }
 
-        return (true, currentMaxLeverage, "");
+        // Calculate funding owed
+        fundingOwed = FundingRateLib.calculatePositionFunding(
+            entryRateLong,
+            entryRateShort,
+            cumulativeFundingRateLong,
+            cumulativeFundingRateShort,
+            positionSize,
+            direction
+        );
+
+        // Calculate effective collateral
+        bool isNegative;
+        (effectiveCollateral, isNegative) =
+            FundingRateLib.calculateEffectiveCollateral(collateral, fundingOwed);
+
+        if (isNegative) {
+            return (true, fundingOwed, 0);
+        }
+
+        // Check if below maintenance margin
+        isLiquidatable =
+            FundingRateLib.checkFundingLiquidation(collateral, fundingOwed, maintenanceMarginRatio);
+
+        return (isLiquidatable, fundingOwed, effectiveCollateral);
     }
 
     /**
-     * @notice Simulate what max leverage would be at different TVL levels
-     * @param targetTVL Target TVL to simulate
-     * @return maxLeverageAtTarget Max leverage at target TVL
-     * @return phase Phase at target TVL
+     * @notice Set funding rate configuration
+     * @param tier1RateBps Rate for < 20% imbalance
+     * @param tier2RateBps Rate for 20-40% imbalance
+     * @param tier3RateBps Rate for 40-60% imbalance
+     * @param tier4RateBps Rate for 60-80% imbalance
+     * @param tier5RateBps Rate for > 80% imbalance
      */
-    function simulateLeverageAtTVL(uint256 targetTVL)
-        external
-        view
-        returns (uint16 maxLeverageAtTarget, string memory phase)
-    {
-        maxLeverageAtTarget = _calculateMaxLeverage(targetTVL);
+    function setFundingConfig(
+        uint16 tier1RateBps,
+        uint16 tier2RateBps,
+        uint16 tier3RateBps,
+        uint16 tier4RateBps,
+        uint16 tier5RateBps
+    ) external onlyVaultManagerOrHelper {
+        FundingRateLib.FundingConfig memory newConfig = FundingRateLib.FundingConfig({
+            tier1RateBps: tier1RateBps,
+            tier2RateBps: tier2RateBps,
+            tier3RateBps: tier3RateBps,
+            tier4RateBps: tier4RateBps,
+            tier5RateBps: tier5RateBps,
+            isEnabled: fundingEnabled
+        });
 
-        if (targetTVL < leverageTier1Threshold) {
-            phase = "Launch";
-        } else if (targetTVL < leverageTier2Threshold) {
-            phase = "Growth";
-        } else {
-            phase = "Mature";
+        if (!FundingRateLib.validateConfig(newConfig)) {
+            revert InvalidParameters();
         }
 
-        return (maxLeverageAtTarget, phase);
+        fundingConfig = newConfig;
+
+        emit FundingConfigUpdated(
+            tier1RateBps, tier2RateBps, tier3RateBps, tier4RateBps, tier5RateBps
+        );
+    }
+
+    /**
+     * @notice Enable or disable funding rate
+     * @param enabled True to enable funding
+     */
+    function setFundingEnabled(bool enabled) external onlyVaultManagerOrHelper {
+        fundingEnabled = enabled;
+        fundingConfig.isEnabled = enabled;
+        emit FundingEnabledUpdated(enabled);
+    }
+
+    // REMOVED: isFundingEnabled() - Use fundingEnabled() directly
+    // REMOVED: estimateFunding() - Use VaultViewer.estimateFunding(vault, ...) instead
+
+    /**
+     * @notice Get funding configuration as tuple
+     * @return tier1RateBps Rate for < 20% imbalance
+     * @return tier2RateBps Rate for 20-40% imbalance
+     * @return tier3RateBps Rate for 40-60% imbalance
+     * @return tier4RateBps Rate for 60-80% imbalance
+     * @return tier5RateBps Rate for > 80% imbalance
+     */
+    function getFundingConfig()
+        external
+        view
+        returns (
+            uint16 tier1RateBps,
+            uint16 tier2RateBps,
+            uint16 tier3RateBps,
+            uint16 tier4RateBps,
+            uint16 tier5RateBps
+        )
+    {
+        return (
+            fundingConfig.tier1RateBps,
+            fundingConfig.tier2RateBps,
+            fundingConfig.tier3RateBps,
+            fundingConfig.tier4RateBps,
+            fundingConfig.tier5RateBps
+        );
     }
 
     /**
      * @notice Get vault version
      */
     function version() external pure returns (string memory) {
-        return "2.0.0-upgradeable";
+        return "2.1.0-with-funding";
     }
 }

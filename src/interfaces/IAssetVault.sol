@@ -37,7 +37,6 @@ interface IAssetVault {
     struct VaultParams {
         uint256 minBetAmount;
         uint256 maxBetAmount;
-        uint16 maxPositionSizePercentBps;
         uint256 minLiquidityAmount;
     }
 
@@ -117,11 +116,7 @@ interface IAssetVault {
         uint8 direction
     ) external;
 
-    function updateVaultParams(
-        uint256 _minBetAmount,
-        uint256 _maxBetAmount,
-        uint16 _maxPositionSizePercentBps
-    ) external;
+    function updateVaultParams(uint256 _minBetAmount, uint256 _maxBetAmount) external;
 
     /**
      * @notice Check position risk
@@ -184,11 +179,7 @@ interface IAssetVault {
      */
     function paused() external view returns (bool);
 
-    /**
-     * @notice Set upgrade manager for opt-in upgrades
-     * @param _upgradeManager OptInUpgradeManager address
-     */
-    function setUpgradeManager(address _upgradeManager) external;
+    // DEPRECATED: setUpgradeManager removed in V2
 
     // ========================================================================
     // FEE-RELATED FUNCTIONS
@@ -468,4 +459,205 @@ interface IAssetVault {
      * @return Max directional exposure cap (e.g., 5000 = 50%)
      */
     function maxDirectionalExposureBps() external view returns (uint16);
+
+    // ========================================================================
+    // FUNDING RATE FUNCTIONS
+    // ========================================================================
+
+    /**
+     * @notice Update hourly funding rates (called by keeper every hour)
+     * @return newLongRate New cumulative long rate
+     * @return newShortRate New cumulative short rate
+     * @return imbalanceBps Current imbalance in basis points
+     * @return hasCounterparty True if both Long and Short have OI
+     */
+    function updateHourlyFunding()
+        external
+        returns (
+            int256 newLongRate,
+            int256 newShortRate,
+            uint256 imbalanceBps,
+            bool hasCounterparty
+        );
+
+    /**
+     * @notice Get cumulative funding rates
+     * @return cumulativeLongRate Cumulative funding rate for Longs
+     * @return cumulativeShortRate Cumulative funding rate for Shorts
+     */
+    function getCumulativeFundingRates()
+        external
+        view
+        returns (int256 cumulativeLongRate, int256 cumulativeShortRate);
+
+    /**
+     * @notice Calculate funding owed by a position
+     * @param entryRateLong Position's entry cumulative long rate
+     * @param entryRateShort Position's entry cumulative short rate
+     * @param positionSize Position size
+     * @param direction Position direction (1 = LONG, 2 = SHORT)
+     * @return fundingOwed Funding amount (positive = owes, negative = receives)
+     */
+    function calculatePositionFunding(
+        int256 entryRateLong,
+        int256 entryRateShort,
+        uint256 positionSize,
+        uint8 direction
+    ) external view returns (int256 fundingOwed);
+
+    /**
+     * @notice Get current hourly funding rate based on imbalance
+     * @return rateBps Funding rate in basis points per hour
+     * @return longsPayShorts True if longs pay shorts
+     * @return imbalanceBps Current imbalance in basis points
+     * @return hasCounterparty True if both sides have OI
+     */
+    function getCurrentHourlyFundingRate()
+        external
+        view
+        returns (uint256 rateBps, bool longsPayShorts, uint256 imbalanceBps, bool hasCounterparty);
+
+    /**
+     * @notice Get funding rate statistics
+     * @return cumulativeLongRate Cumulative long rate
+     * @return cumulativeShortRate Cumulative short rate
+     * @return lastUpdateTime Last funding update timestamp
+     * @return currentHourlyRateBps Current hourly rate in bps
+     * @return longsPayShorts True if longs pay shorts
+     * @return imbalanceBps Current imbalance
+     */
+    function getFundingStats()
+        external
+        view
+        returns (
+            int256 cumulativeLongRate,
+            int256 cumulativeShortRate,
+            uint256 lastUpdateTime,
+            uint256 currentHourlyRateBps,
+            bool longsPayShorts,
+            uint256 imbalanceBps
+        );
+
+    /**
+     * @notice Check if position is liquidatable due to funding
+     * @param collateral Position collateral
+     * @param entryRateLong Entry funding rate for long
+     * @param entryRateShort Entry funding rate for short
+     * @param positionSize Position size
+     * @param direction Position direction
+     * @param maintenanceMarginRatio Maintenance margin ratio in bps
+     * @return isLiquidatable True if position should be liquidated
+     * @return fundingOwed Amount of funding owed
+     * @return effectiveCollateral Collateral after funding deduction
+     */
+    function checkFundingLiquidation(
+        uint256 collateral,
+        int256 entryRateLong,
+        int256 entryRateShort,
+        uint256 positionSize,
+        uint8 direction,
+        uint256 maintenanceMarginRatio
+    )
+        external
+        view
+        returns (bool isLiquidatable, int256 fundingOwed, uint256 effectiveCollateral);
+
+    /**
+     * @notice Set funding rate configuration
+     * @param tier1RateBps Rate for < 20% imbalance
+     * @param tier2RateBps Rate for 20-40% imbalance
+     * @param tier3RateBps Rate for 40-60% imbalance
+     * @param tier4RateBps Rate for 60-80% imbalance
+     * @param tier5RateBps Rate for > 80% imbalance
+     */
+    function setFundingConfig(
+        uint16 tier1RateBps,
+        uint16 tier2RateBps,
+        uint16 tier3RateBps,
+        uint16 tier4RateBps,
+        uint16 tier5RateBps
+    ) external;
+
+    /**
+     * @notice Enable or disable funding rate
+     * @param enabled True to enable funding
+     */
+    function setFundingEnabled(bool enabled) external;
+
+    /**
+     * @notice Check if funding is enabled
+     * @return True if funding is enabled
+     */
+    function isFundingEnabled() external view returns (bool);
+
+    // ========================================================================
+    // CONFIG VIEW FUNCTIONS (V2 - for VaultViewer)
+    // ========================================================================
+
+    /**
+     * @notice Get Total OI tier configuration
+     */
+    function getTotalOITierConfig()
+        external
+        view
+        returns (
+            uint16 totalOIRiskMultiplierBps,
+            uint256 tier1Threshold,
+            uint256 tier2Threshold,
+            uint256 tier3Threshold,
+            uint16 tier1MultiplierBps,
+            uint16 tier2MultiplierBps,
+            uint16 tier3MultiplierBps,
+            uint16 tier4MultiplierBps
+        );
+
+    /**
+     * @notice Get leverage tier configuration
+     */
+    function getLeverageTierConfig()
+        external
+        view
+        returns (
+            uint256 tier1Threshold,
+            uint256 tier2Threshold,
+            uint16 tier1MaxLeverage,
+            uint16 tier2MaxLeverage,
+            uint16 tier3MaxLeverage
+        );
+
+    // Note: getFeeConfig() is defined above in FEE-RELATED FUNCTIONS section
+
+    /**
+     * @notice Get funding rate configuration
+     */
+    function getFundingConfig()
+        external
+        view
+        returns (
+            uint16 tier1RateBps,
+            uint16 tier2RateBps,
+            uint16 tier3RateBps,
+            uint16 tier4RateBps,
+            uint16 tier5RateBps
+        );
+
+    /**
+     * @notice Get last funding update timestamp
+     */
+    function lastFundingUpdateTime() external view returns (uint256);
+
+    /**
+     * @notice Get cumulative funding rate for longs
+     */
+    function cumulativeFundingRateLong() external view returns (int256);
+
+    /**
+     * @notice Get cumulative funding rate for shorts
+     */
+    function cumulativeFundingRateShort() external view returns (int256);
+
+    /**
+     * @notice Get claimable rewards for a user
+     */
+    function claimableRewards(address user) external view returns (uint256);
 }

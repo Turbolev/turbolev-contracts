@@ -139,9 +139,8 @@ contract SettlementEngineTest is Test {
         // Deploy VaultManager
         VaultManager vaultManagerImpl = new VaultManager();
 
-        // Create mock governance addresses for testing
-        address mockVaultBeacon = makeAddr("mockVaultBeacon");
-        address mockOptInUpgradeManager = makeAddr("mockOptInUpgradeManager");
+        // Create mock governance addresses for testing (V2 - opt-in removed)
+        address mockVaultBeacon = makeAddr("mockVersionedBeacon");
         address mockTimelockController = makeAddr("mockTimelockController");
         address mockMultisigWallet = makeAddr("mockMultisigWallet");
         address mockVaultGovernor = makeAddr("mockVaultGovernor");
@@ -150,7 +149,6 @@ contract SettlementEngineTest is Test {
             VaultManager.initializeV2.selector,
             owner,
             mockVaultBeacon,
-            mockOptInUpgradeManager,
             mockTimelockController,
             mockMultisigWallet,
             mockVaultGovernor
@@ -336,7 +334,10 @@ contract SettlementEngineTest is Test {
             lastModifiedTimestamp: block.timestamp,
             minCloseTime: block.timestamp,
             initialMargin: 1 ether,
-            addedMargin: 0
+            addedMargin: 0,
+            entryFundingRateLong: 0,
+            entryFundingRateShort: 0,
+            lastFundingSettlement: block.timestamp
         });
 
         // Close at higher price (winning)
@@ -383,7 +384,10 @@ contract SettlementEngineTest is Test {
             lastModifiedTimestamp: block.timestamp,
             minCloseTime: block.timestamp,
             initialMargin: 1 ether,
-            addedMargin: 0
+            addedMargin: 0,
+            entryFundingRateLong: 0,
+            entryFundingRateShort: 0,
+            lastFundingSettlement: block.timestamp
         });
 
         // Close at lower price (losing)
@@ -422,7 +426,10 @@ contract SettlementEngineTest is Test {
             lastModifiedTimestamp: block.timestamp,
             minCloseTime: block.timestamp,
             initialMargin: 1 ether,
-            addedMargin: 0
+            addedMargin: 0,
+            entryFundingRateLong: 0,
+            entryFundingRateShort: 0,
+            lastFundingSettlement: block.timestamp
         });
 
         // Price drops enough to liquidate
@@ -460,7 +467,10 @@ contract SettlementEngineTest is Test {
             lastModifiedTimestamp: block.timestamp,
             minCloseTime: block.timestamp,
             initialMargin: 1 ether,
-            addedMargin: 0
+            addedMargin: 0,
+            entryFundingRateLong: 0,
+            entryFundingRateShort: 0,
+            lastFundingSettlement: block.timestamp
         });
 
         // Huge price increase
@@ -549,7 +559,10 @@ contract SettlementEngineTest is Test {
             lastModifiedTimestamp: block.timestamp,
             minCloseTime: block.timestamp,
             initialMargin: 1 ether,
-            addedMargin: 0
+            addedMargin: 0,
+            entryFundingRateLong: 0,
+            entryFundingRateShort: 0,
+            lastFundingSettlement: block.timestamp
         });
 
         vm.prank(user);
@@ -608,7 +621,10 @@ contract SettlementEngineTest is Test {
             lastModifiedTimestamp: block.timestamp,
             minCloseTime: block.timestamp,
             initialMargin: 1 ether,
-            addedMargin: 0
+            addedMargin: 0,
+            entryFundingRateLong: 0,
+            entryFundingRateShort: 0,
+            lastFundingSettlement: block.timestamp
         });
 
         vm.prank(address(positionManager));

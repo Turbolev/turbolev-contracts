@@ -319,20 +319,15 @@ contract VaultManagerHelper {
      * @param tokenAddress Token address
      * @param minBetAmount Min bet amount
      * @param maxBetAmount Max bet amount
-     * @param maxPositionSizePercentBps Max position size percent in basis points
      */
-    function updateVaultParams(
-        address tokenAddress,
-        uint256 minBetAmount,
-        uint256 maxBetAmount,
-        uint16 maxPositionSizePercentBps
-    ) external onlyOwner {
+    function updateVaultParams(address tokenAddress, uint256 minBetAmount, uint256 maxBetAmount)
+        external
+        onlyOwner
+    {
         address vaultAddress = IVaultManager(vaultManager).getVault(tokenAddress);
         if (vaultAddress == address(0)) revert VaultNotFound();
 
-        IAssetVault(vaultAddress).updateVaultParams(
-            minBetAmount, maxBetAmount, maxPositionSizePercentBps
-        );
+        IAssetVault(vaultAddress).updateVaultParams(minBetAmount, maxBetAmount);
     }
 
     /**
@@ -520,5 +515,192 @@ contract VaultManagerHelper {
         onlyVault
     {
         emit RewardsClaimed(msg.sender, user, amount, timestamp);
+    }
+
+    // ========================================================================
+    // FUNDING RATE FUNCTIONS
+    // ========================================================================
+
+    /**
+     * @notice Batch update hourly funding rates for all vaults
+     * @dev Called by keeper every hour to update funding rates
+     * @return updatedCount Number of vaults successfully updated
+     */
+    function batchUpdateHourlyFunding() external returns (uint256 updatedCount) {
+        address[] memory vaults = IVaultManager(vaultManager).getAllVaults();
+
+        for (uint256 i = 0; i < vaults.length; i++) {
+            try IAssetVault(vaults[i]).updateHourlyFunding() {
+                updatedCount++;
+            } catch {
+                // Skip failed vaults, continue with others
+                continue;
+            }
+        }
+
+        return updatedCount;
+    }
+
+    /**
+     * @notice Update hourly funding for specific vaults
+     * @param vaults Array of vault addresses to update
+     * @return updatedCount Number of vaults successfully updated
+     */
+    function batchUpdateHourlyFundingForVaults(address[] calldata vaults)
+        external
+        returns (uint256 updatedCount)
+    {
+        for (uint256 i = 0; i < vaults.length; i++) {
+            try IAssetVault(vaults[i]).updateHourlyFunding() {
+                updatedCount++;
+            } catch {
+                // Skip failed vaults, continue with others
+                continue;
+            }
+        }
+
+        return updatedCount;
+    }
+
+    /**
+     * @notice Get funding statistics for all vaults
+     * @return vaultAddresses Array of vault addresses
+     * @return longRates Array of cumulative long rates
+     * @return shortRates Array of cumulative short rates
+     * @return imbalances Array of current imbalances in bps
+     * @return hourlyRates Array of current hourly rates in bps
+     */
+    function getAllVaultsFundingStats()
+        external
+        view
+        returns (
+            address[] memory vaultAddresses,
+            int256[] memory longRates,
+            int256[] memory shortRates,
+            uint256[] memory imbalances,
+            uint256[] memory hourlyRates
+        )
+    {
+        vaultAddresses = IVaultManager(vaultManager).getAllVaults();
+        uint256 length = vaultAddresses.length;
+
+        longRates = new int256[](length);
+        shortRates = new int256[](length);
+        imbalances = new uint256[](length);
+        hourlyRates = new uint256[](length);
+
+        for (uint256 i = 0; i < length; i++) {
+            try IAssetVault(vaultAddresses[i]).getFundingStats() returns (
+                int256 cumulativeLong,
+                int256 cumulativeShort,
+                uint256, // lastUpdateTime
+                uint256 currentHourlyRate,
+                bool, // longsPayShorts
+                uint256 imbalanceBps
+            ) {
+                longRates[i] = cumulativeLong;
+                shortRates[i] = cumulativeShort;
+                imbalances[i] = imbalanceBps;
+                hourlyRates[i] = currentHourlyRate;
+            } catch {
+                // Default values for failed calls
+                longRates[i] = 0;
+                shortRates[i] = 0;
+                imbalances[i] = 0;
+                hourlyRates[i] = 0;
+            }
+        }
+
+        return (vaultAddresses, longRates, shortRates, imbalances, hourlyRates);
+    }
+
+    /**
+     * @notice Get funding info for a specific vault
+     * @param tokenAddress Project token address
+     * @return cumulativeLongRate Cumulative long rate
+     * @return cumulativeShortRate Cumulative short rate
+     * @return lastUpdateTime Last funding update time
+     * @return currentHourlyRateBps Current hourly rate in bps
+     * @return longsPayShorts True if longs pay shorts
+     * @return imbalanceBps Current imbalance in bps
+     */
+    function getVaultFundingInfo(address tokenAddress)
+        external
+        view
+        returns (
+            int256 cumulativeLongRate,
+            int256 cumulativeShortRate,
+            uint256 lastUpdateTime,
+            uint256 currentHourlyRateBps,
+            bool longsPayShorts,
+            uint256 imbalanceBps
+        )
+    {
+        address vaultAddress = IVaultManager(vaultManager).getVault(tokenAddress);
+        if (vaultAddress == address(0)) revert VaultNotFound();
+
+        IAssetVault vault = IAssetVault(vaultAddress);
+
+        // Get cumulative rates and update time from public state variables
+        cumulativeLongRate = vault.cumulativeFundingRateLong();
+        cumulativeShortRate = vault.cumulativeFundingRateShort();
+        lastUpdateTime = vault.lastFundingUpdateTime();
+
+        // Get current hourly rate from the remaining function
+        (currentHourlyRateBps, longsPayShorts, imbalanceBps,) = vault.getCurrentHourlyFundingRate();
+    }
+
+    /**
+     * @notice Set funding configuration for a vault
+     * @param tokenAddress Project token address
+     * @param tier1RateBps Rate for < 20% imbalance
+     * @param tier2RateBps Rate for 20-40% imbalance
+     * @param tier3RateBps Rate for 40-60% imbalance
+     * @param tier4RateBps Rate for 60-80% imbalance
+     * @param tier5RateBps Rate for > 80% imbalance
+     */
+    function setVaultFundingConfig(
+        address tokenAddress,
+        uint16 tier1RateBps,
+        uint16 tier2RateBps,
+        uint16 tier3RateBps,
+        uint16 tier4RateBps,
+        uint16 tier5RateBps
+    ) external onlyOwner {
+        address vaultAddress = IVaultManager(vaultManager).getVault(tokenAddress);
+        if (vaultAddress == address(0)) revert VaultNotFound();
+
+        IAssetVault(vaultAddress).setFundingConfig(
+            tier1RateBps, tier2RateBps, tier3RateBps, tier4RateBps, tier5RateBps
+        );
+    }
+
+    /**
+     * @notice Enable or disable funding for a vault
+     * @param tokenAddress Project token address
+     * @param enabled True to enable funding
+     */
+    function setVaultFundingEnabled(address tokenAddress, bool enabled) external onlyOwner {
+        address vaultAddress = IVaultManager(vaultManager).getVault(tokenAddress);
+        if (vaultAddress == address(0)) revert VaultNotFound();
+
+        IAssetVault(vaultAddress).setFundingEnabled(enabled);
+    }
+
+    /**
+     * @notice Enable funding for all vaults
+     * @param enabled True to enable funding
+     */
+    function setFundingEnabledForAllVaults(bool enabled) external onlyOwner {
+        address[] memory vaults = IVaultManager(vaultManager).getAllVaults();
+
+        for (uint256 i = 0; i < vaults.length; i++) {
+            try IAssetVault(vaults[i]).setFundingEnabled(enabled) {
+                // Success
+            } catch {
+                // Skip failed vaults
+                continue;
+            }
+        }
     }
 }

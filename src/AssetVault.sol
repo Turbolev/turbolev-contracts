@@ -170,7 +170,6 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
     struct VaultParams {
         uint256 minBetAmount; // Min bet amount (collateral)
         uint256 maxBetAmount; // Max bet amount (collateral)
-        uint16 maxPositionSizePercentBps; // Max position size as % of TVL (e.g., 200 = 2%)
         uint256 minLiquidityAmount; // Min liquidity deposit (separate from bet)
     }
 
@@ -205,7 +204,6 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
 
     uint256 public constant DEFAULT_MAX_STAKING_FEE_BPS = 200; // 2%
     uint256 public constant DEFAULT_EARLY_WITHDRAWAL_FEE_BPS = 1000; // 10%
-    uint256 public constant DEFAULT_MAX_POSITION_SIZE_PERCENT_BPS = 3000; // 30%
     uint256 public constant DEFAULT_MAX_DIRECTIONAL_EXPOSURE_BPS = 5000; // 50% of TVL
 
     uint256 public constant BASIS_POINTS = 10_000;
@@ -465,7 +463,6 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         vaultParams = VaultParams({
             minBetAmount: _minBetAmount,
             maxBetAmount: _maxBetAmount,
-            maxPositionSizePercentBps: uint16(DEFAULT_MAX_POSITION_SIZE_PERCENT_BPS),
             minLiquidityAmount: _minBetAmount
         });
         stakingFeeBps = uint16(DEFAULT_MAX_STAKING_FEE_BPS);
@@ -952,19 +949,10 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
             return (false, "Below minimum bet amount");
         }
 
-        // Check max bet amount using min(maxBetAmount, MAX_VAULT_RATE_PER_TRADE * totalVault)
+        // Check max bet amount (fixed amount, no % of TVL - replaced by Total OI Cap + Directional Exposure Cap)
         uint256 totalLiquidity = vaultInfo.totalLiquidity;
-        uint256 maxAllowedBet = vaultParams.maxBetAmount;
 
-        // Calculate max bet based on vault rate per trade (maxPositionSizePercentBps)
-        if (totalLiquidity > 0 && vaultParams.maxPositionSizePercentBps > 0) {
-            uint256 maxBetByVaultRate =
-                (totalLiquidity * vaultParams.maxPositionSizePercentBps) / BASIS_POINTS;
-            // Use the minimum of the two limits
-            maxAllowedBet = maxAllowedBet < maxBetByVaultRate ? maxAllowedBet : maxBetByVaultRate;
-        }
-
-        if (collateral > maxAllowedBet) {
+        if (collateral > vaultParams.maxBetAmount) {
             return (false, "Exceeds maximum bet amount");
         }
 
@@ -1515,21 +1503,12 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
     /**
      * @notice Update vault parameters
      */
-    function updateVaultParams(
-        uint256 _minBetAmount,
-        uint256 _maxBetAmount,
-        uint16 _maxPositionSizePercentBps
-    ) external onlyOwner {
-        if (_maxPositionSizePercentBps > BASIS_POINTS) {
-            revert InvalidParameters();
-        }
-
+    function updateVaultParams(uint256 _minBetAmount, uint256 _maxBetAmount) external onlyOwner {
         if (_minBetAmount >= _maxBetAmount) revert InvalidParameters();
         if (_minBetAmount == 0) revert InvalidAmount();
 
         vaultParams.minBetAmount = _minBetAmount;
         vaultParams.maxBetAmount = _maxBetAmount;
-        vaultParams.maxPositionSizePercentBps = _maxPositionSizePercentBps;
 
         emit VaultParamsUpdated(_minBetAmount, _maxBetAmount, block.timestamp);
     }

@@ -13,7 +13,7 @@ import "../src/oracles/BlocksenseOracle.sol";
 import "../src/oracles/ChainlinkOracle.sol";
 import "../src/PriceFeedManager.sol";
 import "../src/VaultManagerHelper.sol";
-import "../src/governance/VaultBeacon.sol";
+import "../src/governance/VersionedBeacon.sol";
 import "../src/interfaces/ICLFeedRegistryAdapter.sol";
 import "../src/interfaces/ICLAggregatorAdapter.sol";
 import "../src/interfaces/IChainlinkAggregatorV3.sol";
@@ -344,13 +344,10 @@ contract BaseTest is Test {
         // Deploy VaultManager (upgradeable via ERC1967Proxy)
         VaultManager vaultImpl = new VaultManager();
 
-        // Create mock governance addresses for testing
-        address mockOptInUpgradeManager = makeAddr("mockOptInUpgradeManager");
-
-        // Deploy VaultBeacon for AssetVault (needed for createVaultWithBeacon)
+        // Deploy VersionedBeacon for AssetVault (V2 - opt-in mechanism removed)
         AssetVaultUpgradeable vaultImplementation = new AssetVaultUpgradeable();
-        VaultBeacon vaultBeaconContract =
-            new VaultBeacon(address(vaultImplementation), owner, mockOptInUpgradeManager);
+        VersionedBeacon vaultBeaconContract =
+            new VersionedBeacon(address(vaultImplementation), owner);
         mockTimelockController = makeAddr("mockTimelockController");
         mockMultisigWallet = makeAddr("mockMultisigWallet");
         address mockVaultGovernor = makeAddr("mockVaultGovernor");
@@ -359,7 +356,6 @@ contract BaseTest is Test {
             VaultManager.initializeV2.selector,
             owner,
             address(vaultBeaconContract),
-            mockOptInUpgradeManager,
             mockTimelockController,
             mockMultisigWallet,
             mockVaultGovernor

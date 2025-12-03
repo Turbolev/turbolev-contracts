@@ -499,13 +499,12 @@ contract IntegrationTest is BaseTest {
         vm.stopPrank();
 
         // Check exposure - should be balanced
-        (uint256 longExposure, uint256 shortExposure, uint256 netExposure,,,) =
-            assetVault.getDirectionalExposure();
+        uint256 longExposure = assetVault.totalLongExposure();
+        uint256 shortExposure = assetVault.totalShortExposure();
 
         uint256 expectedExposure = positionAmount * LEVERAGE_5X;
         assertEq(longExposure, expectedExposure, "Long exposure should match");
         assertEq(shortExposure, expectedExposure, "Short exposure should match");
-        assertEq(netExposure, 0, "Net exposure should be 0 when balanced");
 
         // Verify positions were created
         assertTrue(longPos > 0, "Long position should be created");
@@ -521,8 +520,7 @@ contract IntegrationTest is BaseTest {
         // First, update maxBetAmount to allow larger positions
         assetVault.updateVaultParams(
             0.01 ether, // minBetAmount
-            2000 ether, // maxBetAmount - increased
-            3000 // maxPositionSizePercentBps (30% of TVL)
+            2000 ether // maxBetAmount - increased
         );
 
         uint256 excessiveAmount = 2000 ether; // 2000 * 5 = 10,000 > 7,500
@@ -554,8 +552,7 @@ contract IntegrationTest is BaseTest {
         // First, update maxBetAmount if needed
         assetVault.updateVaultParams(
             0.01 ether, // minBetAmount
-            500 ether, // maxBetAmount - increased to allow test
-            3000 // maxPositionSizePercentBps (30% of TVL)
+            500 ether // maxBetAmount - increased to allow test
         );
 
         uint256 safeAmount = 100 ether; // 100 * 5 = 500 < 7,500 and < maxBet
@@ -580,7 +577,7 @@ contract IntegrationTest is BaseTest {
         assertEq(pos.user, user1, "Position should be created");
 
         // Check exposure
-        (uint256 longExposure,,,,,) = assetVault.getDirectionalExposure();
+        uint256 longExposure = assetVault.totalLongExposure();
         assertEq(longExposure, safeAmount * LEVERAGE_5X, "Long exposure should be updated");
     }
 
@@ -592,8 +589,7 @@ contract IntegrationTest is BaseTest {
         // Update maxBetAmount if needed
         assetVault.updateVaultParams(
             0.01 ether, // minBetAmount
-            200 ether, // maxBetAmount
-            3000 // maxPositionSizePercentBps
+            200 ether // maxBetAmount
         );
 
         // Open LONG position
@@ -612,7 +608,7 @@ contract IntegrationTest is BaseTest {
         vm.stopPrank();
 
         // Check exposure before close
-        (uint256 longBefore,,,,,) = assetVault.getDirectionalExposure();
+        uint256 longBefore = assetVault.totalLongExposure();
         uint256 expectedExposure = positionAmount * LEVERAGE_5X;
         assertEq(longBefore, expectedExposure, "Long exposure should be set");
 
@@ -624,7 +620,7 @@ contract IntegrationTest is BaseTest {
         positionManager.closePosition(positionId, block.timestamp + 3600, 0, "");
 
         // Check exposure after close
-        (uint256 longAfter,,,,,) = assetVault.getDirectionalExposure();
+        uint256 longAfter = assetVault.totalLongExposure();
         assertEq(longAfter, 0, "Long exposure should be cleared after close");
     }
 
@@ -674,7 +670,7 @@ contract IntegrationTest is BaseTest {
         uint256 collateralAmount = 10 ether;
 
         // Get initial state
-        uint256 initialWithdrawableFees = assetVault.getWithdrawableFees();
+        uint256 initialWithdrawableFees = assetVault.withdrawableFees();
         uint256 initialVaultLiquidity = assetVault.getVaultInfo().totalLiquidity;
 
         // Expected fee: 10 ether * 0.05% = 0.005 ether
@@ -697,7 +693,7 @@ contract IntegrationTest is BaseTest {
         vm.stopPrank();
 
         // Verify open fee was collected
-        uint256 newWithdrawableFees = assetVault.getWithdrawableFees();
+        uint256 newWithdrawableFees = assetVault.withdrawableFees();
         uint256 newVaultLiquidity = assetVault.getVaultInfo().totalLiquidity;
 
         assertEq(
@@ -735,7 +731,7 @@ contract IntegrationTest is BaseTest {
         );
         vm.stopPrank();
 
-        uint256 feesAfterOpen = assetVault.getWithdrawableFees();
+        uint256 feesAfterOpen = assetVault.withdrawableFees();
 
         // Price goes up - user wins
         _updatePrice(address(projectToken), address(usdc), int256(HIGHER_PRICE));
@@ -748,7 +744,7 @@ contract IntegrationTest is BaseTest {
         positionManager.closePosition(positionId, block.timestamp + 3600, 0, "");
 
         // Verify close fee was collected
-        uint256 finalFees = assetVault.getWithdrawableFees();
+        uint256 finalFees = assetVault.withdrawableFees();
         assertTrue(finalFees > feesAfterOpen, "Close position fee should be collected");
 
         // Close fee should be approximately 0.05% of net collateral
@@ -782,7 +778,7 @@ contract IntegrationTest is BaseTest {
         );
         vm.stopPrank();
 
-        uint256 feesAfterOpen = assetVault.getWithdrawableFees();
+        uint256 feesAfterOpen = assetVault.withdrawableFees();
 
         // Price goes down - user loses
         _updatePrice(address(projectToken), address(usdc), int256(LOWER_PRICE));
@@ -795,7 +791,7 @@ contract IntegrationTest is BaseTest {
         positionManager.closePosition(positionId, block.timestamp + 3600, 0, "");
 
         // Verify close fee was still collected (even on losing position)
-        uint256 finalFees = assetVault.getWithdrawableFees();
+        uint256 finalFees = assetVault.withdrawableFees();
         assertTrue(
             finalFees > feesAfterOpen, "Close fee should be collected even on losing position"
         );
@@ -804,7 +800,7 @@ contract IntegrationTest is BaseTest {
     function testIntegration_TotalPositionFees_CompleteRoundTrip() public {
         uint256 collateralAmount = 100 ether;
 
-        uint256 initialFees = assetVault.getWithdrawableFees();
+        uint256 initialFees = assetVault.withdrawableFees();
 
         // Open position
         vm.startPrank(user1);
@@ -833,7 +829,7 @@ contract IntegrationTest is BaseTest {
         positionManager.closePosition(positionId, block.timestamp + 3600, 0, "");
 
         // Calculate total fees collected
-        uint256 totalFees = assetVault.getWithdrawableFees() - initialFees;
+        uint256 totalFees = assetVault.withdrawableFees() - initialFees;
 
         // Expected: ~0.1% of initial collateral (0.05% open + 0.05% close)
         // Open: 100 * 0.0005 = 0.05
@@ -852,7 +848,7 @@ contract IntegrationTest is BaseTest {
         uint256 collateral2 = 100 ether;
         uint256 collateral3 = 75 ether;
 
-        uint256 initialFees = assetVault.getWithdrawableFees();
+        uint256 initialFees = assetVault.withdrawableFees();
 
         // Open 3 positions
         vm.startPrank(user1);
@@ -872,7 +868,7 @@ contract IntegrationTest is BaseTest {
         );
         vm.stopPrank();
 
-        uint256 feesAfterOpen = assetVault.getWithdrawableFees();
+        uint256 feesAfterOpen = assetVault.withdrawableFees();
 
         // Calculate expected open fees
         uint256 expectedOpenFees =
@@ -896,7 +892,7 @@ contract IntegrationTest is BaseTest {
         vm.stopPrank();
 
         // Verify close fees were collected
-        uint256 finalFees = assetVault.getWithdrawableFees();
+        uint256 finalFees = assetVault.withdrawableFees();
         assertTrue(finalFees > feesAfterOpen, "Close fees should be collected for all positions");
     }
 
@@ -921,11 +917,11 @@ contract IntegrationTest is BaseTest {
         positionManager.closePosition(positionId, block.timestamp + 3600, 0, "");
 
         // Check withdrawable fees
-        uint256 withdrawableFees = assetVault.getWithdrawableFees();
+        uint256 withdrawableFees = assetVault.withdrawableFees();
         assertGt(withdrawableFees, 0, "Should have fees to withdraw");
 
         // Get treasury or owner
-        address recipient = assetVault.getTreasury();
+        address recipient = assetVault.treasury();
         if (recipient == address(0)) {
             recipient = assetVault.owner();
         }
@@ -942,15 +938,13 @@ contract IntegrationTest is BaseTest {
             withdrawableFees,
             "Recipient should receive all withdrawable fees"
         );
-        assertEq(
-            assetVault.getWithdrawableFees(), 0, "Withdrawable fees should be 0 after withdrawal"
-        );
+        assertEq(assetVault.withdrawableFees(), 0, "Withdrawable fees should be 0 after withdrawal");
     }
 
     function testIntegration_PositionFees_AccumulateAcrossMultipleCycles() public {
         // Test that fees accumulate correctly over multiple open/close cycles
         uint256 collateralAmount = 50 ether;
-        uint256 initialFees = assetVault.getWithdrawableFees();
+        uint256 initialFees = assetVault.withdrawableFees();
 
         // Cycle 1
         vm.startPrank(user1);
@@ -969,7 +963,7 @@ contract IntegrationTest is BaseTest {
         vm.prank(user1);
         positionManager.closePosition(pos1, block.timestamp + 3600, 0, "");
 
-        uint256 feesAfterCycle1 = assetVault.getWithdrawableFees();
+        uint256 feesAfterCycle1 = assetVault.withdrawableFees();
         uint256 cycle1Fees = feesAfterCycle1 - initialFees;
 
         // Cycle 2
@@ -988,7 +982,7 @@ contract IntegrationTest is BaseTest {
         vm.prank(user1);
         positionManager.closePosition(pos2, block.timestamp + 3600, 0, "");
 
-        uint256 finalFees = assetVault.getWithdrawableFees();
+        uint256 finalFees = assetVault.withdrawableFees();
         uint256 cycle2Fees = finalFees - feesAfterCycle1;
 
         // Both cycles should have collected fees
