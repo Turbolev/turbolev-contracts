@@ -36,6 +36,7 @@ contract PositionManager is
     AdminAccessControlUpgradeable
 {
     using PositionLib for PositionLib.Position;
+    using SafeERC20 for IERC20;
 
     // ========================================================================
     // STATE VARIABLES
@@ -328,8 +329,8 @@ contract PositionManager is
         amount = collateralAmount;
         if (amount == 0) revert InvalidAmount();
 
-        // Transfer project token from user to this contract
-        IERC20(projectToken).transferFrom(msg.sender, address(this), amount);
+        // Transfer project token from user to this contract (SafeERC20)
+        IERC20(projectToken).safeTransferFrom(msg.sender, address(this), amount);
 
         // Get price from PriceFeedManager
         // Use deadline as maxAge for price validation
@@ -385,8 +386,8 @@ contract PositionManager is
         positionId = nextPositionId++;
 
         // Transfer collateral to VaultManager
-        // ERC20 project token - approve and transfer
-        IERC20(projectToken).approve(vaultManager, amount);
+        // ERC20 project token - approve and transfer (SafeERC20)
+        IERC20(projectToken).forceApprove(vaultManager, amount);
 
         IVaultManager(vaultManager).depositFromBet(
             projectToken, positionId, amount, positionSize, false, direction
@@ -611,8 +612,8 @@ contract PositionManager is
             // Native project token
             if (msg.value != marginAmount) revert InvalidAmount();
         } else {
-            // ERC20 project token
-            IERC20(pos.tokenAddress).transferFrom(msg.sender, address(this), marginAmount);
+            // ERC20 project token (SafeERC20)
+            IERC20(pos.tokenAddress).safeTransferFrom(msg.sender, address(this), marginAmount);
         }
 
         // Update position margin (position size stays the same)
@@ -639,8 +640,8 @@ contract PositionManager is
         if (vaultManager != address(0)) {
             bool useProjectToken = (pos.tokenAddress != address(0));
             if (useProjectToken && pos.tokenAddress != address(0)) {
-                // ERC20 project token - approve and forward
-                IERC20(pos.tokenAddress).approve(vaultManager, marginAmount);
+                // ERC20 project token - approve and forward (SafeERC20)
+                IERC20(pos.tokenAddress).forceApprove(vaultManager, marginAmount);
             }
 
             IVaultManager(vaultManager).depositFromBet{

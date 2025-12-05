@@ -54,6 +54,9 @@ contract AssetVaultUpgradeable is
     mapping(uint64 => address) public failedPayoutUsers;
     uint64[] public pendingPayoutQueue;
     mapping(uint64 => uint256) public betCollateral;
+    
+    /// @notice Start index for pending payout queue to skip processed entries (C-02 fix)
+    uint256 public queueStartIndex;
 
     // Fee configuration
     uint16 public stakingFeeBps;
@@ -166,7 +169,7 @@ contract AssetVaultUpgradeable is
     // STORAGE GAP
     // ========================================================================
 
-    uint256[22] private __gap; // Reduced from 29 to 22 (added 7 slots for funding)
+    uint256[21] private __gap; // Reduced from 22 to 21 (added queueStartIndex for C-02 fix)
 
     // ========================================================================
     // STRUCTS (copy từ AssetVault)
@@ -1418,19 +1421,26 @@ contract AssetVaultUpgradeable is
         if (vaultInfo.totalLiquidity == 0) return;
 
         uint256 queueLength = pendingPayoutQueue.length;
+        uint256 startIdx = queueStartIndex;
+        
+        // Nothing to process if start index >= queue length
+        if (startIdx >= queueLength) return;
 
-        uint256 maxIterations = queueLength > MAX_PAYOUTS_PER_TX ? MAX_PAYOUTS_PER_TX : queueLength;
+        uint256 remainingItems = queueLength - startIdx;
+        uint256 maxIterations = remainingItems > MAX_PAYOUTS_PER_TX ? MAX_PAYOUTS_PER_TX : remainingItems;
 
         uint256 processed = 0;
+        uint256 currentIdx = startIdx;
 
-        // Process pending payouts in FIFO order
+        // Process pending payouts in FIFO order starting from queueStartIndex (C-02 fix)
         for (uint256 i = 0; i < maxIterations && vaultInfo.totalLiquidity > 0;) {
-            uint64 positionId = pendingPayoutQueue[i];
+            uint64 positionId = pendingPayoutQueue[currentIdx];
 
-            // Skip if already processed
+            // Skip if already processed (edge case: processed out of order)
             if (positionPayouts[positionId] == 0) {
                 unchecked {
                     ++i;
+                    ++currentIdx;
                 }
                 continue;
             }
@@ -1506,6 +1516,7 @@ contract AssetVaultUpgradeable is
                         }
                         unchecked {
                             ++i;
+                            ++currentIdx;
                         }
                         continue;
                     }
@@ -1528,29 +1539,41 @@ contract AssetVaultUpgradeable is
 
             unchecked {
                 ++i;
+                ++currentIdx;
             }
         }
 
-        // Clean up the queue - remove processed items
-        if (processed > 0) {
+        // Update start index to skip processed entries (C-02 fix: O(1) instead of O(n) cleanup)
+        if (currentIdx > startIdx) {
+            queueStartIndex = currentIdx;
+        }
+        
+        // Periodic cleanup: when start index is large enough, compact the array
+        // This prevents unbounded storage growth while avoiding frequent cleanups
+        if (queueStartIndex > 100 && queueStartIndex > queueLength / 2) {
             _cleanupPayoutQueue();
         }
     }
 
     /**
      * @notice Clean up the payout queue by removing processed items
-     * @dev Removes all items where positionPayouts[positionId] == 0
+     * @dev Compacts array by shifting unprocessed items to front and resetting queueStartIndex
+     * @dev C-02 fix: Only iterates from queueStartIndex (items before are already processed)
      */
     function _cleanupPayoutQueue() internal {
-        uint256 writeIndex = 0;
+        uint256 startIdx = queueStartIndex;
         uint256 length = pendingPayoutQueue.length;
-
-        for (uint256 i = 0; i < length;) {
+        
+        // Nothing to cleanup if queue is empty or start index is 0
+        if (length == 0 || startIdx == 0) return;
+        
+        uint256 writeIndex = 0;
+        
+        // Only iterate from startIdx - items before are guaranteed processed
+        for (uint256 i = startIdx; i < length;) {
             if (positionPayouts[pendingPayoutQueue[i]] != 0) {
                 // Keep this item - move it to writeIndex
-                if (writeIndex != i) {
-                    pendingPayoutQueue[writeIndex] = pendingPayoutQueue[i];
-                }
+                pendingPayoutQueue[writeIndex] = pendingPayoutQueue[i];
                 unchecked {
                     ++writeIndex;
                 }
@@ -1560,11 +1583,14 @@ contract AssetVaultUpgradeable is
             }
         }
 
-        // Remove processed items from the end
+        // Remove all items after writeIndex
         uint256 itemsRemoved = length - writeIndex;
         while (pendingPayoutQueue.length > writeIndex) {
             pendingPayoutQueue.pop();
         }
+        
+        // Reset start index since we've compacted the array (C-02 fix)
+        queueStartIndex = 0;
 
         if (itemsRemoved > 0) {
             emit PayoutQueueCleaned(itemsRemoved, pendingPayoutQueue.length, block.timestamp);
@@ -1578,6 +1604,30 @@ contract AssetVaultUpgradeable is
      */
     function processPendingPayouts() external nonReentrant {
         _processPendingPayouts();
+    }
+
+    /**
+     * @notice Get effective queue length (items not yet processed)
+     * @dev C-02 fix: Returns actual pending items count considering queueStartIndex
+     * @return effectiveLength Number of items from queueStartIndex to end of array
+     */
+    function getEffectiveQueueLength() external view returns (uint256 effectiveLength) {
+        uint256 totalLength = pendingPayoutQueue.length;
+        uint256 startIdx = queueStartIndex;
+        
+        if (startIdx >= totalLength) {
+            return 0;
+        }
+        
+        return totalLength - startIdx;
+    }
+    
+    /**
+     * @notice Admin function to manually trigger queue cleanup
+     * @dev Useful for reclaiming storage when queue has grown large
+     */
+    function adminCleanupPayoutQueue() external onlyOwner {
+        _cleanupPayoutQueue();
     }
 
     // REMOVED: getPendingPayoutQueue() - Access pendingPayoutQueue array directly
@@ -2359,3 +2409,4 @@ contract AssetVaultUpgradeable is
         return "2.1.0-with-funding";
     }
 }
+
