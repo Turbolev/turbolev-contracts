@@ -28,6 +28,7 @@ library FundingRateLib {
     uint256 public constant FUNDING_PRECISION = 1e18;
 
     /// @notice Basis points denominator
+    /// @dev 8.4 FIX: This value MUST match MathLib.BASIS_POINTS (10_000)
     uint256 public constant BASIS_POINTS = 10_000;
 
     /// @notice Seconds in one hour

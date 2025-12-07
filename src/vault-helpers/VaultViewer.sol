@@ -373,6 +373,126 @@ contract VaultViewer {
         currentHourlyRateBps = FundingRateLib.getHourlyRate(imbalanceBps, config);
     }
 
+    /**
+     * @notice Check if position is liquidatable due to funding
+     * @dev Moved from AssetVaultUpgradeable to reduce contract size
+     * @param vault Vault address
+     * @param collateral Position collateral
+     * @param entryRateLong Entry funding rate for long
+     * @param entryRateShort Entry funding rate for short
+     * @param positionSize Position size
+     * @param direction Position direction (1 = LONG, 2 = SHORT)
+     * @param maintenanceMarginRatio Maintenance margin ratio in bps
+     * @return isLiquidatable True if position should be liquidated
+     * @return fundingOwed Amount of funding owed
+     * @return effectiveCollateral Collateral after funding deduction
+     */
+    function checkFundingLiquidation(
+        address vault,
+        uint256 collateral,
+        int256 entryRateLong,
+        int256 entryRateShort,
+        uint256 positionSize,
+        uint8 direction,
+        uint256 maintenanceMarginRatio
+    )
+        external
+        view
+        returns (bool isLiquidatable, int256 fundingOwed, uint256 effectiveCollateral)
+    {
+        IAssetVault v = IAssetVault(vault);
+
+        if (!v.fundingEnabled()) {
+            return (false, 0, collateral);
+        }
+
+        // Get cumulative rates from vault
+        (int256 cumulativeLongRate, int256 cumulativeShortRate) = v.getCumulativeFundingRates();
+
+        // Calculate funding owed using library
+        fundingOwed = FundingRateLib.calculatePositionFunding(
+            entryRateLong,
+            entryRateShort,
+            cumulativeLongRate,
+            cumulativeShortRate,
+            positionSize,
+            direction
+        );
+
+        // Calculate effective collateral
+        bool isNegative;
+        (effectiveCollateral, isNegative) =
+            FundingRateLib.calculateEffectiveCollateral(collateral, fundingOwed);
+
+        if (isNegative) {
+            return (true, fundingOwed, 0);
+        }
+
+        // Check if below maintenance margin
+        isLiquidatable =
+            FundingRateLib.checkFundingLiquidation(collateral, fundingOwed, maintenanceMarginRatio);
+
+        return (isLiquidatable, fundingOwed, effectiveCollateral);
+    }
+
+    /**
+     * @notice Calculate position funding owed
+     * @dev Helper function using vault's cumulative rates
+     */
+    function calculatePositionFundingOwed(
+        address vault,
+        int256 entryRateLong,
+        int256 entryRateShort,
+        uint256 positionSize,
+        uint8 direction
+    ) external view returns (int256 fundingOwed) {
+        IAssetVault v = IAssetVault(vault);
+
+        if (!v.fundingEnabled()) {
+            return 0;
+        }
+
+        (int256 cumulativeLongRate, int256 cumulativeShortRate) = v.getCumulativeFundingRates();
+
+        return FundingRateLib.calculatePositionFunding(
+            entryRateLong,
+            entryRateShort,
+            cumulativeLongRate,
+            cumulativeShortRate,
+            positionSize,
+            direction
+        );
+    }
+
+    /**
+     * @notice Get current hourly funding rate based on imbalance
+     * @dev Alternative to calling vault directly
+     */
+    function getCurrentHourlyFundingRate(address vault)
+        external
+        view
+        returns (uint256 rateBps, bool longsPayShorts, uint256 imbalanceBps, bool hasCounterparty)
+    {
+        IAssetVault v = IAssetVault(vault);
+
+        (imbalanceBps, longsPayShorts, hasCounterparty) =
+            FundingRateLib.calculateImbalance(v.totalLongExposure(), v.totalShortExposure());
+
+        (uint16 t1Rate, uint16 t2Rate, uint16 t3Rate, uint16 t4Rate, uint16 t5Rate) =
+            v.getFundingConfig();
+
+        FundingRateLib.FundingConfig memory config = FundingRateLib.FundingConfig({
+            tier1RateBps: t1Rate,
+            tier2RateBps: t2Rate,
+            tier3RateBps: t3Rate,
+            tier4RateBps: t4Rate,
+            tier5RateBps: t5Rate,
+            isEnabled: true
+        });
+
+        rateBps = FundingRateLib.getHourlyRate(imbalanceBps, config);
+    }
+
     // ========================================================================
     // SIMULATION FUNCTIONS
     // ========================================================================
@@ -586,5 +706,96 @@ contract VaultViewer {
         } else {
             return t3Max;
         }
+    }
+
+    // ========================================================================
+    // LP ARRAY VIEW FUNCTIONS (moved from AssetVaultUpgradeable)
+    // ========================================================================
+
+    /**
+     * @notice Get total number of active LPs
+     * @param vault Address of the vault
+     * @return count Number of LPs currently in the vault
+     */
+    function getVaultLPsCount(address vault) external view returns (uint256 count) {
+        IAssetVault v = IAssetVault(vault);
+        // Iterate to find length since we can't get array length directly
+        uint256 i = 0;
+        while (true) {
+            try v.vaultLPs(i) returns (address) {
+                i++;
+            } catch {
+                break;
+            }
+        }
+        return i;
+    }
+
+    /**
+     * @notice Get LP address at specific index
+     * @param vault Address of the vault
+     * @param index Index in the LP array (0-based)
+     * @return lp LP address at the given index
+     */
+    function getVaultLPAt(address vault, uint256 index) external view returns (address lp) {
+        return IAssetVault(vault).vaultLPs(index);
+    }
+
+    /**
+     * @notice Check if address is an active LP
+     * @param vault Address of the vault
+     * @param account Address to check
+     * @return isLP True if address is in the LP array
+     */
+    function isVaultLP(address vault, address account) external view returns (bool isLP) {
+        return IAssetVault(vault).lpIndex(account) != 0;
+    }
+
+    /**
+     * @notice Get all active LPs (use with caution for large arrays)
+     * @param vault Address of the vault
+     * @return lps Array of all LP addresses
+     * @dev May be gas-expensive for large LP counts
+     */
+    function getAllVaultLPs(address vault) external view returns (address[] memory lps) {
+        IAssetVault v = IAssetVault(vault);
+        // First count LPs
+        uint256 count = 0;
+        while (true) {
+            try v.vaultLPs(count) returns (address) {
+                count++;
+            } catch {
+                break;
+            }
+        }
+        // Then collect them
+        lps = new address[](count);
+        for (uint256 i = 0; i < count; i++) {
+            lps[i] = v.vaultLPs(i);
+        }
+    }
+
+    /**
+     * @notice Get effective queue length (items not yet processed)
+     * @param vault Address of the vault
+     * @return effectiveLength Number of pending payout items
+     */
+    function getEffectiveQueueLength(address vault)
+        external
+        view
+        returns (uint256 effectiveLength)
+    {
+        IAssetVault v = IAssetVault(vault);
+        uint256 startIdx = v.queueStartIndex();
+        // Count items from startIdx
+        uint256 i = startIdx;
+        while (true) {
+            try v.pendingPayoutQueue(i) returns (uint64) {
+                i++;
+            } catch {
+                break;
+            }
+        }
+        return i - startIdx;
     }
 }

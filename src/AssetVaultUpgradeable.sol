@@ -10,6 +10,8 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./libraries/AdminAccessControl.sol";
 import "./libraries/VaultRiskLib.sol";
 import "./libraries/FundingRateLib.sol";
+import "./libraries/VaultPayoutLib.sol";
+import "./libraries/VaultRewardsLib.sol";
 import "./interfaces/IVaultManagerHelper.sol";
 
 /**
@@ -44,6 +46,8 @@ contract AssetVaultUpgradeable is
     VaultInfo public vaultInfo;
     VaultParams public vaultParams;
     mapping(address => LPPosition) public lpPositions;
+
+    /// @notice Array of LP addresses (M-08: now supports removal via swap-and-pop)
     address[] public vaultLPs;
 
     // Pending payout tracking
@@ -54,7 +58,7 @@ contract AssetVaultUpgradeable is
     mapping(uint64 => address) public failedPayoutUsers;
     uint64[] public pendingPayoutQueue;
     mapping(uint64 => uint256) public betCollateral;
-    
+
     /// @notice Start index for pending payout queue to skip processed entries (C-02 fix)
     uint256 public queueStartIndex;
 
@@ -166,10 +170,18 @@ contract AssetVaultUpgradeable is
     bool public fundingEnabled;
 
     // ========================================================================
+    // M-08 FIX: LP INDEX TRACKING FOR O(1) REMOVAL
+    // ========================================================================
+
+    /// @notice Mapping from LP address to index in vaultLPs array (1-based to distinguish from 0)
+    /// @dev Index 0 means not in array. Actual array index = lpIndex[lp] - 1
+    mapping(address => uint256) public lpIndex;
+
+    // ========================================================================
     // STORAGE GAP
     // ========================================================================
 
-    uint256[21] private __gap; // Reduced from 22 to 21 (added queueStartIndex for C-02 fix)
+    uint256[20] private __gap; // Reduced from 21 to 20 (added lpIndex mapping - 1 slot)
 
     // ========================================================================
     // STRUCTS (copy từ AssetVault)
@@ -223,35 +235,35 @@ contract AssetVaultUpgradeable is
     }
 
     // ========================================================================
-    // CONSTANTS
+    // CONSTANTS (internal to reduce bytecode - no auto-generated getters)
     // ========================================================================
 
-    uint256 public constant MIN_LOCK_PERIOD = 30 days;
-    uint256 public constant REWARD_MIN_STAKE_PERIOD = 1 days;
-    uint256 public constant DEFAULT_MAX_STAKING_FEE_BPS = 200;
-    uint256 public constant DEFAULT_EARLY_WITHDRAWAL_FEE_BPS = 1000;
-    uint256 public constant DEFAULT_OPEN_POSITION_FEE_BPS = 5; // 0.05%
-    uint256 public constant DEFAULT_CLOSE_POSITION_FEE_BPS = 5; // 0.05%
-    uint256 public constant DEFAULT_MAX_DIRECTIONAL_EXPOSURE_BPS = 5000; // 50% of TVL
-    uint256 public constant DEFAULT_TOTAL_OI_RISK_MULTIPLIER_BPS = 20_000; // 2.0x default
-    uint256 public constant DEFAULT_TIER1_MULTIPLIER_BPS = 15_000; // 1.5x for small vaults
-    uint256 public constant DEFAULT_TIER2_MULTIPLIER_BPS = 20_000; // 2.0x for medium vaults
-    uint256 public constant DEFAULT_TIER3_MULTIPLIER_BPS = 25_000; // 2.5x for large vaults
-    uint256 public constant DEFAULT_TIER4_MULTIPLIER_BPS = 30_000; // 3.0x for very large vaults
-
-    // Maximum Leverage Tier Defaults (Control Lever 1)
-    uint256 public constant DEFAULT_LEVERAGE_TIER1_THRESHOLD = 100_000 * 1e18; // 100K TVL
-    uint256 public constant DEFAULT_LEVERAGE_TIER2_THRESHOLD = 500_000 * 1e18; // 500K TVL
-    uint16 public constant DEFAULT_TIER1_MAX_LEVERAGE = 100; // Launch Phase: 100x
-    uint16 public constant DEFAULT_TIER2_MAX_LEVERAGE = 200; // Growth Phase: 200x
-    uint16 public constant DEFAULT_TIER3_MAX_LEVERAGE = 500; // Mature Phase: 500x
-
-    uint256 public constant BASIS_POINTS = 10_000;
-    uint256 public constant INITIAL_SHARE_MULTIPLIER = 1e18;
-    uint256 public constant MAX_PAYOUTS_PER_TX = 50;
-    uint8 public constant MAX_PAYOUT_RETRIES = 3;
-    uint256 public constant MAX_DAYS_PER_CALCULATION = 365;
-    uint256 public constant MAX_LPS_PER_FINALIZE = 200;
+    uint256 internal constant MIN_LOCK_PERIOD = 30 days;
+    uint256 internal constant REWARD_MIN_STAKE_PERIOD = 1 days;
+    uint256 internal constant DEFAULT_MAX_STAKING_FEE_BPS = 200;
+    uint256 internal constant DEFAULT_EARLY_WITHDRAWAL_FEE_BPS = 1000;
+    uint256 internal constant DEFAULT_OPEN_POSITION_FEE_BPS = 5;
+    uint256 internal constant DEFAULT_CLOSE_POSITION_FEE_BPS = 5;
+    uint256 internal constant MIN_OPEN_POSITION_FEE_BPS = 1;
+    uint256 internal constant MIN_CLOSE_POSITION_FEE_BPS = 1;
+    uint256 internal constant DEFAULT_MAX_DIRECTIONAL_EXPOSURE_BPS = 5000;
+    uint256 internal constant DEFAULT_TOTAL_OI_RISK_MULTIPLIER_BPS = 20_000;
+    uint256 internal constant DEFAULT_TIER1_MULTIPLIER_BPS = 15_000;
+    uint256 internal constant DEFAULT_TIER2_MULTIPLIER_BPS = 20_000;
+    uint256 internal constant DEFAULT_TIER3_MULTIPLIER_BPS = 25_000;
+    uint256 internal constant DEFAULT_TIER4_MULTIPLIER_BPS = 30_000;
+    uint256 internal constant DEFAULT_LEVERAGE_TIER1_THRESHOLD = 100_000 * 1e18;
+    uint256 internal constant DEFAULT_LEVERAGE_TIER2_THRESHOLD = 500_000 * 1e18;
+    uint16 internal constant DEFAULT_TIER1_MAX_LEVERAGE = 100;
+    uint16 internal constant DEFAULT_TIER2_MAX_LEVERAGE = 200;
+    uint16 internal constant DEFAULT_TIER3_MAX_LEVERAGE = 500;
+    uint256 internal constant BASIS_POINTS = 10_000;
+    uint256 internal constant INITIAL_SHARE_MULTIPLIER = 1e18;
+    uint256 internal constant MAX_CATCHUP_HOURS = 2;
+    uint256 internal constant MAX_PAYOUTS_PER_TX = 50;
+    uint8 internal constant MAX_PAYOUT_RETRIES = 3;
+    uint256 internal constant MAX_DAYS_PER_CALCULATION = 365;
+    uint256 internal constant MAX_LPS_PER_FINALIZE = 200;
 
     // ========================================================================
     // ENUMS
@@ -268,13 +280,6 @@ contract AssetVaultUpgradeable is
     // ========================================================================
     // EVENTS
     // ========================================================================
-
-    // DEPRECATED: OptIn events removed in V2
-    // - OptInUpgradeEnabled
-    // - OptInUpgradeDisabled
-    // - UpgradeManagerUpdated
-
-    // Events từ AssetVault (copy tất cả)
     event VaultInitialized(
         address indexed projectToken,
         bytes32 indexed projectTokenPriceFeedId,
@@ -331,8 +336,6 @@ contract AssetVaultUpgradeable is
     event EarlyWithdrawalFeeApplied(
         address indexed user, uint256 fee, uint256 remainingLockTime, uint256 timestamp
     );
-    event StakingFeeBpsUpdated(uint16 oldBps, uint16 newBps);
-    event EarlyWithdrawalFeeBpsUpdated(uint16 oldBps, uint16 newBps);
     event OpenPositionFeeCollected(
         uint64 indexed positionId,
         address indexed user,
@@ -343,8 +346,8 @@ contract AssetVaultUpgradeable is
     event ClosePositionFeeCollected(
         uint64 indexed positionId, address indexed user, uint256 fee, uint256 timestamp
     );
-    event OpenPositionFeeBpsUpdated(uint16 oldBps, uint16 newBps);
-    event ClosePositionFeeBpsUpdated(uint16 oldBps, uint16 newBps);
+    /// @notice Unified fee update event: feeType 0=staking,1=earlyWithdrawal,2=openPosition,3=closePosition
+    event FeeUpdated(uint8 indexed feeType, uint16 oldBps, uint16 newBps);
     event VaultGraduated(
         address indexed vaultAddress,
         uint256 currentValueUSD,
@@ -385,16 +388,16 @@ contract AssetVaultUpgradeable is
         address indexed recipient, uint256 amount, uint256 remainingFees, uint256 timestamp
     );
     event TreasuryUpdated(address indexed oldTreasury, address indexed newTreasury);
-    event TotalOIRiskMultiplierUpdated(uint16 oldBps, uint16 newBps);
-    event TotalOITierThresholdsUpdated(uint256 tier1, uint256 tier2, uint256 tier3);
-    event TotalOITierMultipliersUpdated(
-        uint16 tier1Bps, uint16 tier2Bps, uint16 tier3Bps, uint16 tier4Bps
-    );
+    /// @notice Unified OI tier config event
+    event OITierConfigUpdated(uint16 fixedMultiplier, uint256[3] thresholds, uint16[4] multipliers);
 
     // Maximum Leverage Tier System Events (Control Lever 1)
-    event LeverageTierThresholdsUpdated(uint256 tier1Threshold, uint256 tier2Threshold);
-    event LeverageTierMaxValuesUpdated(
-        uint16 tier1MaxLeverage, uint16 tier2MaxLeverage, uint16 tier3MaxLeverage
+    event LeverageTierConfigUpdated(
+        uint256 tier1Threshold,
+        uint256 tier2Threshold,
+        uint16 tier1Max,
+        uint16 tier2Max,
+        uint16 tier3Max
     );
 
     // ========== FUNDING RATE EVENTS ==========
@@ -408,6 +411,11 @@ contract AssetVaultUpgradeable is
         uint256 timestamp
     );
 
+    // H-04 FIX: Event emitted when funding update is capped due to missed hours
+    event FundingUpdateCapped(
+        uint256 actualHoursMissed, uint256 maxCatchupHours, uint256 timestamp
+    );
+
     event FundingConfigUpdated(
         uint16 tier1RateBps,
         uint16 tier2RateBps,
@@ -417,6 +425,25 @@ contract AssetVaultUpgradeable is
     );
 
     event FundingEnabledUpdated(bool enabled);
+
+    // M-01 FIX: Events for state changes that were missing
+    event BetCollateralUpdated(
+        uint64 indexed positionId,
+        uint256 oldCollateral,
+        uint256 newCollateral,
+        bool isIncrease,
+        uint256 timestamp
+    );
+
+    event DirectionalExposureUpdated(
+        uint256 oldLongExposure,
+        uint256 newLongExposure,
+        uint256 oldShortExposure,
+        uint256 newShortExposure,
+        uint8 direction,
+        bool isIncrease,
+        uint256 timestamp
+    );
 
     // ========================================================================
     // ERRORS
@@ -435,6 +462,7 @@ contract AssetVaultUpgradeable is
     error AlreadyGraduated();
     error TradingDisabled();
     error InvalidOraclePrice();
+    error IndexOutOfBounds(); // L-03 FIX: Custom error instead of string
     error DailySnapshotAlreadyProcessed();
     error TooEarlyForSnapshot();
     error NoStakeFound();
@@ -444,8 +472,6 @@ contract AssetVaultUpgradeable is
     error DirectTransferNotAllowed();
     error VaultManagerHelperNotSet();
     error NativeTokenNotAllowed();
-    // DEPRECATED: UpgradeNotOptedIn removed in V2
-    // DEPRECATED: OnlyUpgradeManager removed in V2
     error TotalOICapExceeded();
 
     // ========================================================================
@@ -476,8 +502,6 @@ contract AssetVaultUpgradeable is
         if (paused()) revert VaultPaused();
         _;
     }
-
-    // DEPRECATED: onlyUpgradeManager modifier removed in V2
 
     // ========================================================================
     // INITIALIZER (thay thế constructor)
@@ -651,7 +675,9 @@ contract AssetVaultUpgradeable is
             // New LP
             lpPos.user = msg.sender;
             lpPos.stakedAt = block.timestamp;
+            // M-08 FIX: Track index for O(1) removal
             vaultLPs.push(msg.sender);
+            lpIndex[msg.sender] = vaultLPs.length; // 1-based index
         }
 
         lpPos.shares += shares;
@@ -731,6 +757,14 @@ contract AssetVaultUpgradeable is
             lpPos.stakedAmount = 0;
         }
 
+        // M-08 FIX: Remove LP from array when they have no more shares
+        // Uses swap-and-pop for O(1) removal
+        if (lpPos.shares == 0) {
+            _removeLPFromArray(msg.sender);
+            // Note: We don't delete lpPositions[msg.sender] to preserve historical data
+            // (totalRewardsClaimed, lastRewardClaim, etc.)
+        }
+
         // Update vault liquidity - remove only netPayout (fee stays in vault)
         vault.totalLiquidity -= netPayout;
         vault.totalShares -= shares;
@@ -797,25 +831,27 @@ contract AssetVaultUpgradeable is
     ) external payable onlyVaultManager nonReentrant {
         if (amount == 0) revert InvalidAmount();
 
-        // Calculate open position fee (only for new positions, not margin adds)
-        uint256 openFee = 0;
-        uint256 netCollateral = amount;
+        // Calculate open position fee using library (only for new positions)
+        uint256 openFee;
+        uint256 netCollateral;
 
-        if (!isMarginAdd && openPositionFeeBps > 0) {
-            // Thu phí khi mở position mới
-            openFee = (amount * openPositionFeeBps) / BASIS_POINTS;
-            netCollateral = amount - openFee;
+        if (!isMarginAdd) {
+            (openFee, netCollateral) = VaultPayoutLib.calculateOpenFee(amount, openPositionFeeBps);
 
-            // Add fee to vault liquidity and make it withdrawable
-            vaultInfo.totalLiquidity += openFee;
-            vaultInfo.totalFeesCollected += openFee;
-            withdrawableFees += openFee;
-
-            // Emit event
-            emit OpenPositionFeeCollected(
-                positionId, msg.sender, openFee, netCollateral, block.timestamp
-            );
+            if (openFee > 0) {
+                vaultInfo.totalLiquidity += openFee;
+                vaultInfo.totalFeesCollected += openFee;
+                withdrawableFees += openFee;
+                emit OpenPositionFeeCollected(
+                    positionId, msg.sender, openFee, netCollateral, block.timestamp
+                );
+            }
+        } else {
+            netCollateral = amount;
         }
+
+        // M-01 FIX: Track old collateral for event emission
+        uint256 oldCollateral = betCollateral[positionId];
 
         // Store bet collateral for this position (net amount after fee, NOT added to vault liquidity yet)
         if (isMarginAdd) {
@@ -826,10 +862,23 @@ contract AssetVaultUpgradeable is
             betCollateral[positionId] = netCollateral;
         }
 
+        // M-01 FIX: Emit BetCollateralUpdated event
+        emit BetCollateralUpdated(
+            positionId,
+            oldCollateral,
+            betCollateral[positionId],
+            true, // isIncrease
+            block.timestamp
+        );
+
         vaultInfo.totalVolume += amount;
 
         // Update leverage exposure
         vaultInfo.totalLeverageExposure += positionSize;
+
+        // M-01 FIX: Track old exposures for event emission
+        uint256 oldLongExposure = totalLongExposure;
+        uint256 oldShortExposure = totalShortExposure;
 
         // Update directional exposure tracking
         if (direction == 1) {
@@ -839,6 +888,17 @@ contract AssetVaultUpgradeable is
             // SHORT position
             totalShortExposure += positionSize;
         }
+
+        // M-01 FIX: Emit DirectionalExposureUpdated event
+        emit DirectionalExposureUpdated(
+            oldLongExposure,
+            totalLongExposure,
+            oldShortExposure,
+            totalShortExposure,
+            direction,
+            true, // isIncrease
+            block.timestamp
+        );
 
         emit CollateralDeposited(netCollateral, positionSize, block.timestamp);
     }
@@ -855,35 +915,29 @@ contract AssetVaultUpgradeable is
         onlyPositionManager
         nonReentrant
     {
-        // ============================================================
-        // CHECKS
-        // ============================================================
         if (user == address(0)) revert InvalidAddress();
-        if (amount == 0) return; // No payout
+        if (amount == 0) return;
 
-        // Get bet collateral for this position
-        uint256 collateral = betCollateral[positionId];
+        // Use library to calculate payout requirements
+        VaultPayoutLib.PayoutParams memory params = VaultPayoutLib.PayoutParams({
+            totalAmount: amount,
+            collateral: betCollateral[positionId],
+            availableLiquidity: vaultInfo.totalLiquidity
+        });
 
-        // Calculate rewards from vault (amount - collateral)
-        uint256 rewardsFromVault = amount > collateral ? amount - collateral : 0;
+        VaultPayoutLib.PayoutResult memory result = VaultPayoutLib.calculatePayout(params);
 
-        // Check available liquidity for rewards
-        if (rewardsFromVault > vaultInfo.totalLiquidity) {
-            // Insufficient liquidity - queue the payout for later
+        // Check if should queue payout
+        if (!result.canPayout) {
             positionPayouts[positionId] = amount;
             pendingPayoutUsers[positionId] = user;
             pendingPayoutQueue.push(positionId);
             vaultInfo.pendingPositions++;
-
-            emit PayoutQueued(
-                positionId,
-                user,
-                amount,
-                true, // Always project token
-                block.timestamp
-            );
+            emit PayoutQueued(positionId, user, amount, true, block.timestamp);
             return;
         }
+
+        uint256 rewardsFromVault = result.rewardsFromVault;
 
         // ============================================================
         // EFFECTS - UPDATE STATE FIRST
@@ -951,93 +1005,49 @@ contract AssetVaultUpgradeable is
         uint256 positionSize,
         uint8 direction
     ) external onlyPositionManager {
-        // Calculate close position fee based on collateral
-        uint256 closeFee = 0;
-        if (closePositionFeeBps > 0 && collateral > 0) {
-            closeFee = (collateral * closePositionFeeBps) / BASIS_POINTS;
+        // Calculate close fee and PnL update using library
+        uint256 closeFee = VaultPayoutLib.calculateCloseFee(collateral, closePositionFeeBps);
 
-            // Add close fee to vault liquidity and make it withdrawable
+        if (closeFee > 0) {
             vaultInfo.totalLiquidity += closeFee;
             vaultInfo.totalFeesCollected += closeFee;
             withdrawableFees += closeFee;
-
-            // Emit event
-            emit ClosePositionFeeCollected(
-                positionId,
-                tx.origin, // Original user who opened the position
-                closeFee,
-                block.timestamp
-            );
+            emit ClosePositionFeeCollected(positionId, tx.origin, closeFee, block.timestamp);
         }
 
-        // Process collateral based on outcome
-        if (vaultPnL >= 0) {
-            // Vault gained (trader lost)
-            // Add the loss amount to vault liquidity
-            // This becomes part of the profit that will be distributed to LPs
-            uint256 lossAmount = uint256(vaultPnL);
-            vaultInfo.totalLiquidity += lossAmount;
+        // Use library to calculate PnL update
+        VaultPayoutLib.PnLUpdateParams memory pnlParams = VaultPayoutLib.PnLUpdateParams({
+            collateral: collateral,
+            vaultPnL: vaultPnL,
+            closeFeeBps: closePositionFeeBps,
+            currentLifetimePnL: vaultInfo.lifetimePnL,
+            isNegativePnL: vaultInfo.isNegativePnL
+        });
 
-            // Emit LiquidityAdded via VaultManagerHelper for the loss amount
-            if (vaultManagerHelper == address(0)) {
-                revert VaultManagerHelperNotSet();
-            }
+        VaultPayoutLib.PnLUpdateResult memory pnlResult =
+            VaultPayoutLib.calculatePnLUpdate(pnlParams);
 
+        // Apply liquidity change
+        if (pnlResult.isLiquidityIncrease && pnlResult.liquidityChange > 0) {
+            vaultInfo.totalLiquidity += pnlResult.liquidityChange;
+
+            if (vaultManagerHelper == address(0)) revert VaultManagerHelperNotSet();
             IVaultManagerHelper(vaultManagerHelper).emitLiquidityAdded(
                 address(this),
-                lossAmount,
-                0, // No shares issued
+                pnlResult.liquidityChange,
+                0,
                 vaultInfo.totalLiquidity,
                 uint8(LiquidityOperationType.CLOSE_POSITION),
                 block.timestamp
             );
-
-            // Update lifetime P&L (including close fee as profit)
-            uint256 totalGain = lossAmount + closeFee;
-            if (vaultInfo.isNegativePnL) {
-                if (totalGain >= vaultInfo.lifetimePnL) {
-                    vaultInfo.lifetimePnL = totalGain - vaultInfo.lifetimePnL;
-                    vaultInfo.isNegativePnL = false;
-                } else {
-                    vaultInfo.lifetimePnL -= totalGain;
-                }
-            } else {
-                vaultInfo.lifetimePnL += totalGain;
-            }
-        } else {
-            // Vault lost (trader won)
-            // Collateral + rewards will be paid out via executePayout
-            // Close fee already added to vault above
-            // Adjust vaultPnL by close fee (fee reduces vault loss)
-
-            uint256 loss = uint256(-vaultPnL);
-            // Subtract close fee from loss (fee partially offsets vault loss)
-            if (loss > closeFee) {
-                loss -= closeFee;
-            } else {
-                loss = 0;
-            }
-
-            // Update lifetime P&L
-            if (vaultInfo.isNegativePnL) {
-                vaultInfo.lifetimePnL += loss;
-            } else {
-                if (loss >= vaultInfo.lifetimePnL) {
-                    vaultInfo.lifetimePnL = loss - vaultInfo.lifetimePnL;
-                    vaultInfo.isNegativePnL = true;
-                } else {
-                    vaultInfo.lifetimePnL -= loss;
-                }
-            }
         }
 
-        // Track Daily P&L and Position IDs
-        // dailyNetPnL tracks vault's profit/loss for the day
-        // Positive value = vault profit (from losing positions + fees)
-        // This will be distributed to LPs during finalizeDailyReward
-        // Add close fee to daily PnL
-        int256 adjustedPnL = vaultPnL + int256(closeFee);
-        dailyNetPnL += adjustedPnL; // Accumulate for current day
+        // Update lifetime P&L
+        vaultInfo.lifetimePnL = pnlResult.newLifetimePnL;
+        vaultInfo.isNegativePnL = pnlResult.newIsNegativePnL;
+
+        // Track Daily P&L using library helper
+        dailyNetPnL += VaultPayoutLib.calculateAdjustedPnL(vaultPnL, closeFee);
         dailyPositionIds.push(positionId);
 
         // Update leverage exposure
@@ -1046,6 +1056,10 @@ contract AssetVaultUpgradeable is
         } else {
             vaultInfo.totalLeverageExposure = 0;
         }
+
+        // M-01 FIX: Track old exposures for event emission
+        uint256 oldLongExposure = totalLongExposure;
+        uint256 oldShortExposure = totalShortExposure;
 
         // Update directional exposure tracking
         if (direction == 1) {
@@ -1064,11 +1078,36 @@ contract AssetVaultUpgradeable is
             }
         }
 
+        // M-01 FIX: Emit DirectionalExposureUpdated event (exposure decrease)
+        emit DirectionalExposureUpdated(
+            oldLongExposure,
+            totalLongExposure,
+            oldShortExposure,
+            totalShortExposure,
+            direction,
+            false, // isIncrease = false (decrease)
+            block.timestamp
+        );
+
         // Update positions settled
         vaultInfo.totalPositionsSettled++;
 
+        // M-01 FIX: Track old collateral for event emission
+        uint256 oldBetCollateral = betCollateral[positionId];
+
         // Clear bet collateral for this position
         delete betCollateral[positionId];
+
+        // M-01 FIX: Emit BetCollateralUpdated event (collateral cleared)
+        if (oldBetCollateral > 0) {
+            emit BetCollateralUpdated(
+                positionId,
+                oldBetCollateral,
+                0,
+                false, // isIncrease = false
+                block.timestamp
+            );
+        }
 
         emit VaultPnLUpdated(
             collateral,
@@ -1193,18 +1232,14 @@ contract AssetVaultUpgradeable is
      *      Pre-calculates and stores rewards for all LPs to avoid recalculation on claim
      */
     function finalizeDailyReward() external onlyAdmin returns (bool isComplete) {
-        uint256 today = block.timestamp / 1 days;
+        // Use library to check if snapshot can be taken
+        (bool canSnapshot, uint256 today) =
+            VaultRewardsLib.canTakeSnapshot(lastSnapshotDay, block.timestamp);
 
-        // Check if already processed today - this is the primary protection
-        if (dailySnapshots[today].isProcessed) {
-            revert DailySnapshotAlreadyProcessed();
-        }
+        if (dailySnapshots[today].isProcessed) revert DailySnapshotAlreadyProcessed();
+        if (!canSnapshot) revert TooEarlyForSnapshot();
 
-        if (today <= lastSnapshotDay) {
-            revert TooEarlyForSnapshot();
-        }
-
-        // Take snapshot with position IDs
+        // Take snapshot
         DailySnapshot storage snapshot = dailySnapshots[today];
         snapshot.day = today;
         snapshot.totalLiquidity = vaultInfo.totalLiquidity;
@@ -1214,63 +1249,48 @@ contract AssetVaultUpgradeable is
         snapshot.isProcessed = true;
         snapshot.timestamp = block.timestamp;
 
-        // Copy position IDs to snapshot
         for (uint256 i = 0; i < dailyPositionIds.length; i++) {
             snapshot.positionIds.push(dailyPositionIds[i]);
         }
 
-        // Reset finalize index for new day
         finalizeLPIndex = 0;
-
-        // Pre-calculate rewards for all LPs (only if netPnL > 0)
-        // Vault profit comes from:
-        // 1. Users losing their positions (collateral goes to vault)
-        // 2. House edge from winning positions
         int256 finalizedPnL = dailyNetPnL;
-        if (finalizedPnL > 0 && snapshot.totalShares > 0) {
-            uint256 dayStartTimestamp = today * 1 days;
-            uint256 totalLPs = vaultLPs.length;
-            uint256 maxIterations =
-                totalLPs > MAX_LPS_PER_FINALIZE ? MAX_LPS_PER_FINALIZE : totalLPs;
 
-            // Process LPs in batches to prevent out of gas
-            for (uint256 i = 0; i < maxIterations; i++) {
+        if (finalizedPnL > 0 && snapshot.totalShares > 0) {
+            uint256 dayStartTimestamp = VaultRewardsLib.getDayStartTimestamp(today);
+            (uint256 endIndex,) =
+                VaultRewardsLib.calculateBatchIndices(vaultLPs.length, 0, MAX_LPS_PER_FINALIZE);
+
+            for (uint256 i = 0; i < endIndex; i++) {
                 address lp = vaultLPs[i];
                 LPPosition storage lpPos = lpPositions[lp];
+                if (lpPos.shares == 0) continue;
 
-                // Skip if user has no shares
-                if (lpPos.shares == 0) {
-                    continue;
-                }
+                // Use library to calculate LP reward
+                VaultRewardsLib.LPRewardResult memory rewardResult = VaultRewardsLib
+                    .calculateLPReward(
+                    VaultRewardsLib.RewardCalculationParams({
+                        userShares: lpPos.shares,
+                        totalShares: snapshot.totalShares,
+                        netPnL: finalizedPnL,
+                        stakedAt: lpPos.stakedAt,
+                        dayStartTimestamp: dayStartTimestamp
+                    })
+                );
 
-                // Check if user was staked for at least 1 day before this reward day
-                if (lpPos.stakedAt + REWARD_MIN_STAKE_PERIOD <= dayStartTimestamp) {
-                    // Calculate user's share of profit for this day
-                    uint256 userReward =
-                        (lpPos.shares * uint256(finalizedPnL)) / snapshot.totalShares;
-
-                    if (userReward > 0) {
-                        // Add reward to user's claimable rewards
-                        claimableRewards[lp] += userReward;
-                    }
+                if (rewardResult.isEligible && rewardResult.reward > 0) {
+                    claimableRewards[lp] += rewardResult.reward;
                 }
             }
-
-            // Update finalize index
-            finalizeLPIndex = maxIterations;
+            finalizeLPIndex = endIndex;
         }
 
-        // Update state
         lastSnapshotDay = today;
         currentDay = today;
-
-        // Reset daily accumulators for next day
         dailyNetPnL = 0;
-        delete dailyPositionIds; // Clear position IDs array
+        delete dailyPositionIds;
 
-        // Emit DailyRewardFinalized via VaultManagerHelper
         if (vaultManagerHelper == address(0)) revert VaultManagerHelperNotSet();
-
         IVaultManagerHelper(vaultManagerHelper).emitDailyRewardFinalized(
             today, vaultInfo.totalLiquidity, vaultInfo.totalShares, finalizedPnL, block.timestamp
         );
@@ -1285,62 +1305,48 @@ contract AssetVaultUpgradeable is
      * @return isComplete True if all LPs have been processed
      */
     function finalizeDailyRewardRemaining() external onlyAdmin returns (bool isComplete) {
-        uint256 today = block.timestamp / 1 days;
+        uint256 today = VaultRewardsLib.getDayFromTimestamp(block.timestamp);
 
-        // Check if snapshot exists
         if (!dailySnapshots[today].isProcessed) {
-            revert DailySnapshotAlreadyProcessed(); // Use same error for consistency
+            revert DailySnapshotAlreadyProcessed();
         }
 
         DailySnapshot storage snapshot = dailySnapshots[today];
         int256 finalizedPnL = snapshot.netPnL;
 
-        // Only process if there are rewards to distribute
-        if (finalizedPnL <= 0 || snapshot.totalShares == 0) {
-            return true; // Nothing to process
-        }
+        if (finalizedPnL <= 0 || snapshot.totalShares == 0) return true;
 
-        uint256 totalLPs = vaultLPs.length;
-        uint256 startIndex = finalizeLPIndex;
+        // Use library to calculate batch indices
+        (uint256 endIndex, bool complete) = VaultRewardsLib.calculateBatchIndices(
+            vaultLPs.length, finalizeLPIndex, MAX_LPS_PER_FINALIZE
+        );
 
-        if (startIndex >= totalLPs) {
-            return true; // Already processed all
-        }
+        if (finalizeLPIndex >= vaultLPs.length) return true;
 
-        uint256 endIndex = startIndex + MAX_LPS_PER_FINALIZE;
-        if (endIndex > totalLPs) {
-            endIndex = totalLPs;
-        }
+        uint256 dayStartTimestamp = VaultRewardsLib.getDayStartTimestamp(today);
 
-        uint256 dayStartTimestamp = today * 1 days;
-
-        // Process remaining LPs
-        for (uint256 i = startIndex; i < endIndex; i++) {
+        for (uint256 i = finalizeLPIndex; i < endIndex; i++) {
             address lp = vaultLPs[i];
             LPPosition storage lpPos = lpPositions[lp];
+            if (lpPos.shares == 0) continue;
 
-            // Skip if user has no shares
-            if (lpPos.shares == 0) {
-                continue;
-            }
+            VaultRewardsLib.LPRewardResult memory rewardResult = VaultRewardsLib.calculateLPReward(
+                VaultRewardsLib.RewardCalculationParams({
+                    userShares: lpPos.shares,
+                    totalShares: snapshot.totalShares,
+                    netPnL: finalizedPnL,
+                    stakedAt: lpPos.stakedAt,
+                    dayStartTimestamp: dayStartTimestamp
+                })
+            );
 
-            // Check if user was staked for at least 1 day before this reward day
-            if (lpPos.stakedAt + REWARD_MIN_STAKE_PERIOD <= dayStartTimestamp) {
-                // Calculate user's share of profit for this day
-                uint256 userReward = (lpPos.shares * uint256(finalizedPnL)) / snapshot.totalShares;
-
-                if (userReward > 0) {
-                    // Add reward to user's claimable rewards
-                    claimableRewards[lp] += userReward;
-                }
+            if (rewardResult.isEligible && rewardResult.reward > 0) {
+                claimableRewards[lp] += rewardResult.reward;
             }
         }
 
-        // Update finalize index
         finalizeLPIndex = endIndex;
-
-        // Check if all LPs have been processed
-        return endIndex >= totalLPs;
+        return complete;
     }
 
     /**
@@ -1350,48 +1356,30 @@ contract AssetVaultUpgradeable is
      */
     function claimRewards() external nonReentrant whenNotPaused {
         LPPosition storage lpPos = lpPositions[msg.sender];
-
-        // Get claimable rewards (already accumulated from all days)
         uint256 rewards = claimableRewards[msg.sender];
 
-        if (rewards == 0 || lpPos.shares == 0) {
-            revert NoRewardsToClaim();
-        }
+        if (rewards == 0 || lpPos.shares == 0) revert NoRewardsToClaim();
 
-        // Cap rewards at available balance to prevent race conditions
-        // If multiple users claim simultaneously, early claimers get full rewards
-        // Later claimers get capped at remaining balance (simple, fair approach)
-        uint256 vaultBalance;
-        if (projectToken == address(0)) {
-            vaultBalance = address(this).balance;
-        } else {
-            vaultBalance = IERC20(projectToken).balanceOf(address(this));
-        }
+        // Get vault balance and use library to cap rewards
+        uint256 vaultBalance = projectToken == address(0)
+            ? address(this).balance
+            : IERC20(projectToken).balanceOf(address(this));
 
-        uint256 actualRewards = rewards;
-        bool wasCapped = false;
+        (uint256 actualRewards, bool wasCapped) =
+            VaultRewardsLib.capRewardsAtBalance(rewards, vaultBalance);
 
-        if (rewards > vaultBalance) {
-            actualRewards = vaultBalance;
-            wasCapped = true;
-
+        if (wasCapped) {
             emit RewardsCapped(msg.sender, rewards, actualRewards, block.timestamp);
         }
+        if (actualRewards == 0) revert InsufficientLiquidity();
 
-        // Only revert if there's absolutely nothing to pay
-        if (actualRewards == 0) {
-            revert InsufficientLiquidity();
-        }
-
-        // Update LP position
+        // Update state
         lpPos.lastProcessedDay = lastSnapshotDay;
         lpPos.lastRewardClaim = block.timestamp;
         lpPos.totalRewardsClaimed += actualRewards;
-
-        // Subtract claimed rewards from claimableRewards
         claimableRewards[msg.sender] -= actualRewards;
 
-        // Transfer rewards (capped amount) - ONLY project token
+        // Transfer
         if (projectToken == address(0)) {
             (bool success,) = msg.sender.call{ value: actualRewards }("");
             if (!success) revert TransferFailed();
@@ -1399,9 +1387,7 @@ contract AssetVaultUpgradeable is
             IERC20(projectToken).safeTransfer(msg.sender, actualRewards);
         }
 
-        // Emit RewardsClaimed via VaultManagerHelper
         if (vaultManagerHelper == address(0)) revert VaultManagerHelperNotSet();
-
         IVaultManagerHelper(vaultManagerHelper).emitRewardsClaimed(
             msg.sender, actualRewards, block.timestamp
         );
@@ -1415,6 +1401,7 @@ contract AssetVaultUpgradeable is
      * @notice Process pending payouts when liquidity becomes available
      * @dev Called automatically after liquidity is added or payouts are made
      * @dev Processes payouts in FIFO order - oldest positions get paid first
+     * @dev M-05 FIX: Restructured to follow CEI pattern - all state updates before external calls
      */
     function _processPendingPayouts() internal {
         if (vaultInfo.pendingPositions == 0) return;
@@ -1422,12 +1409,13 @@ contract AssetVaultUpgradeable is
 
         uint256 queueLength = pendingPayoutQueue.length;
         uint256 startIdx = queueStartIndex;
-        
+
         // Nothing to process if start index >= queue length
         if (startIdx >= queueLength) return;
 
         uint256 remainingItems = queueLength - startIdx;
-        uint256 maxIterations = remainingItems > MAX_PAYOUTS_PER_TX ? MAX_PAYOUTS_PER_TX : remainingItems;
+        uint256 maxIterations =
+            remainingItems > MAX_PAYOUTS_PER_TX ? MAX_PAYOUTS_PER_TX : remainingItems;
 
         uint256 processed = 0;
         uint256 currentIdx = startIdx;
@@ -1456,64 +1444,77 @@ contract AssetVaultUpgradeable is
 
             // Check if we have enough liquidity for rewards
             if (rewardsFromVault <= vaultInfo.totalLiquidity) {
-                // Process full payout
-                unchecked {
-                    // Deduct rewards from vault liquidity
-                    if (rewardsFromVault > 0) {
-                        vaultInfo.totalLiquidity -= rewardsFromVault;
+                // M-05 FIX: Get retry count BEFORE any state changes
+                uint8 currentRetries = payoutRetryCount[positionId];
+                bool isMaxRetriesReached = currentRetries >= MAX_PAYOUT_RETRIES;
 
-                        // Emit LiquidityRemoved via VaultManagerHelper
-                        if (vaultManagerHelper == address(0)) {
-                            revert VaultManagerHelperNotSet();
-                        }
+                // ============================================================
+                // EFFECTS - ALL STATE UPDATES BEFORE EXTERNAL CALLS (CEI Pattern)
+                // ============================================================
 
-                        IVaultManagerHelper(vaultManagerHelper).emitLiquidityRemoved(
-                            user,
-                            rewardsFromVault,
-                            0, // No shares burned for payouts
-                            vaultInfo.totalLiquidity,
-                            uint8(LiquidityOperationType.PAYOUT_EXECUTION),
-                            block.timestamp
-                        );
+                // Deduct rewards from vault liquidity
+                if (rewardsFromVault > 0) {
+                    vaultInfo.totalLiquidity -= rewardsFromVault;
+
+                    // Emit LiquidityRemoved via VaultManagerHelper
+                    if (vaultManagerHelper == address(0)) {
+                        revert VaultManagerHelperNotSet();
                     }
 
-                    vaultInfo.pendingPositions--;
-                    ++processed;
+                    IVaultManagerHelper(vaultManagerHelper).emitLiquidityRemoved(
+                        user,
+                        rewardsFromVault,
+                        0, // No shares burned for payouts
+                        vaultInfo.totalLiquidity,
+                        uint8(LiquidityOperationType.PAYOUT_EXECUTION),
+                        block.timestamp
+                    );
                 }
 
-                // Clear mappings
+                // Update pending positions count
+                vaultInfo.pendingPositions--;
+                ++processed;
+
+                // Clear mappings BEFORE external call
                 delete positionPayouts[positionId];
                 delete pendingPayoutUsers[positionId];
                 delete betCollateral[positionId];
+                delete payoutRetryCount[positionId];
 
-                // Transfer tokens
+                // ============================================================
+                // INTERACTIONS - EXTERNAL CALLS LAST (CEI Pattern)
+                // ============================================================
+
                 if (projectToken == address(0)) {
                     // Native project token
                     (bool success,) = user.call{ value: amount }("");
+
                     if (!success) {
-                        uint8 retries = payoutRetryCount[positionId];
-                        if (retries >= MAX_PAYOUT_RETRIES) {
+                        // M-05 FIX: Handle failure with pre-calculated retry state
+                        if (isMaxRetriesReached) {
                             // Max retries reached - mark as failed for admin rescue
+                            // State already cleared above, just record failure
                             failedPayouts[positionId] = amount;
                             failedPayoutUsers[positionId] = user;
 
-                            emit PayoutFailed(positionId, user, amount, retries, block.timestamp);
-
-                            // Remove from queue
-                            delete positionPayouts[positionId];
-                            delete pendingPayoutUsers[positionId];
-                            delete payoutRetryCount[positionId];
-                            vaultInfo.pendingPositions--;
+                            emit PayoutFailed(
+                                positionId, user, amount, currentRetries, block.timestamp
+                            );
                         } else {
                             // Re-queue with incremented retry count
-                            payoutRetryCount[positionId]++;
+                            // Restore state for retry
+                            payoutRetryCount[positionId] = currentRetries + 1;
                             positionPayouts[positionId] = amount;
                             pendingPayoutUsers[positionId] = user;
-                            unchecked {
-                                ++vaultInfo.pendingPositions;
-                                vaultInfo.totalLiquidity += amount;
+
+                            // Note: We need to restore pendingPositions (was decremented above)
+                            // and restore liquidity if we deducted rewards
+                            vaultInfo.pendingPositions++;
+                            if (rewardsFromVault > 0) {
+                                vaultInfo.totalLiquidity += rewardsFromVault;
                             }
                         }
+
                         unchecked {
                             ++i;
                             ++currentIdx;
@@ -1522,6 +1523,7 @@ contract AssetVaultUpgradeable is
                     }
                 } else {
                     // ERC20 project token - SafeTransfer handles revert
+                    // If this reverts, the entire transaction reverts (no state inconsistency)
                     IERC20(projectToken).safeTransfer(user, amount);
                 }
 
@@ -1547,7 +1549,7 @@ contract AssetVaultUpgradeable is
         if (currentIdx > startIdx) {
             queueStartIndex = currentIdx;
         }
-        
+
         // Periodic cleanup: when start index is large enough, compact the array
         // This prevents unbounded storage growth while avoiding frequent cleanups
         if (queueStartIndex > 100 && queueStartIndex > queueLength / 2) {
@@ -1563,12 +1565,12 @@ contract AssetVaultUpgradeable is
     function _cleanupPayoutQueue() internal {
         uint256 startIdx = queueStartIndex;
         uint256 length = pendingPayoutQueue.length;
-        
+
         // Nothing to cleanup if queue is empty or start index is 0
         if (length == 0 || startIdx == 0) return;
-        
+
         uint256 writeIndex = 0;
-        
+
         // Only iterate from startIdx - items before are guaranteed processed
         for (uint256 i = startIdx; i < length;) {
             if (positionPayouts[pendingPayoutQueue[i]] != 0) {
@@ -1588,7 +1590,7 @@ contract AssetVaultUpgradeable is
         while (pendingPayoutQueue.length > writeIndex) {
             pendingPayoutQueue.pop();
         }
-        
+
         // Reset start index since we've compacted the array (C-02 fix)
         queueStartIndex = 0;
 
@@ -1606,22 +1608,8 @@ contract AssetVaultUpgradeable is
         _processPendingPayouts();
     }
 
-    /**
-     * @notice Get effective queue length (items not yet processed)
-     * @dev C-02 fix: Returns actual pending items count considering queueStartIndex
-     * @return effectiveLength Number of items from queueStartIndex to end of array
-     */
-    function getEffectiveQueueLength() external view returns (uint256 effectiveLength) {
-        uint256 totalLength = pendingPayoutQueue.length;
-        uint256 startIdx = queueStartIndex;
-        
-        if (startIdx >= totalLength) {
-            return 0;
-        }
-        
-        return totalLength - startIdx;
-    }
-    
+    // NOTE: getEffectiveQueueLength() moved to VaultViewer
+
     /**
      * @notice Admin function to manually trigger queue cleanup
      * @dev Useful for reclaiming storage when queue has grown large
@@ -1629,9 +1617,6 @@ contract AssetVaultUpgradeable is
     function adminCleanupPayoutQueue() external onlyOwner {
         _cleanupPayoutQueue();
     }
-
-    // REMOVED: getPendingPayoutQueue() - Access pendingPayoutQueue array directly
-    // REMOVED: calculatePendingRewards() - Access claimableRewards[user] directly or use VaultViewer
 
     // ========================================================================
     // ADMIN FUNCTIONS
@@ -1818,70 +1803,111 @@ contract AssetVaultUpgradeable is
         return vaultParams;
     }
 
-    // REMOVED: getAllLPs() - Access vaultLPs directly
-    // REMOVED: getTreasury() - Access treasury directly
-    // REMOVED: calculateShareValue() - Use (shares * getVaultInfo().totalLiquidity) / getVaultInfo().totalShares
-    // REMOVED: getDailySnapshot(), getDailyPositionIds(), getCurrentDailyPositionIds() - Use mapping directly
-    // REMOVED: getRemainingLockTime() - Use getLPPosition().stakedAt + MIN_LOCK_PERIOD
-    // REMOVED: calculateWithdrawalAmount() - Use VaultViewer.calculateWithdrawalAmount()
-    // REMOVED: getFeeConfig() - Access stakingFeeBps, earlyWithdrawalFeeBps, MIN_LOCK_PERIOD directly
-    // REMOVED: getPositionFeeConfig() - Access openPositionFeeBps, closePositionFeeBps directly
-    // REMOVED: getAllFeeConfig() - Use getFeeConfig() + getPositionFeeConfig() instead
-    // REMOVED: getFeesCollected() - Use getVaultInfo().totalFeesCollected instead
-    // REMOVED: getWithdrawableFees() - Access withdrawableFees directly
+    /**
+     * @notice Get Total OI tier configuration
+     */
+    function getTotalOITierConfig()
+        external
+        view
+        returns (uint16, uint256, uint256, uint256, uint16, uint16, uint16, uint16)
+    {
+        return (
+            totalOIRiskMultiplierBps,
+            tier1Threshold,
+            tier2Threshold,
+            tier3Threshold,
+            tier1MultiplierBps,
+            tier2MultiplierBps,
+            tier3MultiplierBps,
+            tier4MultiplierBps
+        );
+    }
+
+    /**
+     * @notice Get leverage tier configuration
+     */
+    function getLeverageTierConfig()
+        external
+        view
+        returns (uint256, uint256, uint16, uint16, uint16)
+    {
+        return (
+            leverageTier1Threshold,
+            leverageTier2Threshold,
+            tier1MaxLeverage,
+            tier2MaxLeverage,
+            tier3MaxLeverage
+        );
+    }
+
+    /**
+     * @notice Get fee configuration
+     */
+    function getFeeConfig() external view returns (uint16, uint16, uint256) {
+        return (stakingFeeBps, earlyWithdrawalFeeBps, MIN_LOCK_PERIOD);
+    }
+
+    // ========================================================================
+    // M-08 FIX: LP ARRAY HELPER FUNCTIONS
+    // ========================================================================
+    // NOTE: View functions (getVaultLPsCount, getVaultLPAt, isVaultLP, getAllVaultLPs)
+    //       moved to VaultViewer to reduce bytecode size
+
+    /**
+     * @notice Internal function to remove LP from array using swap-and-pop
+     * @param lp Address of LP to remove
+     * @dev M-08 FIX: O(1) removal using index tracking
+     */
+    function _removeLPFromArray(address lp) internal {
+        uint256 index1Based = lpIndex[lp];
+        if (index1Based == 0) return; // Not in array
+
+        uint256 index = index1Based - 1; // Convert to 0-based
+        uint256 lastIndex = vaultLPs.length - 1;
+
+        if (index != lastIndex) {
+            // Swap with last element
+            address lastLP = vaultLPs[lastIndex];
+            vaultLPs[index] = lastLP;
+            lpIndex[lastLP] = index1Based; // Update index of moved LP
+        }
+
+        // Remove last element
+        vaultLPs.pop();
+        delete lpIndex[lp];
+    }
 
     // ========================================================================
     // FEE ADMIN FUNCTIONS
     // ========================================================================
 
     /**
-     * @notice Update staking fee
-     * @param _stakingFeeBps New staking fee in basis points
+     * @notice Update fee by type - consolidated setter for all fees
+     * @param feeType 0=staking, 1=earlyWithdrawal, 2=openPosition, 3=closePosition
+     * @param feeBps New fee in basis points
      */
-    function setStakingFeeBps(uint16 _stakingFeeBps) external onlyVaultManagerOrHelper {
-        if (_stakingFeeBps > 1000) revert InvalidParameters(); // Max 10%
-        uint16 oldBps = stakingFeeBps;
-        stakingFeeBps = _stakingFeeBps;
-        emit StakingFeeBpsUpdated(oldBps, _stakingFeeBps);
-    }
-
-    /**
-     * @notice Update early withdrawal fee
-     * @param _earlyWithdrawalFeeBps New early withdrawal fee in basis points
-     */
-    function setEarlyWithdrawalFeeBps(uint16 _earlyWithdrawalFeeBps)
-        external
-        onlyVaultManagerOrHelper
-    {
-        if (_earlyWithdrawalFeeBps > 5000) revert InvalidParameters(); // Max 50%
-        uint16 oldBps = earlyWithdrawalFeeBps;
-        earlyWithdrawalFeeBps = _earlyWithdrawalFeeBps;
-        emit EarlyWithdrawalFeeBpsUpdated(oldBps, _earlyWithdrawalFeeBps);
-    }
-
-    /**
-     * @notice Update open position fee
-     * @param _openPositionFeeBps New open position fee in basis points
-     */
-    function setOpenPositionFeeBps(uint16 _openPositionFeeBps) external onlyVaultManagerOrHelper {
-        if (_openPositionFeeBps > 1000) revert InvalidParameters(); // Max 10%
-        uint16 oldBps = openPositionFeeBps;
-        openPositionFeeBps = _openPositionFeeBps;
-        emit OpenPositionFeeBpsUpdated(oldBps, _openPositionFeeBps);
-    }
-
-    /**
-     * @notice Update close position fee
-     * @param _closePositionFeeBps New close position fee in basis points
-     */
-    function setClosePositionFeeBps(uint16 _closePositionFeeBps)
-        external
-        onlyVaultManagerOrHelper
-    {
-        if (_closePositionFeeBps > 1000) revert InvalidParameters(); // Max 10%
-        uint16 oldBps = closePositionFeeBps;
-        closePositionFeeBps = _closePositionFeeBps;
-        emit ClosePositionFeeBpsUpdated(oldBps, _closePositionFeeBps);
+    function setFee(uint8 feeType, uint16 feeBps) external onlyVaultManagerOrHelper {
+        uint16 oldBps;
+        if (feeType == 0) {
+            if (feeBps > 1000) revert InvalidParameters();
+            oldBps = stakingFeeBps;
+            stakingFeeBps = feeBps;
+        } else if (feeType == 1) {
+            if (feeBps > 5000) revert InvalidParameters();
+            oldBps = earlyWithdrawalFeeBps;
+            earlyWithdrawalFeeBps = feeBps;
+        } else if (feeType == 2) {
+            if (feeBps < MIN_OPEN_POSITION_FEE_BPS || feeBps > 1000) revert InvalidParameters();
+            oldBps = openPositionFeeBps;
+            openPositionFeeBps = feeBps;
+        } else if (feeType == 3) {
+            if (feeBps < MIN_CLOSE_POSITION_FEE_BPS || feeBps > 1000) revert InvalidParameters();
+            oldBps = closePositionFeeBps;
+            closePositionFeeBps = feeBps;
+        } else {
+            revert InvalidParameters();
+        }
+        emit FeeUpdated(feeType, oldBps, feeBps);
     }
 
     // ========================================================================
@@ -1945,93 +1971,53 @@ contract AssetVaultUpgradeable is
         maxDirectionalExposureBps = _maxDirectionalExposureBps;
     }
 
-    // REMOVED: getDirectionalExposure() - Use VaultViewer.getDirectionalExposure(vault) instead
-
     // ========================================================================
     // TOTAL OPEN INTEREST CAP MANAGEMENT
     // ========================================================================
 
     /**
-     * @notice Set fixed total OI risk multiplier (used when tier system is disabled)
-     * @param _multiplierBps Risk multiplier in basis points (15000 = 1.5x, 30000 = 3.0x)
-     * @dev Only admin can update. Max 5.0x (50000 bps) for safety
+     * @notice Set OI tier config in one call
+     * @param fixedMultiplier Fixed multiplier when tier disabled (set 0 to use tier system)
+     * @param thresholds [tier1, tier2, tier3] - set all 0 to use fixed multiplier
+     * @param multipliers [tier1Bps, tier2Bps, tier3Bps, tier4Bps]
      */
-    function setTotalOIRiskMultiplier(uint16 _multiplierBps) external onlyVaultManagerOrHelper {
-        if (_multiplierBps < 10_000 || _multiplierBps > 50_000) {
-            revert InvalidParameters(); // Min 1.0x, Max 5.0x
-        }
-        uint16 oldBps = totalOIRiskMultiplierBps;
-        totalOIRiskMultiplierBps = _multiplierBps;
-        emit TotalOIRiskMultiplierUpdated(oldBps, _multiplierBps);
-    }
-
-    /**
-     * @notice Set TVL tier thresholds for dynamic risk multiplier
-     * @param _tier1 Threshold for tier 1 (small vaults) in token amount
-     * @param _tier2 Threshold for tier 2 (medium vaults) in token amount
-     * @param _tier3 Threshold for tier 3 (large vaults) in token amount
-     * @dev Set all to 0 to disable tier system and use fixed multiplier
-     *      Thresholds must be in ascending order: tier1 < tier2 < tier3
-     */
-    function setTotalOITierThresholds(uint256 _tier1, uint256 _tier2, uint256 _tier3)
-        external
-        onlyVaultManagerOrHelper
-    {
-        // Allow all 0 to disable tier system
-        if (_tier1 == 0 && _tier2 == 0 && _tier3 == 0) {
-            tier1Threshold = 0;
-            tier2Threshold = 0;
-            tier3Threshold = 0;
-            emit TotalOITierThresholdsUpdated(0, 0, 0);
-            return;
-        }
-
-        // If not all 0, must be in ascending order
-        if (_tier1 >= _tier2 || _tier2 >= _tier3) {
+    function setOITierConfig(
+        uint16 fixedMultiplier,
+        uint256[3] calldata thresholds,
+        uint16[4] calldata multipliers
+    ) external onlyVaultManagerOrHelper {
+        // Validate fixed multiplier
+        if (fixedMultiplier > 0 && (fixedMultiplier < 10_000 || fixedMultiplier > 50_000)) {
             revert InvalidParameters();
         }
+        if (fixedMultiplier > 0) totalOIRiskMultiplierBps = fixedMultiplier;
 
-        tier1Threshold = _tier1;
-        tier2Threshold = _tier2;
-        tier3Threshold = _tier3;
+        // Thresholds: allow all 0 to disable tier system
+        if (thresholds[0] != 0 || thresholds[1] != 0 || thresholds[2] != 0) {
+            if (thresholds[0] >= thresholds[1] || thresholds[1] >= thresholds[2]) {
+                revert InvalidParameters();
+            }
+        }
+        tier1Threshold = thresholds[0];
+        tier2Threshold = thresholds[1];
+        tier3Threshold = thresholds[2];
 
-        emit TotalOITierThresholdsUpdated(_tier1, _tier2, _tier3);
-    }
-
-    /**
-     * @notice Set risk multipliers for each TVL tier
-     * @param _tier1Bps Multiplier for tier 1 (small vaults) in bps
-     * @param _tier2Bps Multiplier for tier 2 (medium vaults) in bps
-     * @param _tier3Bps Multiplier for tier 3 (large vaults) in bps
-     * @param _tier4Bps Multiplier for tier 4 (very large vaults) in bps
-     * @dev Multipliers should be in ascending order for larger vaults to get higher caps
-     *      Min 1.0x (10000), Max 5.0x (50000) for safety
-     */
-    function setTotalOITierMultipliers(
-        uint16 _tier1Bps,
-        uint16 _tier2Bps,
-        uint16 _tier3Bps,
-        uint16 _tier4Bps
-    ) external onlyVaultManagerOrHelper {
-        // Validate range (1.0x to 5.0x)
+        // Validate multipliers
+        for (uint256 i = 0; i < 4; i++) {
+            if (multipliers[i] < 10_000 || multipliers[i] > 50_000) revert InvalidParameters();
+        }
         if (
-            _tier1Bps < 10_000 || _tier1Bps > 50_000 || _tier2Bps < 10_000 || _tier2Bps > 50_000
-                || _tier3Bps < 10_000 || _tier3Bps > 50_000 || _tier4Bps < 10_000 || _tier4Bps > 50_000
+            multipliers[0] > multipliers[1] || multipliers[1] > multipliers[2]
+                || multipliers[2] > multipliers[3]
         ) {
             revert InvalidParameters();
         }
+        tier1MultiplierBps = multipliers[0];
+        tier2MultiplierBps = multipliers[1];
+        tier3MultiplierBps = multipliers[2];
+        tier4MultiplierBps = multipliers[3];
 
-        // Validate ascending order (larger vaults should have higher or equal multipliers)
-        if (_tier1Bps > _tier2Bps || _tier2Bps > _tier3Bps || _tier3Bps > _tier4Bps) {
-            revert InvalidParameters();
-        }
-
-        tier1MultiplierBps = _tier1Bps;
-        tier2MultiplierBps = _tier2Bps;
-        tier3MultiplierBps = _tier3Bps;
-        tier4MultiplierBps = _tier4Bps;
-
-        emit TotalOITierMultipliersUpdated(_tier1Bps, _tier2Bps, _tier3Bps, _tier4Bps);
+        emit OITierConfigUpdated(fixedMultiplier, thresholds, multipliers);
     }
 
     // ========================================================================
@@ -2039,117 +2025,57 @@ contract AssetVaultUpgradeable is
     // ========================================================================
 
     /**
-     * @notice Set leverage tier thresholds based on vault TVL
-     * @dev Thresholds define when vault graduates to higher leverage tiers
-     * @param _tier1Threshold TVL threshold for Growth Phase (e.g., 100,000 * 10^18)
-     * @param _tier2Threshold TVL threshold for Mature Phase (e.g., 500,000 * 10^18)
+     * @notice Set leverage tier config in one call
+     * @param _t1Threshold TVL threshold for Growth Phase
+     * @param _t2Threshold TVL threshold for Mature Phase
+     * @param _t1Max Max leverage for Launch Phase
+     * @param _t2Max Max leverage for Growth Phase
+     * @param _t3Max Max leverage for Mature Phase
      */
-    function setLeverageTierThresholds(uint256 _tier1Threshold, uint256 _tier2Threshold)
-        external
-        onlyVaultManagerOrHelper
-    {
-        // Validate ascending order
-        if (_tier1Threshold >= _tier2Threshold) {
-            revert InvalidParameters();
-        }
-
-        leverageTier1Threshold = _tier1Threshold;
-        leverageTier2Threshold = _tier2Threshold;
-
-        emit LeverageTierThresholdsUpdated(_tier1Threshold, _tier2Threshold);
-    }
-
-    /**
-     * @notice Set maximum leverage for each tier
-     * @dev Configure max leverage based on vault maturity
-     * @param _tier1Max Max leverage for Launch Phase (vaults < tier1Threshold)
-     * @param _tier2Max Max leverage for Growth Phase (tier1 <= vaults < tier2)
-     * @param _tier3Max Max leverage for Mature Phase (vaults >= tier2Threshold)
-     */
-    function setLeverageTierMaxValues(uint16 _tier1Max, uint16 _tier2Max, uint16 _tier3Max)
-        external
-        onlyVaultManagerOrHelper
-    {
-        // Validate ranges (must be > 0 and <= 500)
+    function setLeverageTierConfig(
+        uint256 _t1Threshold,
+        uint256 _t2Threshold,
+        uint16 _t1Max,
+        uint16 _t2Max,
+        uint16 _t3Max
+    ) external onlyVaultManagerOrHelper {
+        if (_t1Threshold >= _t2Threshold) revert InvalidParameters();
         if (
-            _tier1Max == 0 || _tier1Max > 500 || _tier2Max == 0 || _tier2Max > 500 || _tier3Max == 0
-                || _tier3Max > 500
+            _t1Max == 0 || _t1Max > 500 || _t2Max == 0 || _t2Max > 500 || _t3Max == 0
+                || _t3Max > 500
         ) {
             revert InvalidParameters();
         }
+        if (_t1Max > _t2Max || _t2Max > _t3Max) revert InvalidParameters();
 
-        // Validate ascending order (larger vaults should have higher or equal leverage)
-        if (_tier1Max > _tier2Max || _tier2Max > _tier3Max) {
-            revert InvalidParameters();
-        }
+        leverageTier1Threshold = _t1Threshold;
+        leverageTier2Threshold = _t2Threshold;
+        tier1MaxLeverage = _t1Max;
+        tier2MaxLeverage = _t2Max;
+        tier3MaxLeverage = _t3Max;
 
-        tier1MaxLeverage = _tier1Max;
-        tier2MaxLeverage = _tier2Max;
-        tier3MaxLeverage = _tier3Max;
-
-        emit LeverageTierMaxValuesUpdated(_tier1Max, _tier2Max, _tier3Max);
+        emit LeverageTierConfigUpdated(_t1Threshold, _t2Threshold, _t1Max, _t2Max, _t3Max);
     }
-
-    /**
-     * @notice Quick setup standard leverage tier system (recommended defaults)
-     * @dev Sets up:
-     *      Launch Phase (< 100K TVL): 100x max
-     *      Growth Phase (100K-500K TVL): 200x max
-     *      Mature Phase (>= 500K TVL): 500x max
-     */
-    function setupStandardLeverageTiers() external onlyVaultManagerOrHelper {
-        leverageTier1Threshold = DEFAULT_LEVERAGE_TIER1_THRESHOLD; // 100K
-        leverageTier2Threshold = DEFAULT_LEVERAGE_TIER2_THRESHOLD; // 500K
-
-        tier1MaxLeverage = DEFAULT_TIER1_MAX_LEVERAGE; // 100x
-        tier2MaxLeverage = DEFAULT_TIER2_MAX_LEVERAGE; // 200x
-        tier3MaxLeverage = DEFAULT_TIER3_MAX_LEVERAGE; // 500x
-
-        emit LeverageTierThresholdsUpdated(
-            DEFAULT_LEVERAGE_TIER1_THRESHOLD, DEFAULT_LEVERAGE_TIER2_THRESHOLD
-        );
-        emit LeverageTierMaxValuesUpdated(
-            DEFAULT_TIER1_MAX_LEVERAGE, DEFAULT_TIER2_MAX_LEVERAGE, DEFAULT_TIER3_MAX_LEVERAGE
-        );
-    }
-
-    // REMOVED: getTotalOICapStatus() - Use VaultViewer.getTotalOICapStatus(vault) instead
-    // REMOVED: getTotalOITierConfig() - Access state variables directly or use VaultViewer
-    // REMOVED: checkTotalOICap() - Use VaultViewer.checkTotalOICap(vault, positionSize) instead
-
-    // REMOVED: simulateTVLChange() - Use VaultViewer.simulateTVLChange(vault, newTVL) instead
-
-    // REMOVED: getTotalOIBreakdown() - Use VaultViewer.getTotalOIBreakdown(vault) instead
-
-    // ========================================================================
-    // MAXIMUM LEVERAGE TIER SYSTEM - VIEW FUNCTIONS (Control Lever 1)
-    // ========================================================================
-
-    // REMOVED: getVaultMaxLeverage() - Use VaultViewer.getVaultMaxLeverage(vault) instead
-    // REMOVED: getEffectiveMaxLeverage() - Use VaultViewer.getEffectiveMaxLeverage(vault) instead
-    // REMOVED: getVaultUtilization() - Use VaultViewer.getVaultUtilization(vault) instead
-
-    // REMOVED: getLeverageTierConfig() - Use VaultViewer.getLeverageTierConfig(vault) instead or access state directly
-    // REMOVED: checkLeverageAllowed() - Use VaultViewer.checkLeverageAllowed(vault, leverage) instead
-    // REMOVED: simulateLeverageAtTVL() - Use VaultViewer.simulateLeverageAtTVL(vault, targetTVL) instead
 
     // ========================================================================
     // FUNDING RATE FUNCTIONS
     // ========================================================================
 
     /**
-     * @notice Update hourly funding rates (called by keeper every hour)
+     * @notice Update hourly funding rates
      * @return newLongRate New cumulative long rate
      * @return newShortRate New cumulative short rate
      * @return imbalanceBps Current imbalance in basis points
      * @return hasCounterparty True if both Long and Short have OI
-     * @dev Can only be called once per hour. If no counterparty exists, rates are updated
-     *      but no actual funding is charged (display only).
+     * @dev H-04 FIX: Permissionless - anyone can call (keeper, user, etc.)
+     *      Can only actually update once per hour (returns early if already updated).
+     *      If counterparty doesn't exist, rates are updated but no actual funding is charged.
+     *      MAX_CATCHUP_HOURS limits impact if updates are missed for extended periods.
      */
     function updateHourlyFunding()
         external
-        onlyAdmin
         returns (
+            // H-04 FIX: Removed onlyAdmin - now permissionless
             int256 newLongRate,
             int256 newShortRate,
             uint256 imbalanceBps,
@@ -2166,8 +2092,17 @@ contract AssetVaultUpgradeable is
         uint256 hoursElapsed = currentHour - lastFundingUpdateHour;
 
         if (hoursElapsed == 0) {
-            // Already updated this hour
+            // Already updated this hour - return early with minimal gas
             return (cumulativeFundingRateLong, cumulativeFundingRateShort, 0, true);
+        }
+
+        // H-04 FIX: Cap hours to limit manipulation impact
+        // If funding updates are missed for extended periods, this prevents
+        // using current imbalance to calculate funding for all missed hours
+        bool wasCapped = false;
+        if (hoursElapsed > MAX_CATCHUP_HOURS) {
+            wasCapped = true;
+            hoursElapsed = MAX_CATCHUP_HOURS;
         }
 
         // Calculate current imbalance
@@ -2184,7 +2119,7 @@ contract AssetVaultUpgradeable is
             (int256 longDelta, int256 shortDelta) =
                 FundingRateLib.calculateHourlyRateDelta(hourlyRateBps, isLongDominant);
 
-            // Apply for each hour elapsed
+            // Apply for each hour elapsed (capped at MAX_CATCHUP_HOURS)
             cumulativeFundingRateLong += longDelta * int256(hoursElapsed);
             cumulativeFundingRateShort += shortDelta * int256(hoursElapsed);
         }
@@ -2206,6 +2141,13 @@ contract AssetVaultUpgradeable is
             block.timestamp
         );
 
+        // H-04 FIX: Emit event if hours were capped
+        if (wasCapped) {
+            emit FundingUpdateCapped(
+                currentHour - lastFundingUpdateHour, MAX_CATCHUP_HOURS, block.timestamp
+            );
+        }
+
         return (newLongRate, newShortRate, imbalanceBps, hasCounterparty);
     }
 
@@ -2224,22 +2166,14 @@ contract AssetVaultUpgradeable is
 
     /**
      * @notice Calculate funding owed by a position
-     * @param entryRateLong Position's entry cumulative long rate
-     * @param entryRateShort Position's entry cumulative short rate
-     * @param positionSize Position size
-     * @param direction Position direction (1 = LONG, 2 = SHORT)
-     * @return fundingOwed Funding amount (positive = owes, negative = receives)
      */
     function calculatePositionFunding(
         int256 entryRateLong,
         int256 entryRateShort,
         uint256 positionSize,
         uint8 direction
-    ) external view returns (int256 fundingOwed) {
-        if (!fundingEnabled) {
-            return 0;
-        }
-
+    ) external view returns (int256) {
+        if (!fundingEnabled) return 0;
         return FundingRateLib.calculatePositionFunding(
             entryRateLong,
             entryRateShort,
@@ -2252,10 +2186,6 @@ contract AssetVaultUpgradeable is
 
     /**
      * @notice Get current hourly funding rate based on imbalance
-     * @return rateBps Funding rate in basis points per hour
-     * @return longsPayShorts True if longs pay shorts
-     * @return imbalanceBps Current imbalance in basis points
-     * @return hasCounterparty True if both sides have OI
      */
     function getCurrentHourlyFundingRate()
         external
@@ -2264,25 +2194,12 @@ contract AssetVaultUpgradeable is
     {
         (imbalanceBps, longsPayShorts, hasCounterparty) =
             FundingRateLib.calculateImbalance(totalLongExposure, totalShortExposure);
-
         rateBps = FundingRateLib.getHourlyRate(imbalanceBps, fundingConfig);
-
-        return (rateBps, longsPayShorts, imbalanceBps, hasCounterparty);
     }
 
-    // REMOVED: getFundingStats() - Use VaultViewer.getFundingStats(vault) instead
-
     /**
-     * @notice Check if position is liquidatable due to funding
-     * @param collateral Position collateral
-     * @param entryRateLong Entry funding rate for long
-     * @param entryRateShort Entry funding rate for short
-     * @param positionSize Position size
-     * @param direction Position direction
-     * @param maintenanceMarginRatio Maintenance margin ratio in bps
-     * @return isLiquidatable True if position should be liquidated
-     * @return fundingOwed Amount of funding owed
-     * @return effectiveCollateral Collateral after funding deduction
+     * @notice Check if position should be liquidated due to funding
+     * @dev Required by PositionManager - cannot be moved to VaultViewer
      */
     function checkFundingLiquidation(
         uint256 collateral,
@@ -2296,11 +2213,8 @@ contract AssetVaultUpgradeable is
         view
         returns (bool isLiquidatable, int256 fundingOwed, uint256 effectiveCollateral)
     {
-        if (!fundingEnabled) {
-            return (false, 0, collateral);
-        }
+        if (!fundingEnabled) return (false, 0, collateral);
 
-        // Calculate funding owed
         fundingOwed = FundingRateLib.calculatePositionFunding(
             entryRateLong,
             entryRateShort,
@@ -2310,20 +2224,13 @@ contract AssetVaultUpgradeable is
             direction
         );
 
-        // Calculate effective collateral
         bool isNegative;
         (effectiveCollateral, isNegative) =
             FundingRateLib.calculateEffectiveCollateral(collateral, fundingOwed);
+        if (isNegative) return (true, fundingOwed, 0);
 
-        if (isNegative) {
-            return (true, fundingOwed, 0);
-        }
-
-        // Check if below maintenance margin
         isLiquidatable =
             FundingRateLib.checkFundingLiquidation(collateral, fundingOwed, maintenanceMarginRatio);
-
-        return (isLiquidatable, fundingOwed, effectiveCollateral);
     }
 
     /**
@@ -2371,28 +2278,10 @@ contract AssetVaultUpgradeable is
         emit FundingEnabledUpdated(enabled);
     }
 
-    // REMOVED: isFundingEnabled() - Use fundingEnabled() directly
-    // REMOVED: estimateFunding() - Use VaultViewer.estimateFunding(vault, ...) instead
-
     /**
-     * @notice Get funding configuration as tuple
-     * @return tier1RateBps Rate for < 20% imbalance
-     * @return tier2RateBps Rate for 20-40% imbalance
-     * @return tier3RateBps Rate for 40-60% imbalance
-     * @return tier4RateBps Rate for 60-80% imbalance
-     * @return tier5RateBps Rate for > 80% imbalance
+     * @notice Get funding configuration
      */
-    function getFundingConfig()
-        external
-        view
-        returns (
-            uint16 tier1RateBps,
-            uint16 tier2RateBps,
-            uint16 tier3RateBps,
-            uint16 tier4RateBps,
-            uint16 tier5RateBps
-        )
-    {
+    function getFundingConfig() external view returns (uint16, uint16, uint16, uint16, uint16) {
         return (
             fundingConfig.tier1RateBps,
             fundingConfig.tier2RateBps,
@@ -2409,4 +2298,3 @@ contract AssetVaultUpgradeable is
         return "2.1.0-with-funding";
     }
 }
-

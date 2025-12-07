@@ -74,7 +74,7 @@ contract TreasuryAndFeesTest is BaseTest {
         uint16 newFee = 100; // 1%
 
         vm.prank(owner);
-        assetVault.setStakingFeeBps(newFee);
+        assetVault.setFee(0, newFee); // staking fee type = 0
 
         assertEq(assetVault.stakingFeeBps(), newFee, "Staking fee should be updated");
     }
@@ -83,14 +83,14 @@ contract TreasuryAndFeesTest is BaseTest {
         // Max is 10% (1000 bps)
         vm.expectRevert(abi.encodeWithSelector(AssetVaultUpgradeable.InvalidParameters.selector));
         vm.prank(owner);
-        assetVault.setStakingFeeBps(1001);
+        assetVault.setFee(0, 1001);
     }
 
     function test_SetEarlyWithdrawalFeeBps_Success() public {
         uint16 newFee = 500; // 5%
 
         vm.prank(owner);
-        assetVault.setEarlyWithdrawalFeeBps(newFee);
+        assetVault.setFee(1, newFee); // earlyWithdrawal fee type = 1
 
         assertEq(
             assetVault.earlyWithdrawalFeeBps(), newFee, "Early withdrawal fee should be updated"
@@ -101,14 +101,14 @@ contract TreasuryAndFeesTest is BaseTest {
         // Max is 50% (5000 bps)
         vm.expectRevert(abi.encodeWithSelector(AssetVaultUpgradeable.InvalidParameters.selector));
         vm.prank(owner);
-        assetVault.setEarlyWithdrawalFeeBps(5001);
+        assetVault.setFee(1, 5001);
     }
 
     function test_SetOpenPositionFeeBps_Success() public {
         uint16 newFee = 10; // 0.1%
 
         vm.prank(owner);
-        assetVault.setOpenPositionFeeBps(newFee);
+        assetVault.setFee(2, newFee); // openPosition fee type = 2
 
         assertEq(assetVault.openPositionFeeBps(), newFee, "Open position fee should be updated");
     }
@@ -117,14 +117,14 @@ contract TreasuryAndFeesTest is BaseTest {
         // Max is 10% (1000 bps)
         vm.expectRevert(abi.encodeWithSelector(AssetVaultUpgradeable.InvalidParameters.selector));
         vm.prank(owner);
-        assetVault.setOpenPositionFeeBps(1001);
+        assetVault.setFee(2, 1001);
     }
 
     function test_SetClosePositionFeeBps_Success() public {
         uint16 newFee = 10; // 0.1%
 
         vm.prank(owner);
-        assetVault.setClosePositionFeeBps(newFee);
+        assetVault.setFee(3, newFee); // closePosition fee type = 3
 
         assertEq(assetVault.closePositionFeeBps(), newFee, "Close position fee should be updated");
     }
@@ -133,7 +133,7 @@ contract TreasuryAndFeesTest is BaseTest {
         // Max is 10% (1000 bps)
         vm.expectRevert(abi.encodeWithSelector(AssetVaultUpgradeable.InvalidParameters.selector));
         vm.prank(owner);
-        assetVault.setClosePositionFeeBps(1001);
+        assetVault.setFee(3, 1001);
     }
 
     // ========================================================================
@@ -291,7 +291,7 @@ contract TreasuryAndFeesTest is BaseTest {
     function test_MultipleFeeTypes_AccumulateCorrectly() public {
         // Set higher staking fee for testing
         vm.prank(owner);
-        assetVault.setStakingFeeBps(500); // 5%
+        assetVault.setFee(0, 500); // 5%
 
         uint256 stakingAmount = 100 ether;
         uint256 expectedStakingFee = (stakingAmount * 500) / 10_000; // 5 ether
@@ -315,7 +315,7 @@ contract TreasuryAndFeesTest is BaseTest {
         fee = uint16(bound(fee, 0, 1000)); // Max 10%
 
         vm.prank(owner);
-        assetVault.setStakingFeeBps(fee);
+        assetVault.setFee(0, fee);
 
         assertEq(assetVault.stakingFeeBps(), fee);
     }
@@ -324,7 +324,7 @@ contract TreasuryAndFeesTest is BaseTest {
         fee = uint16(bound(fee, 0, 5000)); // Max 50%
 
         vm.prank(owner);
-        assetVault.setEarlyWithdrawalFeeBps(fee);
+        assetVault.setFee(1, fee);
 
         assertEq(assetVault.earlyWithdrawalFeeBps(), fee);
     }

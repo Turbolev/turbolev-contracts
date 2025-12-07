@@ -179,8 +179,6 @@ interface IAssetVault {
      */
     function paused() external view returns (bool);
 
-    // DEPRECATED: setUpgradeManager removed in V2
-
     // ========================================================================
     // FEE-RELATED FUNCTIONS
     // ========================================================================
@@ -647,6 +645,11 @@ interface IAssetVault {
     function lastFundingUpdateTime() external view returns (uint256);
 
     /**
+     * @notice Check if funding rate is enabled
+     */
+    function fundingEnabled() external view returns (bool);
+
+    /**
      * @notice Get cumulative funding rate for longs
      */
     function cumulativeFundingRateLong() external view returns (int256);
@@ -660,4 +663,28 @@ interface IAssetVault {
      * @notice Get claimable rewards for a user
      */
     function claimableRewards(address user) external view returns (uint256);
+
+    // ========================================================================
+    // LP ARRAY STATE GETTERS (for VaultViewer)
+    // ========================================================================
+
+    /**
+     * @notice Get LP address at index (auto-generated from public array)
+     */
+    function vaultLPs(uint256 index) external view returns (address);
+
+    /**
+     * @notice Get LP index (1-based) for address (auto-generated from public mapping)
+     */
+    function lpIndex(address lp) external view returns (uint256);
+
+    /**
+     * @notice Get pending payout queue item at index
+     */
+    function pendingPayoutQueue(uint256 index) external view returns (uint64);
+
+    /**
+     * @notice Get queue start index
+     */
+    function queueStartIndex() external view returns (uint256);
 }

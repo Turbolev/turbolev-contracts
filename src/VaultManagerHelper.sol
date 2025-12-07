@@ -81,6 +81,7 @@ contract VaultManagerHelper {
     error InvalidAddress();
     error VaultNotFound();
     error NotAuthorized();
+    error VaultNotActive(); // H-01 FIX: Error for deactivated vaults
     error DirectTransferNotAllowed();
 
     // ========================================================================
@@ -124,6 +125,11 @@ contract VaultManagerHelper {
         // Check if msg.sender is a valid vault
         address vault = IVaultManager(vaultManager).getVault(IAssetVault(msg.sender).projectToken());
         if (vault != msg.sender) revert NotAuthorized();
+
+        // H-01 FIX: Check if vault is active
+        // Deactivated vaults should not be able to emit events
+        IVaultManager.VaultInfo memory info = IVaultManager(vaultManager).getVaultInfo(msg.sender);
+        if (!info.isActive) revert VaultNotActive();
         _;
     }
 
@@ -702,5 +708,279 @@ contract VaultManagerHelper {
                 continue;
             }
         }
+    }
+
+    // ========================================================================
+    // VAULT HEALTH METRICS
+    // ========================================================================
+
+    /**
+     * @notice Vault health metrics struct
+     */
+    struct VaultHealthMetrics {
+        address vault;
+        address projectToken;
+        uint256 totalLiquidity;
+        uint256 totalShares;
+        uint256 totalLongExposure;
+        uint256 totalShortExposure;
+        uint256 netExposure;
+        uint256 utilizationBps; // Net exposure / Total liquidity * 10000
+        uint256 pendingPayoutsCount;
+        uint256 pendingPayoutsValue;
+        bool isPaused;
+        bool isActive;
+        bool isFundingEnabled;
+        uint256 healthScore; // 0-10000 (higher is healthier)
+    }
+
+    /**
+     * @notice Get health metrics for a specific vault
+     * @param tokenAddress Project token address
+     * @return metrics VaultHealthMetrics struct
+     */
+    function getVaultHealthMetrics(address tokenAddress)
+        external
+        view
+        returns (VaultHealthMetrics memory metrics)
+    {
+        address vaultAddress = IVaultManager(vaultManager).getVault(tokenAddress);
+        if (vaultAddress == address(0)) revert VaultNotFound();
+
+        return _getVaultHealthMetrics(vaultAddress);
+    }
+
+    /**
+     * @notice Get health metrics for all vaults
+     * @return allMetrics Array of VaultHealthMetrics
+     */
+    function getAllVaultsHealthMetrics()
+        external
+        view
+        returns (VaultHealthMetrics[] memory allMetrics)
+    {
+        address[] memory vaults = IVaultManager(vaultManager).getAllVaults();
+        allMetrics = new VaultHealthMetrics[](vaults.length);
+
+        for (uint256 i = 0; i < vaults.length; i++) {
+            allMetrics[i] = _getVaultHealthMetrics(vaults[i]);
+        }
+
+        return allMetrics;
+    }
+
+    /**
+     * @notice Get aggregated health metrics across all vaults
+     * @return totalLiquidity Total liquidity across all vaults
+     * @return totalLongExposure Total long exposure across all vaults
+     * @return totalShortExposure Total short exposure across all vaults
+     * @return totalNetExposure Total net exposure across all vaults
+     * @return avgUtilizationBps Average utilization in bps
+     * @return avgHealthScore Average health score (0-10000)
+     * @return pausedVaultsCount Number of paused vaults
+     * @return unhealthyVaultsCount Number of vaults with health score < 5000
+     */
+    function getAggregatedHealthMetrics()
+        external
+        view
+        returns (
+            uint256 totalLiquidity,
+            uint256 totalLongExposure,
+            uint256 totalShortExposure,
+            uint256 totalNetExposure,
+            uint256 avgUtilizationBps,
+            uint256 avgHealthScore,
+            uint256 pausedVaultsCount,
+            uint256 unhealthyVaultsCount
+        )
+    {
+        address[] memory vaults = IVaultManager(vaultManager).getAllVaults();
+        uint256 totalUtilization = 0;
+        uint256 totalHealthScore = 0;
+        uint256 activeVaultsCount = 0;
+
+        for (uint256 i = 0; i < vaults.length; i++) {
+            VaultHealthMetrics memory metrics = _getVaultHealthMetrics(vaults[i]);
+
+            totalLiquidity += metrics.totalLiquidity;
+            totalLongExposure += metrics.totalLongExposure;
+            totalShortExposure += metrics.totalShortExposure;
+            totalNetExposure += metrics.netExposure;
+            totalUtilization += metrics.utilizationBps;
+            totalHealthScore += metrics.healthScore;
+
+            if (metrics.isPaused) {
+                pausedVaultsCount++;
+            }
+
+            if (metrics.healthScore < 5000) {
+                unhealthyVaultsCount++;
+            }
+
+            if (metrics.isActive) {
+                activeVaultsCount++;
+            }
+        }
+
+        // Calculate averages
+        if (activeVaultsCount > 0) {
+            avgUtilizationBps = totalUtilization / activeVaultsCount;
+            avgHealthScore = totalHealthScore / activeVaultsCount;
+        }
+
+        return (
+            totalLiquidity,
+            totalLongExposure,
+            totalShortExposure,
+            totalNetExposure,
+            avgUtilizationBps,
+            avgHealthScore,
+            pausedVaultsCount,
+            unhealthyVaultsCount
+        );
+    }
+
+    /**
+     * @notice Internal function to get health metrics for a vault
+     * @param vaultAddress Vault address
+     * @return metrics VaultHealthMetrics struct
+     */
+    function _getVaultHealthMetrics(address vaultAddress)
+        internal
+        view
+        returns (VaultHealthMetrics memory metrics)
+    {
+        IAssetVault vault = IAssetVault(vaultAddress);
+        IVaultManager.VaultInfo memory managerInfo =
+            IVaultManager(vaultManager).getVaultInfo(vaultAddress);
+
+        metrics.vault = vaultAddress;
+        metrics.projectToken = managerInfo.projectToken;
+        metrics.isActive = managerInfo.isActive;
+
+        // Get vault info
+        try vault.getVaultInfo() returns (IAssetVault.VaultInfo memory info) {
+            metrics.totalLiquidity = info.totalLiquidity;
+            metrics.totalShares = info.totalShares;
+            metrics.pendingPayoutsCount = info.pendingPositions;
+        } catch {
+            // Default values
+        }
+        // Get exposure data
+        try vault.getDirectionalExposure() returns (
+            uint256 longExp, uint256 shortExp, uint256 netExp, uint256, uint256, bool
+        ) {
+            metrics.totalLongExposure = longExp;
+            metrics.totalShortExposure = shortExp;
+            metrics.netExposure = netExp;
+
+            // Calculate utilization
+            if (metrics.totalLiquidity > 0) {
+                metrics.utilizationBps = (netExp * 10_000) / metrics.totalLiquidity;
+            }
+        } catch {
+            // Default values
+        }
+        // Get pending payouts value
+        try vault.getPendingPayoutQueue() returns (uint64[] memory queue) {
+            for (uint256 i = 0; i < queue.length; i++) {
+                try vault.positionPayouts(queue[i]) returns (uint256 amount) {
+                    metrics.pendingPayoutsValue += amount;
+                } catch {
+                    continue;
+                }
+            }
+        } catch {
+            // Default values
+        }
+        // Check if paused
+        try vault.paused() returns (bool isPaused) {
+            metrics.isPaused = isPaused;
+        } catch {
+            // Default false
+        }
+        // Check funding enabled
+        try vault.isFundingEnabled() returns (bool enabled) {
+            metrics.isFundingEnabled = enabled;
+        } catch {
+            // Default false
+        }
+        // Calculate health score (0-10000)
+        // Factors:
+        // 1. Utilization (lower is better) - 40% weight
+        // 2. Liquidity vs Pending Payouts (higher ratio is better) - 30% weight
+        // 3. Exposure balance (more balanced is better) - 20% weight
+        // 4. Active & not paused - 10% weight
+        metrics.healthScore = _calculateHealthScore(metrics);
+
+        return metrics;
+    }
+
+    /**
+     * @notice Calculate health score for a vault (0-10000)
+     * @param metrics Vault health metrics
+     * @return score Health score
+     */
+    function _calculateHealthScore(VaultHealthMetrics memory metrics)
+        internal
+        pure
+        returns (uint256 score)
+    {
+        uint256 utilizationScore = 0;
+        uint256 liquidityScore = 0;
+        uint256 balanceScore = 0;
+        uint256 statusScore = 0;
+
+        // 1. Utilization score (40% weight) - lower utilization = higher score
+        // 0% utilization = 4000 points, 100% utilization = 0 points
+        if (metrics.utilizationBps <= 10_000) {
+            utilizationScore = 4000 - ((metrics.utilizationBps * 4000) / 10_000);
+        }
+
+        // 2. Liquidity vs Pending Payouts score (30% weight)
+        // If liquidity >= 2x pending payouts = 3000 points
+        if (metrics.totalLiquidity > 0) {
+            if (metrics.pendingPayoutsValue == 0) {
+                liquidityScore = 3000;
+            } else {
+                uint256 ratio = (metrics.totalLiquidity * 10_000) / metrics.pendingPayoutsValue;
+                if (ratio >= 20_000) {
+                    liquidityScore = 3000; // 2x or more = full score
+                } else if (ratio >= 10_000) {
+                    liquidityScore = 2000; // 1x-2x = partial score
+                } else {
+                    liquidityScore = (ratio * 2000) / 10_000; // < 1x = proportional
+                }
+            }
+        }
+
+        // 3. Exposure balance score (20% weight)
+        // More balanced Long/Short = higher score
+        uint256 totalExposure = metrics.totalLongExposure + metrics.totalShortExposure;
+        if (totalExposure > 0) {
+            // Calculate imbalance ratio
+            uint256 imbalanceBps = (metrics.netExposure * 10_000) / totalExposure;
+            // 0% imbalance = 2000 points, 100% imbalance = 0 points
+            balanceScore = 2000 - ((imbalanceBps * 2000) / 10_000);
+        } else {
+            balanceScore = 2000; // No exposure = balanced
+        }
+
+        // 4. Status score (10% weight)
+        // Active and not paused = 1000 points
+        if (metrics.isActive && !metrics.isPaused) {
+            statusScore = 1000;
+        } else if (metrics.isActive) {
+            statusScore = 500; // Active but paused
+        }
+
+        score = utilizationScore + liquidityScore + balanceScore + statusScore;
+
+        // Cap at 10000
+        if (score > 10_000) {
+            score = 10_000;
+        }
+
+        return score;
     }
 }

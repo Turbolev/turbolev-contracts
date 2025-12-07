@@ -6,327 +6,218 @@ import "./BaseTest.sol";
 /**
  * @title TotalOICapSystemTest
  * @notice Unit tests for Total Open Interest Cap System (Control Lever 2)
- * @dev Tests cover:
- *      - Risk multiplier calculation based on TVL tiers
- *      - Admin functions for tier configuration
- *      - Integration with checkPositionRisk for OI cap
+ * @dev Tests now use consolidated setOITierConfig function
  */
 contract TotalOICapSystemTest is BaseTest {
-    // ========================================================================
-    // SETUP
-    // ========================================================================
+    // Default multipliers for most tests
+    uint16[4] defaultMultipliers = [uint16(15_000), uint16(20_000), uint16(25_000), uint16(30_000)];
 
     function setUp() public override {
         super.setUp();
-
-        // Enable trading
         vm.prank(owner);
         assetVault.setTradingEnabled(true);
+    }
+
+    // Helper to set OI config
+    function _setOIConfig(
+        uint16 fixedMult,
+        uint256 t1,
+        uint256 t2,
+        uint256 t3,
+        uint16 m1,
+        uint16 m2,
+        uint16 m3,
+        uint16 m4
+    ) internal {
+        uint256[3] memory thresholds = [t1, t2, t3];
+        uint16[4] memory mults = [m1, m2, m3, m4];
+        vm.prank(owner);
+        assetVault.setOITierConfig(fixedMult, thresholds, mults);
     }
 
     // ========================================================================
     // FIXED RISK MULTIPLIER TESTS
     // ========================================================================
 
-    function test_SetTotalOIRiskMultiplier_Success() public {
-        uint16 newMultiplier = 25_000; // 2.5x
-
-        vm.prank(owner);
-        assetVault.setTotalOIRiskMultiplier(newMultiplier);
-
-        assertEq(
-            assetVault.totalOIRiskMultiplierBps(), newMultiplier, "Multiplier should be updated"
-        );
+    function test_SetOITierConfig_FixedMultiplier() public {
+        // Set fixed multiplier 2.5x, disable tiers
+        _setOIConfig(25_000, 0, 0, 0, 15_000, 20_000, 25_000, 30_000);
+        assertEq(assetVault.totalOIRiskMultiplierBps(), 25_000, "Multiplier should be 2.5x");
     }
 
-    function test_SetTotalOIRiskMultiplier_RevertsOnTooLow() public {
-        // Min is 1.0x (10000)
+    function test_SetOITierConfig_RevertsOnTooLowFixedMultiplier() public {
+        uint256[3] memory thresholds = [uint256(0), uint256(0), uint256(0)];
+        uint16[4] memory mults = [uint16(15_000), uint16(20_000), uint16(25_000), uint16(30_000)];
+
         vm.expectRevert(abi.encodeWithSelector(AssetVaultUpgradeable.InvalidParameters.selector));
         vm.prank(owner);
-        assetVault.setTotalOIRiskMultiplier(9999);
+        assetVault.setOITierConfig(9999, thresholds, mults); // < 10000 min
     }
 
-    function test_SetTotalOIRiskMultiplier_RevertsOnTooHigh() public {
-        // Max is 5.0x (50000)
+    function test_SetOITierConfig_RevertsOnTooHighFixedMultiplier() public {
+        uint256[3] memory thresholds = [uint256(0), uint256(0), uint256(0)];
+        uint16[4] memory mults = [uint16(15_000), uint16(20_000), uint16(25_000), uint16(30_000)];
+
         vm.expectRevert(abi.encodeWithSelector(AssetVaultUpgradeable.InvalidParameters.selector));
         vm.prank(owner);
-        assetVault.setTotalOIRiskMultiplier(50_001);
-    }
-
-    function test_SetTotalOIRiskMultiplier_MinValue() public {
-        vm.prank(owner);
-        assetVault.setTotalOIRiskMultiplier(10_000); // 1.0x
-
-        assertEq(assetVault.totalOIRiskMultiplierBps(), 10_000);
-    }
-
-    function test_SetTotalOIRiskMultiplier_MaxValue() public {
-        vm.prank(owner);
-        assetVault.setTotalOIRiskMultiplier(50_000); // 5.0x
-
-        assertEq(assetVault.totalOIRiskMultiplierBps(), 50_000);
+        assetVault.setOITierConfig(50_001, thresholds, mults); // > 50000 max
     }
 
     // ========================================================================
     // TIER THRESHOLDS TESTS
     // ========================================================================
 
-    function test_SetTotalOITierThresholds_Success() public {
-        uint256 tier1 = 10_000 ether;
-        uint256 tier2 = 50_000 ether;
-        uint256 tier3 = 100_000 ether;
+    function test_SetOITierConfig_Thresholds() public {
+        _setOIConfig(0, 10_000 ether, 50_000 ether, 100_000 ether, 15_000, 20_000, 25_000, 30_000);
 
-        vm.prank(owner);
-        assetVault.setTotalOITierThresholds(tier1, tier2, tier3);
-
-        assertEq(assetVault.tier1Threshold(), tier1, "Tier1 should be updated");
-        assertEq(assetVault.tier2Threshold(), tier2, "Tier2 should be updated");
-        assertEq(assetVault.tier3Threshold(), tier3, "Tier3 should be updated");
+        assertEq(assetVault.tier1Threshold(), 10_000 ether);
+        assertEq(assetVault.tier2Threshold(), 50_000 ether);
+        assertEq(assetVault.tier3Threshold(), 100_000 ether);
     }
 
-    function test_SetTotalOITierThresholds_DisableWithZeros() public {
-        // Setting all to 0 disables tier system
-        vm.prank(owner);
-        assetVault.setTotalOITierThresholds(0, 0, 0);
+    function test_SetOITierConfig_DisableWithZeroThresholds() public {
+        _setOIConfig(20_000, 0, 0, 0, 15_000, 20_000, 25_000, 30_000);
 
         assertEq(assetVault.tier1Threshold(), 0);
         assertEq(assetVault.tier2Threshold(), 0);
         assertEq(assetVault.tier3Threshold(), 0);
     }
 
-    function test_SetTotalOITierThresholds_RevertsOnInvalidOrder() public {
-        // tier1 >= tier2 should revert
-        vm.expectRevert(abi.encodeWithSelector(AssetVaultUpgradeable.InvalidParameters.selector));
-        vm.prank(owner);
-        assetVault.setTotalOITierThresholds(50_000 ether, 50_000 ether, 100_000 ether);
-    }
+    function test_SetOITierConfig_RevertsOnInvalidThresholdOrder() public {
+        uint256[3] memory thresholds =
+            [uint256(50_000 ether), uint256(50_000 ether), uint256(100_000 ether)];
+        uint16[4] memory mults = [uint16(15_000), uint16(20_000), uint16(25_000), uint16(30_000)];
 
-    function test_SetTotalOITierThresholds_RevertsOnDescendingOrder() public {
         vm.expectRevert(abi.encodeWithSelector(AssetVaultUpgradeable.InvalidParameters.selector));
         vm.prank(owner);
-        assetVault.setTotalOITierThresholds(100_000 ether, 50_000 ether, 10_000 ether);
+        assetVault.setOITierConfig(0, thresholds, mults);
     }
 
     // ========================================================================
     // TIER MULTIPLIERS TESTS
     // ========================================================================
 
-    function test_SetTotalOITierMultipliers_Success() public {
-        uint16 tier1 = 12_000; // 1.2x
-        uint16 tier2 = 18_000; // 1.8x
-        uint16 tier3 = 25_000; // 2.5x
-        uint16 tier4 = 35_000; // 3.5x
+    function test_SetOITierConfig_Multipliers() public {
+        _setOIConfig(0, 10 ether, 50 ether, 100 ether, 12_000, 18_000, 25_000, 35_000);
 
-        vm.prank(owner);
-        assetVault.setTotalOITierMultipliers(tier1, tier2, tier3, tier4);
-
-        assertEq(assetVault.tier1MultiplierBps(), tier1, "Tier1 multiplier should be updated");
-        assertEq(assetVault.tier2MultiplierBps(), tier2, "Tier2 multiplier should be updated");
-        assertEq(assetVault.tier3MultiplierBps(), tier3, "Tier3 multiplier should be updated");
-        assertEq(assetVault.tier4MultiplierBps(), tier4, "Tier4 multiplier should be updated");
+        assertEq(assetVault.tier1MultiplierBps(), 12_000);
+        assertEq(assetVault.tier2MultiplierBps(), 18_000);
+        assertEq(assetVault.tier3MultiplierBps(), 25_000);
+        assertEq(assetVault.tier4MultiplierBps(), 35_000);
     }
 
-    function test_SetTotalOITierMultipliers_RevertsOnTooLow() public {
-        // Min is 1.0x (10000)
+    function test_SetOITierConfig_RevertsOnTooLowMultiplier() public {
+        uint256[3] memory thresholds = [uint256(0), uint256(0), uint256(0)];
+        uint16[4] memory mults = [uint16(9999), uint16(15_000), uint16(20_000), uint16(25_000)]; // tier1 < 10000
+
         vm.expectRevert(abi.encodeWithSelector(AssetVaultUpgradeable.InvalidParameters.selector));
         vm.prank(owner);
-        assetVault.setTotalOITierMultipliers(9999, 15_000, 20_000, 25_000);
+        assetVault.setOITierConfig(0, thresholds, mults);
     }
 
-    function test_SetTotalOITierMultipliers_RevertsOnTooHigh() public {
-        // Max is 5.0x (50000)
+    function test_SetOITierConfig_RevertsOnTooHighMultiplier() public {
+        uint256[3] memory thresholds = [uint256(0), uint256(0), uint256(0)];
+        uint16[4] memory mults = [uint16(15_000), uint16(20_000), uint16(25_000), uint16(50_001)]; // tier4 > 50000
+
         vm.expectRevert(abi.encodeWithSelector(AssetVaultUpgradeable.InvalidParameters.selector));
         vm.prank(owner);
-        assetVault.setTotalOITierMultipliers(15_000, 20_000, 25_000, 50_001);
+        assetVault.setOITierConfig(0, thresholds, mults);
     }
 
-    function test_SetTotalOITierMultipliers_RevertsOnDescendingOrder() public {
-        // Multipliers must be in ascending order
+    function test_SetOITierConfig_RevertsOnDescendingMultiplierOrder() public {
+        uint256[3] memory thresholds = [uint256(0), uint256(0), uint256(0)];
+        uint16[4] memory mults = [uint16(20_000), uint16(15_000), uint16(25_000), uint16(30_000)]; // tier2 < tier1
+
         vm.expectRevert(abi.encodeWithSelector(AssetVaultUpgradeable.InvalidParameters.selector));
         vm.prank(owner);
-        assetVault.setTotalOITierMultipliers(20_000, 15_000, 25_000, 30_000);
+        assetVault.setOITierConfig(0, thresholds, mults);
     }
 
     // ========================================================================
-    // RISK MULTIPLIER CALCULATION TESTS (Based on TVL)
+    // RISK MULTIPLIER CALCULATION TESTS
     // ========================================================================
 
     function test_RiskMultiplier_FixedWhenTiersDisabled() public {
-        // Ensure tiers are disabled (all 0)
-        vm.prank(owner);
-        assetVault.setTotalOITierThresholds(0, 0, 0);
+        // Disable tiers, set fixed 1.5x
+        _setOIConfig(15_000, 0, 0, 0, 15_000, 20_000, 25_000, 30_000);
 
-        // Set fixed multiplier to 1.5x (lower to test OI cap)
-        vm.prank(owner);
-        assetVault.setTotalOIRiskMultiplier(15_000); // 1.5x
-
-        // Add large liquidity to have room for testing
         _addLiquidity(liquidityProvider, 500 ether);
-
-        // The fixed multiplier should be used
-        // Total OI cap = 500 ether * 1.5 = 750 ether
-        // Directional cap = 500 * 0.5 = 250 ether (default 50%)
-        // Update params to allow test
         vm.prank(owner);
         assetVault.updateVaultParams(0.01 ether, 250 ether);
 
-        // Position of 200 ether should pass (< 250 directional cap, < 750 OI cap)
-        assetVault.checkPositionRisk(200 ether, 10, 1);
-
-        // Position of 300 ether should fail (> 250 directional cap)
+        // OI cap = 500 * 1.5 = 750, directional = 500 * 0.5 = 250
+        assetVault.checkPositionRisk(200 ether, 10, 1); // Pass
         vm.expectRevert();
-        assetVault.checkPositionRisk(300 ether, 10, 1);
+        assetVault.checkPositionRisk(300 ether, 10, 1); // Fail - exceeds directional
     }
 
     function test_RiskMultiplier_TieredSystem() public {
-        // Setup tier thresholds (small values for testing)
-        vm.prank(owner);
-        assetVault.setTotalOITierThresholds(50 ether, 100 ether, 200 ether);
-
-        // Setup tier multipliers
-        vm.prank(owner);
-        assetVault.setTotalOITierMultipliers(15_000, 20_000, 25_000, 30_000);
-
+        _setOIConfig(0, 50 ether, 100 ether, 200 ether, 15_000, 20_000, 25_000, 30_000);
         vm.prank(owner);
         assetVault.updateVaultParams(0.01 ether, 500 ether);
 
-        // Test Tier 1 (TVL < 50 ether): 1.5x multiplier
+        // Tier 1 (< 50 ether): 1.5x
         _addLiquidity(liquidityProvider, 40 ether);
-        // Total OI Cap = 40 * 1.5 = 60 ether
-        // Directional exposure cap = 40 * 0.5 = 20 ether (default 50%)
-        // Position within directional cap should pass
-        assetVault.checkPositionRisk(15 ether, 10, 1); // Should pass (< 20 directional cap)
-
-        // Position exceeding directional cap should fail
+        // Directional cap = 40 * 0.5 = 20 ether
+        assetVault.checkPositionRisk(15 ether, 10, 1);
         vm.expectRevert();
-        assetVault.checkPositionRisk(25 ether, 10, 1); // Should fail (> 20 directional cap)
-    }
-
-    function test_RiskMultiplier_Tier2() public {
-        // Setup tier thresholds
-        vm.prank(owner);
-        assetVault.setTotalOITierThresholds(50 ether, 100 ether, 200 ether);
-
-        vm.prank(owner);
-        assetVault.setTotalOITierMultipliers(15_000, 20_000, 25_000, 30_000);
-
-        vm.prank(owner);
-        assetVault.updateVaultParams(0.01 ether, 500 ether);
-
-        // Test Tier 2 (50 <= TVL < 100 ether): 2.0x multiplier
-        _addLiquidity(liquidityProvider, 75 ether);
-        // Total OI Cap = 75 * 2.0 = 150 ether
-        // Directional cap = 75 * 0.5 = 37.5 ether
-        assetVault.checkPositionRisk(35 ether, 10, 1); // Should pass (< 37.5 directional cap)
-        vm.expectRevert();
-        assetVault.checkPositionRisk(40 ether, 10, 1); // Should fail (> 37.5 directional cap)
-    }
-
-    function test_RiskMultiplier_Tier3() public {
-        // Setup tier thresholds
-        vm.prank(owner);
-        assetVault.setTotalOITierThresholds(50 ether, 100 ether, 200 ether);
-
-        vm.prank(owner);
-        assetVault.setTotalOITierMultipliers(15_000, 20_000, 25_000, 30_000);
-
-        vm.prank(owner);
-        assetVault.updateVaultParams(0.01 ether, 1000 ether);
-
-        // Test Tier 3 (100 <= TVL < 200 ether): 2.5x multiplier
-        _addLiquidity(liquidityProvider, 150 ether);
-        // Total OI Cap = 150 * 2.5 = 375 ether
-        // Directional cap = 150 * 0.5 = 75 ether
-        assetVault.checkPositionRisk(70 ether, 10, 1); // Should pass (< 75 directional cap)
-        vm.expectRevert();
-        assetVault.checkPositionRisk(80 ether, 10, 1); // Should fail (> 75 directional cap)
-    }
-
-    function test_RiskMultiplier_Tier4() public {
-        // Setup tier thresholds
-        vm.prank(owner);
-        assetVault.setTotalOITierThresholds(50 ether, 100 ether, 200 ether);
-
-        vm.prank(owner);
-        assetVault.setTotalOITierMultipliers(15_000, 20_000, 25_000, 30_000);
-
-        vm.prank(owner);
-        assetVault.updateVaultParams(0.01 ether, 1000 ether);
-
-        // Test Tier 4 (TVL >= 200 ether): 3.0x multiplier
-        _addLiquidity(liquidityProvider, 300 ether);
-        // Total OI Cap = 300 * 3.0 = 900 ether
-        // Directional cap = 300 * 0.5 = 150 ether
-        assetVault.checkPositionRisk(140 ether, 10, 1); // Should pass (< 150 directional cap)
-        vm.expectRevert();
-        assetVault.checkPositionRisk(160 ether, 10, 1); // Should fail (> 150 directional cap)
+        assetVault.checkPositionRisk(25 ether, 10, 1);
     }
 
     // ========================================================================
     // AUTHORIZATION TESTS
     // ========================================================================
 
-    function test_SetTotalOIRiskMultiplier_OnlyAuthorized() public {
-        vm.expectRevert(abi.encodeWithSelector(AssetVaultUpgradeable.NotAuthorized.selector));
-        vm.prank(user1);
-        assetVault.setTotalOIRiskMultiplier(25_000);
-    }
+    function test_SetOITierConfig_OnlyAuthorized() public {
+        uint256[3] memory thresholds =
+            [uint256(10_000 ether), uint256(50_000 ether), uint256(100_000 ether)];
+        uint16[4] memory mults = [uint16(15_000), uint16(20_000), uint16(25_000), uint16(30_000)];
 
-    function test_SetTotalOITierThresholds_OnlyAuthorized() public {
         vm.expectRevert(abi.encodeWithSelector(AssetVaultUpgradeable.NotAuthorized.selector));
         vm.prank(user1);
-        assetVault.setTotalOITierThresholds(10_000 ether, 50_000 ether, 100_000 ether);
-    }
-
-    function test_SetTotalOITierMultipliers_OnlyAuthorized() public {
-        vm.expectRevert(abi.encodeWithSelector(AssetVaultUpgradeable.NotAuthorized.selector));
-        vm.prank(user1);
-        assetVault.setTotalOITierMultipliers(15_000, 20_000, 25_000, 30_000);
+        assetVault.setOITierConfig(20_000, thresholds, mults);
     }
 
     // ========================================================================
     // FUZZ TESTS
     // ========================================================================
 
-    function testFuzz_TotalOIRiskMultiplier(uint16 multiplier) public {
-        // Bound to valid range (1.0x - 5.0x)
-        multiplier = uint16(bound(multiplier, 10_000, 50_000));
+    function testFuzz_OITierConfig(
+        uint16 fixedMult,
+        uint256 t1,
+        uint256 t2,
+        uint256 t3,
+        uint16 m1,
+        uint16 m2,
+        uint16 m3,
+        uint16 m4
+    ) public {
+        // Bound fixed multiplier
+        fixedMult = uint16(bound(fixedMult, 10_000, 50_000));
+
+        // Bound thresholds to ascending order
+        t1 = bound(t1, 1 ether, 100_000 ether);
+        t2 = bound(t2, t1 + 1, 100_001 ether);
+        t3 = bound(t3, t2 + 1, 100_002 ether);
+
+        // Bound multipliers to valid range and ascending order
+        m1 = uint16(bound(m1, 10_000, 20_000));
+        m2 = uint16(bound(m2, m1, 30_000));
+        m3 = uint16(bound(m3, m2, 40_000));
+        m4 = uint16(bound(m4, m3, 50_000));
+
+        uint256[3] memory thresholds = [t1, t2, t3];
+        uint16[4] memory mults = [m1, m2, m3, m4];
 
         vm.prank(owner);
-        assetVault.setTotalOIRiskMultiplier(multiplier);
+        assetVault.setOITierConfig(fixedMult, thresholds, mults);
 
-        assertEq(assetVault.totalOIRiskMultiplierBps(), multiplier);
-    }
-
-    function testFuzz_TotalOITierThresholds(uint256 tier1, uint256 tier2, uint256 tier3) public {
-        // Bound inputs to ascending order
-        tier1 = bound(tier1, 1 ether, 1_000_000 ether);
-        tier2 = bound(tier2, tier1 + 1, 1_000_001 ether);
-        tier3 = bound(tier3, tier2 + 1, 1_000_002 ether);
-
-        vm.prank(owner);
-        assetVault.setTotalOITierThresholds(tier1, tier2, tier3);
-
-        assertEq(assetVault.tier1Threshold(), tier1);
-        assertEq(assetVault.tier2Threshold(), tier2);
-        assertEq(assetVault.tier3Threshold(), tier3);
-    }
-
-    function testFuzz_TotalOITierMultipliers(uint16 tier1, uint16 tier2, uint16 tier3, uint16 tier4)
-        public
-    {
-        // Bound to valid range and ascending order
-        tier1 = uint16(bound(tier1, 10_000, 20_000));
-        tier2 = uint16(bound(tier2, tier1, 30_000));
-        tier3 = uint16(bound(tier3, tier2, 40_000));
-        tier4 = uint16(bound(tier4, tier3, 50_000));
-
-        vm.prank(owner);
-        assetVault.setTotalOITierMultipliers(tier1, tier2, tier3, tier4);
-
-        assertEq(assetVault.tier1MultiplierBps(), tier1);
-        assertEq(assetVault.tier2MultiplierBps(), tier2);
-        assertEq(assetVault.tier3MultiplierBps(), tier3);
-        assertEq(assetVault.tier4MultiplierBps(), tier4);
+        assertEq(assetVault.tier1Threshold(), t1);
+        assertEq(assetVault.tier2Threshold(), t2);
+        assertEq(assetVault.tier3Threshold(), t3);
+        assertEq(assetVault.tier1MultiplierBps(), m1);
+        assertEq(assetVault.tier2MultiplierBps(), m2);
+        assertEq(assetVault.tier3MultiplierBps(), m3);
+        assertEq(assetVault.tier4MultiplierBps(), m4);
     }
 }

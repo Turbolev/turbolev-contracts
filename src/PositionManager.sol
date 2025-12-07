@@ -7,6 +7,7 @@ import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./libraries/PositionLib.sol";
 import "./libraries/AdminAccessControlUpgradeable.sol";
@@ -70,9 +71,6 @@ contract PositionManager is
     /// @notice Minimum time a position must be held before closing (configurable)
     uint256 public minPositionHoldTime;
 
-    /// @notice Default max age for price validation when deadline is invalid (60 seconds)
-    uint256 private constant DEFAULT_PRICE_MAX_AGE = 60;
-
     /// @notice Maximum allowed min position hold time (1 hour)
     uint256 private constant MAX_MIN_POSITION_HOLD_TIME = 3600;
 
@@ -116,12 +114,26 @@ contract PositionManager is
     mapping(uint64 => bool) public isPendingClose;
 
     // ========================================================================
+    // TOKEN DECIMALS VALIDATION (9.3 Missing Validation Fix)
+    // ========================================================================
+
+    /// @notice Minimum supported token decimals
+    uint8 public constant MIN_SUPPORTED_DECIMALS = 6;
+
+    /// @notice Maximum supported token decimals
+    uint8 public constant MAX_SUPPORTED_DECIMALS = 18;
+
+    /// @notice Cache for token decimals to avoid repeated external calls
+    /// @dev 0 means not cached, valid values are 1-255 (offset by 1 for gas efficiency)
+    mapping(address => uint8) private tokenDecimalsCache;
+
+    // ========================================================================
     // STORAGE GAP (for future upgrades)
     // ========================================================================
 
     /// @dev Storage gap to allow for new variables in future versions
-    /// @notice Currently using 12 storage slots, reserving 38 slots for future use
-    uint256[38] private __gap;
+    /// @notice Currently using 13 storage slots, reserving 37 slots for future use
+    uint256[37] private __gap;
 
     // ========================================================================
     // EVENTS
@@ -230,6 +242,7 @@ contract PositionManager is
     error NativeTokenNotAllowed();
     error NoPendingCloseRequest();
     error TooManyPendingCloseRequests();
+    error TokenDecimalsNotSupported(uint8 decimals);
 
     // ========================================================================
     // CONSTRUCTOR / INITIALIZER
@@ -321,6 +334,10 @@ contract PositionManager is
                 || vaultManager == address(0) || priceFeedManager == address(0)
         ) revert InvalidAddress();
 
+        // 9.3 FIX: Validate token decimals compatibility (6-18 decimals supported)
+        // Uses caching to avoid repeated external calls
+        _validateAndCacheTokenDecimals(projectToken);
+
         uint256 amount;
         uint256 openPrice;
         uint256 pricePublishTime;
@@ -334,9 +351,9 @@ contract PositionManager is
 
         // Get price from PriceFeedManager
         // Use deadline as maxAge for price validation
+        // M-04 FIX: Since deadline is already validated above, calculate maxAge directly
         if (priceFeedManager == address(0)) revert InvalidAddress();
-        uint256 maxAge =
-            deadline > block.timestamp ? deadline - block.timestamp : DEFAULT_PRICE_MAX_AGE;
+        uint256 maxAge = deadline - block.timestamp;
 
         // Use getPriceWithUpdate for pull oracles (Pyth) if updateData provided
         if (priceUpdateData.length > 0) {
@@ -476,8 +493,8 @@ contract PositionManager is
         if (settlementEngine == address(0)) revert InvalidAddress();
 
         // Use deadline as maxAge for price validation
-        uint256 maxAge =
-            deadline > block.timestamp ? deadline - block.timestamp : DEFAULT_PRICE_MAX_AGE;
+        // M-04 FIX: Since deadline is already validated above, calculate maxAge directly
+        uint256 maxAge = deadline - block.timestamp;
 
         // Try to get price - if stale, move to pending instead of reverting
         if (priceFeedManager == address(0)) {
@@ -583,8 +600,8 @@ contract PositionManager is
         uint256 currentPrice;
         if (priceFeedManager != address(0)) {
             // Use deadline as maxAge for price validation
-            uint256 maxAge =
-                deadline > block.timestamp ? deadline - block.timestamp : DEFAULT_PRICE_MAX_AGE;
+            // M-04 FIX: Since deadline is already validated above, calculate maxAge directly
+            uint256 maxAge = deadline - block.timestamp;
             (currentPrice,) = IPriceFeedManager(priceFeedManager).getPrice(pos.projectToken, maxAge);
 
             // Check maxAcceptablePrice if specified
@@ -680,6 +697,9 @@ contract PositionManager is
         bool isLiquidation,
         PositionClosedBy closedBy
     ) external nonReentrant onlyAdmin {
+        // M-04 FIX: Add deadline check for admin operations
+        if (block.timestamp > deadline) revert DeadlineExpired();
+
         PositionLib.Position storage pos = positions[positionId];
         if (pos.user == address(0)) revert PositionNotFound();
         if (pos.state != PositionLib.POSITION_STATE_OPEN) {
@@ -692,15 +712,14 @@ contract PositionManager is
 
         // Get close price from PriceFeedManager
         if (priceFeedManager == address(0)) revert InvalidAddress();
-        // Use default maxAge for admin operations
-        uint256 maxAge =
-            deadline > block.timestamp ? deadline - block.timestamp : DEFAULT_PRICE_MAX_AGE;
+        // M-04 FIX: Since deadline is now validated, calculate maxAge directly
+        uint256 maxAge = deadline - block.timestamp;
         (uint256 closePrice, uint256 pricePublishTime) =
             IPriceFeedManager(priceFeedManager).getPrice(pos.projectToken, maxAge);
         if (closePrice == 0) revert InvalidPrice();
 
         if (isLiquidation) {
-            uint256 liquidationFeeBps = PositionLib.calculateLiquidationFee(pos.leverage);
+            uint256 liquidationFeeBps = PositionLib.calculateLiquidationFee();
             uint256 liquidationFee = (pos.amount * liquidationFeeBps) / PositionLib.BASIS_POINTS;
 
             emit BetLiquidated(positionId, pos.user, closePrice, liquidationFee, block.timestamp);
@@ -1397,6 +1416,45 @@ contract PositionManager is
         }
 
         return (true, "");
+    }
+
+    // ========================================================================
+    // INTERNAL FUNCTIONS
+    // ========================================================================
+
+    /**
+     * @notice Validate and cache token decimals
+     * @param token Token address to validate
+     * @dev Caches decimals to avoid repeated external calls
+     * @dev Reverts if token decimals are not within supported range (6-18)
+     */
+    function _validateAndCacheTokenDecimals(address token) internal {
+        // Check cache first (0 means not cached)
+        if (tokenDecimalsCache[token] > 0) {
+            // Already validated and cached
+            return;
+        }
+
+        // Get decimals from token (external call)
+        uint8 decimals = IERC20Metadata(token).decimals();
+
+        // Validate decimals range
+        if (decimals < MIN_SUPPORTED_DECIMALS || decimals > MAX_SUPPORTED_DECIMALS) {
+            revert TokenDecimalsNotSupported(decimals);
+        }
+
+        // Cache decimals (store as decimals + 1 to distinguish from 0/not-cached)
+        // This is gas-efficient: we use decimals directly since valid range is 6-18
+        tokenDecimalsCache[token] = decimals;
+    }
+
+    /**
+     * @notice Get cached token decimals (view function for external use)
+     * @param token Token address
+     * @return decimals Token decimals (0 if not cached)
+     */
+    function getCachedTokenDecimals(address token) external view returns (uint8) {
+        return tokenDecimalsCache[token];
     }
 
     /**

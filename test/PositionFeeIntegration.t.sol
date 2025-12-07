@@ -110,11 +110,23 @@ contract PositionFeeIntegrationTest is BaseTest {
         );
     }
 
-    function test_OpenPositionFee_ZeroFee() public {
-        // Set open fee to 0
+    function test_OpenPositionFee_ZeroFee_Reverts() public {
+        // M-06 FIX: Position fees cannot be set to 0 (MIN_OPEN_POSITION_FEE_BPS = 1)
+        // Set open fee to 0 should revert
         vm.prank(owner);
-        assetVault.setOpenPositionFeeBps(0);
+        vm.expectRevert(abi.encodeWithSignature("InvalidParameters()"));
+        assetVault.setFee(2, 0); // openPosition fee type = 2
+    }
 
+    function test_OpenPositionFee_MinFee() public {
+        // M-06 FIX: Test minimum fee (1 bps = 0.01%)
+        vm.prank(owner);
+        assetVault.setFee(2, 1); // Minimum allowed
+
+        uint16 openFeeBps = assetVault.openPositionFeeBps();
+        assertEq(openFeeBps, 1, "Open fee should be 1 bps");
+
+        uint256 expectedFee = (COLLATERAL * 1) / 10_000;
         uint256 withdrawableFeeBefore = assetVault.withdrawableFees();
 
         // Open position
@@ -123,7 +135,9 @@ contract PositionFeeIntegrationTest is BaseTest {
         uint256 withdrawableFeeAfter = assetVault.withdrawableFees();
 
         assertEq(
-            withdrawableFeeAfter, withdrawableFeeBefore, "No fee should be collected when fee is 0"
+            withdrawableFeeAfter - withdrawableFeeBefore,
+            expectedFee,
+            "Minimum fee should be collected"
         );
     }
 
@@ -131,7 +145,7 @@ contract PositionFeeIntegrationTest is BaseTest {
         // Set custom open fee rate
         uint16 customFeeBps = 50; // 0.5%
         vm.prank(owner);
-        assetVault.setOpenPositionFeeBps(customFeeBps);
+        assetVault.setFee(2, customFeeBps);
 
         uint256 expectedFee = (COLLATERAL * customFeeBps) / 10_000;
         uint256 withdrawableFeeBefore = assetVault.withdrawableFees();
@@ -166,10 +180,21 @@ contract PositionFeeIntegrationTest is BaseTest {
         assertTrue(withdrawableFeeAfter > withdrawableFeeBefore, "Close fee should be collected");
     }
 
-    function test_ClosePositionFee_ZeroFee() public {
-        // Set close fee to 0
+    function test_ClosePositionFee_ZeroFee_Reverts() public {
+        // M-06 FIX: Position fees cannot be set to 0 (MIN_CLOSE_POSITION_FEE_BPS = 1)
+        // Set close fee to 0 should revert
         vm.prank(owner);
-        assetVault.setClosePositionFeeBps(0);
+        vm.expectRevert(abi.encodeWithSignature("InvalidParameters()"));
+        assetVault.setFee(3, 0); // closePosition fee type = 3
+    }
+
+    function test_ClosePositionFee_MinFee() public {
+        // M-06 FIX: Test minimum fee (1 bps = 0.01%)
+        vm.prank(owner);
+        assetVault.setFee(3, 1); // Minimum allowed
+
+        uint16 closeFeeBps = assetVault.closePositionFeeBps();
+        assertEq(closeFeeBps, 1, "Close fee should be 1 bps");
 
         // Open position
         uint64 positionId = _openPosition(user1, COLLATERAL, LEVERAGE, DIRECTION_LONG);
@@ -182,11 +207,9 @@ contract PositionFeeIntegrationTest is BaseTest {
 
         uint256 withdrawableAfterClose = assetVault.withdrawableFees();
 
-        // No additional fee should be collected (only open fee remains)
-        assertEq(
-            withdrawableAfterClose,
-            withdrawableAfterOpen,
-            "No close fee should be collected when fee is 0"
+        // Minimum close fee should be collected
+        assertTrue(
+            withdrawableAfterClose > withdrawableAfterOpen, "Minimum close fee should be collected"
         );
     }
 
@@ -194,7 +217,7 @@ contract PositionFeeIntegrationTest is BaseTest {
         // Set custom close fee rate
         uint16 customFeeBps = 20; // 0.2%
         vm.prank(owner);
-        assetVault.setClosePositionFeeBps(customFeeBps);
+        assetVault.setFee(3, customFeeBps);
 
         // Open position
         uint64 positionId = _openPosition(user1, COLLATERAL, LEVERAGE, DIRECTION_LONG);
@@ -362,7 +385,8 @@ contract PositionFeeIntegrationTest is BaseTest {
     function testFuzz_OpenPositionFee(uint256 collateral, uint16 feeBps) public {
         // Bound inputs
         collateral = bound(collateral, 0.1 ether, 50 ether);
-        feeBps = uint16(bound(feeBps, 0, 1000)); // Max 10%
+        // M-06 FIX: MIN_OPEN_POSITION_FEE_BPS = 1, so bound from 1
+        feeBps = uint16(bound(feeBps, 1, 1000)); // Min 0.01%, Max 10%
 
         // Update vault params
         vm.prank(owner);
@@ -370,7 +394,7 @@ contract PositionFeeIntegrationTest is BaseTest {
 
         // Set custom fee
         vm.prank(owner);
-        assetVault.setOpenPositionFeeBps(feeBps);
+        assetVault.setFee(2, feeBps);
 
         uint256 expectedFee = (collateral * feeBps) / 10_000;
         uint256 feesBefore = assetVault.withdrawableFees();
@@ -385,7 +409,8 @@ contract PositionFeeIntegrationTest is BaseTest {
     function testFuzz_ClosePositionFee(uint256 collateral, uint16 closeFeeBps) public {
         // Bound inputs
         collateral = bound(collateral, 0.1 ether, 50 ether);
-        closeFeeBps = uint16(bound(closeFeeBps, 0, 1000)); // Max 10%
+        // M-06 FIX: MIN_CLOSE_POSITION_FEE_BPS = 1, so bound from 1
+        closeFeeBps = uint16(bound(closeFeeBps, 1, 1000)); // Min 0.01%, Max 10%
 
         // Update vault params
         vm.prank(owner);
@@ -393,7 +418,7 @@ contract PositionFeeIntegrationTest is BaseTest {
 
         // Set custom close fee
         vm.prank(owner);
-        assetVault.setClosePositionFeeBps(closeFeeBps);
+        assetVault.setFee(3, closeFeeBps);
 
         // Open position
         uint64 positionId = _openPosition(user1, collateral, LEVERAGE, DIRECTION_LONG);

@@ -60,8 +60,10 @@ contract UtilizationBasedLeverageTest is BaseTest {
         // Set high directional exposure cap to not interfere
         vault.setMaxDirectionalExposure(10_000); // 100% TVL
 
-        // Set 2.0x OI multiplier for predictable tests
-        vault.setTotalOIRiskMultiplier(20_000);
+        // Set 2.0x OI multiplier for predictable tests (using consolidated setOITierConfig)
+        uint256[3] memory thresholds = [uint256(0), uint256(0), uint256(0)]; // Disable tiers
+        uint16[4] memory mults = [uint16(15_000), uint16(20_000), uint16(25_000), uint16(30_000)];
+        vault.setOITierConfig(20_000, thresholds, mults); // Fixed 2.0x multiplier
 
         // Setup mock price
         _updatePrice(address(projectToken), address(usdc), 100 * 1e18);

@@ -33,6 +33,13 @@ contract DeployHelper is Script {
     address payable public pythOracle;
     address payable public tokenFaucet;
 
+    // Governance contracts
+    address public multisigWallet;
+    address public timelockController;
+    address public vaultBeacon;
+    address public vaultGovernor;
+    address public vaultViewer;
+
     // ========================================================================
     // CONFIGURATION CONSTANTS
     // ========================================================================
@@ -175,6 +182,13 @@ contract DeployHelper is Script {
         vaultManagerHelper = payable(vm.envOr("VAULT_MANAGER_HELPER_ADDRESS", address(0)));
         priceFeedManager = payable(vm.envOr("PRICE_FEED_MANAGER_ADDRESS", address(0)));
         tokenFaucet = payable(vm.envOr("TOKEN_FAUCET_ADDRESS", address(0)));
+
+        // Governance contracts
+        multisigWallet = vm.envOr("MULTISIG_WALLET_ADDRESS", address(0));
+        timelockController = vm.envOr("TIMELOCK_ADDRESS", address(0));
+        vaultBeacon = vm.envOr("VAULT_BEACON_ADDRESS", address(0));
+        vaultGovernor = vm.envOr("VAULT_GOVERNOR_ADDRESS", address(0));
+        vaultViewer = vm.envOr("VAULT_VIEWER_ADDRESS", address(0));
     }
 
     /**

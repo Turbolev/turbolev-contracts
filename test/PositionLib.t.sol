@@ -2,7 +2,9 @@
 pragma solidity ^0.8.22;
 
 import "forge-std/Test.sol";
+import "forge-std/console.sol";
 import "../src/libraries/PositionLib.sol";
+import "../src/libraries/MathLib.sol";
 
 /**
  * @title PositionLibWrapper
@@ -26,6 +28,13 @@ contract PositionLibWrapper {
         returns (int256 pnl, int256 pnlPercentage)
     {
         return PositionLib.calculateUnrealizedPnL(position, currentPrice);
+    }
+
+    function calculateUnrealizedPnLStandard(
+        PositionLib.Position memory position,
+        uint256 currentPrice
+    ) external pure returns (int256 pnl, int256 pnlPercentage) {
+        return PositionLib.calculateUnrealizedPnLStandard(position, currentPrice);
     }
 }
 
@@ -78,7 +87,10 @@ contract PositionLibTest is Test {
             "DEFAULT_MAINTENANCE_MARGIN_RATIO should be 2000"
         );
         assertEq(PositionLib.LIQUIDATION_FEE_BPS, 200, "LIQUIDATION_FEE_BPS should be 200");
-        assertEq(PositionLib.MIN_POSITION_HOLD_TIME, 60, "MIN_POSITION_HOLD_TIME should be 60");
+        // H-05 FIX: MIN_POSITION_HOLD_TIME reduced from 60 to 30 seconds
+        assertEq(
+            PositionLib.MIN_POSITION_HOLD_TIME, 30, "MIN_POSITION_HOLD_TIME should be 30 (H-05 fix)"
+        );
         assertEq(PositionLib.MAX_PROFIT_CAP_MULTIPLIER, 3, "MAX_PROFIT_CAP_MULTIPLIER should be 3");
         assertEq(PositionLib.MAX_CLOSE_REQUESTS, 3, "MAX_CLOSE_REQUESTS should be 3");
     }
@@ -274,11 +286,9 @@ contract PositionLibTest is Test {
     // ========================================================================
 
     function test_CalculateLiquidationFee_AlwaysFlat() public {
-        // Test that fee is always 200 BPS (2%) regardless of leverage
-        assertEq(PositionLib.calculateLiquidationFee(1), 200, "Fee should be 200 for 1x");
-        assertEq(PositionLib.calculateLiquidationFee(10), 200, "Fee should be 200 for 10x");
-        assertEq(PositionLib.calculateLiquidationFee(50), 200, "Fee should be 200 for 50x");
-        assertEq(PositionLib.calculateLiquidationFee(100), 200, "Fee should be 200 for 100x");
+        // Test that fee is always 200 BPS (2%) - flat rate for all positions
+        // 8.5 FIX: leverage parameter removed since it was unused
+        assertEq(PositionLib.calculateLiquidationFee(), 200, "Fee should be 200 BPS (2%)");
     }
 
     // ========================================================================
@@ -410,6 +420,133 @@ contract PositionLibTest is Test {
 
         vm.expectRevert(abi.encodeWithSelector(PositionLib.InvalidPositionAmount.selector));
         wrapper.calculateUnrealizedPnL(pos, 110e18);
+    }
+
+    // ========================================================================
+    // HIGH PRECISION P&L TESTS (H-02 FIX)
+    // ========================================================================
+
+    /**
+     * @notice Test H-02 fix: Small price changes should be detected
+     * @dev Before fix: $1 change on $50k would round to 0 BPS
+     *      After fix: Uses MathLib high precision to preserve the change
+     */
+    function test_H02_SmallPriceChange_ShouldBeDetected() public {
+        PositionLib.Position memory pos =
+            _createPosition(PositionLib.BET_DIRECTION_LONG, 10, 50_000e8);
+        pos.amount = 1 ether;
+
+        // $1 change on $50k = 0.002% = 0.2 bps
+        // With 10x leverage = 2 bps = 0.02%
+        (int256 pnl, int256 pnlPercentage) = PositionLib.calculateUnrealizedPnL(pos, 50_001e8);
+
+        // High precision should detect this
+        assertTrue(pnl > 0, "H-02 Fix: Small price change should result in positive P&L");
+
+        // Expected: 1 ether * 0.02% = 0.0002 ether = 2e14 wei
+        // With high precision, we should get approximately this value
+        console.log("Small change P&L:", pnl);
+        console.log("Small change P&L %:", pnlPercentage);
+    }
+
+    /**
+     * @notice Test that high precision handles very small positions
+     */
+    function test_H02_SmallPosition_PnL() public {
+        PositionLib.Position memory pos =
+            _createPosition(PositionLib.BET_DIRECTION_LONG, 10, OPEN_PRICE);
+        pos.amount = 10_000; // 10,000 wei (very small)
+
+        // 10% price increase with 10x leverage = 100% profit
+        (int256 pnl, int256 pnlPercentage) = PositionLib.calculateUnrealizedPnL(pos, 110e18);
+
+        // Expected: 10,000 wei profit
+        assertEq(pnl, 10_000, "Small position should have correct P&L");
+        assertEq(pnlPercentage, 10_000, "Should be 100% profit (10000 bps)");
+    }
+
+    /**
+     * @notice Compare high precision vs standard precision
+     */
+    function test_H02_HighPrecision_vs_Standard_NormalCase() public {
+        PositionLib.Position memory pos =
+            _createPosition(PositionLib.BET_DIRECTION_LONG, 10, OPEN_PRICE);
+        pos.amount = 1 ether;
+
+        // 10% price increase
+        (int256 pnlHigh,) = PositionLib.calculateUnrealizedPnL(pos, 110e18);
+        (int256 pnlStandard,) = PositionLib.calculateUnrealizedPnLStandard(pos, 110e18);
+
+        // For normal cases, both should give same result
+        assertEq(
+            pnlHigh, pnlStandard, "Normal cases should match between high and standard precision"
+        );
+        assertEq(pnlHigh, 1 ether, "Both should calculate 1 ether profit");
+    }
+
+    /**
+     * @notice Test precision difference for edge cases
+     */
+    function test_H02_HighPrecision_PreservesPrecision() public {
+        PositionLib.Position memory pos =
+            _createPosition(PositionLib.BET_DIRECTION_LONG, 100, 50_000e18);
+        pos.amount = 1 ether;
+
+        // Very small price change: 0.001% = 1 bps
+        // Standard: (5e18 * 10000) / 50000e18 = 5e22 / 5e22 = 1 bps
+        // With 100x leverage = 100 bps = 1%
+        uint256 newPrice = 50_000e18 + 5e18; // +0.01%
+
+        (int256 pnlHigh,) = PositionLib.calculateUnrealizedPnL(pos, newPrice);
+        (int256 pnlStandard,) = PositionLib.calculateUnrealizedPnLStandard(pos, newPrice);
+
+        console.log("High precision P&L:", pnlHigh);
+        console.log("Standard precision P&L:", pnlStandard);
+
+        // Both should work for this case, but high precision is more accurate
+        assertTrue(pnlHigh > 0, "High precision should detect profit");
+    }
+
+    /**
+     * @notice Test that SHORT positions work correctly with high precision
+     */
+    function test_H02_Short_HighPrecision() public {
+        PositionLib.Position memory pos =
+            _createPosition(PositionLib.BET_DIRECTION_SHORT, 10, 50_000e8);
+        pos.amount = 1 ether;
+
+        // Price drops $1 on $50k = 0.002% drop
+        // SHORT profits when price drops
+        (int256 pnl,) = PositionLib.calculateUnrealizedPnL(pos, 49_999e8);
+
+        assertTrue(pnl > 0, "SHORT should profit when price drops");
+        console.log("SHORT small change P&L:", pnl);
+    }
+
+    /**
+     * @notice Fuzz test for high precision P&L
+     */
+    function testFuzz_H02_HighPrecision_NoUnderflow(
+        uint256 amount,
+        uint256 priceChange,
+        uint8 leverage
+    ) public {
+        // Bound inputs to reasonable values
+        amount = bound(amount, 1e15, 1e24); // 0.001 to 1M tokens
+        priceChange = bound(priceChange, 1, 1000); // 0.01% to 10%
+        leverage = uint8(bound(leverage, 1, 100));
+
+        PositionLib.Position memory pos =
+            _createPosition(PositionLib.BET_DIRECTION_LONG, leverage, OPEN_PRICE);
+        pos.amount = amount;
+
+        uint256 newPrice = OPEN_PRICE + (OPEN_PRICE * priceChange / 10_000);
+
+        (int256 pnl, int256 pnlPercentage) = PositionLib.calculateUnrealizedPnL(pos, newPrice);
+
+        // P&L should be positive for price increase on LONG
+        assertTrue(pnl >= 0, "P&L should be non-negative for price increase");
+        assertTrue(pnlPercentage >= 0, "P&L % should be non-negative for price increase");
     }
 
     // ========================================================================

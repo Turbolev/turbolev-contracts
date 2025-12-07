@@ -31,6 +31,30 @@ contract SettlementEngine is
     UUPSUpgradeable
 {
     // ========================================================================
+    // CONSTANTS (L-01 FIX: Replace magic numbers)
+    // ========================================================================
+
+    /// @notice Default house edge in bps (2%)
+    uint16 public constant DEFAULT_HOUSE_EDGE_BPS = 200;
+
+    /// @notice Default win multiplier in bps (3x)
+    uint16 public constant DEFAULT_WIN_MULTIPLIER_BPS = 30_000;
+
+    /// @notice Default min bet amount (0.001 ether)
+    uint256 public constant DEFAULT_MIN_BET_AMOUNT = 0.001 ether;
+
+    /// @notice Default max bet amount (1000 ether)
+    uint256 public constant DEFAULT_MAX_BET_AMOUNT = 1000 ether;
+
+    /// @notice Default max profit cap in bps (2%)
+    uint16 public constant DEFAULT_MAX_PROFIT_CAP_BPS = 200;
+
+    /// @notice Basis points denominator
+    /// @dev 8.4 FIX: This value MUST match MathLib.BASIS_POINTS (10_000)
+    ///      Kept as local constant for gas efficiency (compiler inlines constants)
+    uint256 public constant BASIS_POINTS = 10_000;
+
+    // ========================================================================
     // STATE VARIABLES
     // ========================================================================
 
@@ -153,12 +177,12 @@ contract SettlementEngine is
         __Pausable_init();
         __UUPSUpgradeable_init();
 
-        // Default config
-        houseEdgeBps = 200; // 2%
-        winMultiplierBps = 30_000; // 3x
-        minBetAmount = 0.001 ether; // 0.001 MON
-        maxBetAmount = 1000 ether; // 1000 MON
-        maxProfitCapBps = 200;
+        // Default config (L-01 FIX: Using constants instead of magic numbers)
+        houseEdgeBps = DEFAULT_HOUSE_EDGE_BPS;
+        winMultiplierBps = DEFAULT_WIN_MULTIPLIER_BPS;
+        minBetAmount = DEFAULT_MIN_BET_AMOUNT;
+        maxBetAmount = DEFAULT_MAX_BET_AMOUNT;
+        maxProfitCapBps = DEFAULT_MAX_PROFIT_CAP_BPS;
     }
 
     // ========================================================================
@@ -178,8 +202,6 @@ contract SettlementEngine is
     // ========================================================================
     // SETTLEMENT FUNCTIONS
     // ========================================================================
-
-    uint256 private constant BASIS_POINTS = 10_000;
 
     /**
      * @notice Calculate potential payout (for display)
@@ -238,7 +260,7 @@ contract SettlementEngine is
         // Calculate liquidation fee if applicable
         uint256 liquidationFee = 0;
         if (isLiquidation) {
-            uint256 liquidationFeeBps = PositionLib.calculateLiquidationFee(position.leverage);
+            uint256 liquidationFeeBps = PositionLib.calculateLiquidationFee();
             liquidationFee = (position.amount * liquidationFeeBps) / BASIS_POINTS;
         }
 

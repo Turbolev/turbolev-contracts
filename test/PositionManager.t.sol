@@ -17,7 +17,8 @@ contract PositionManagerTest is BaseTest {
         assertEq(positionManager.maintenanceMarginRatio(), 2000, "MMR should be 2000");
         assertEq(positionManager.minLeverage(), 1, "Min leverage should be 1");
         assertEq(positionManager.maxLeverage(), 100, "Max leverage should be 100");
-        assertEq(positionManager.minPositionHoldTime(), 60, "Min hold time should be 60");
+        // MIN_POSITION_HOLD_TIME is now 30 seconds in PositionLib
+        assertEq(positionManager.minPositionHoldTime(), 30, "Min hold time should be 30");
         // maxSlippageBps has been removed, no need to test anymore
     }
 

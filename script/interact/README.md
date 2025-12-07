@@ -6,11 +6,18 @@ Các script tương tác với hệ thống Boolean đã deploy.
 
 ### 1. InteractAssetVault
 
-Tương tác với một vault cụ thể (user functions và view functions):
+Tương tác với một vault cụ thể (user functions, admin functions và view functions):
 
 ```bash
 # Set vault address
 export VAULT_ADDRESS=0x...
+
+# ========== VIEW FUNCTIONS ==========
+
+# View all configurations
+forge script script/interact/InteractAssetVault.s.sol:InteractAssetVault \
+  --sig "viewAllConfigs()" \
+  --rpc-url $RPC_URL
 
 # View vault info
 forge script script/interact/InteractAssetVault.s.sol:InteractAssetVault \
@@ -21,6 +28,33 @@ forge script script/interact/InteractAssetVault.s.sol:InteractAssetVault \
 forge script script/interact/InteractAssetVault.s.sol:InteractAssetVault \
   --sig "viewRiskControls()" \
   --rpc-url $RPC_URL
+
+# View LP position
+forge script script/interact/InteractAssetVault.s.sol:InteractAssetVault \
+  --sig "viewLPPosition(address)" 0xYourAddress \
+  --rpc-url $RPC_URL
+
+# View fee configuration
+forge script script/interact/InteractAssetVault.s.sol:InteractAssetVault \
+  --sig "viewFeeConfig()" \
+  --rpc-url $RPC_URL
+
+# View funding status
+forge script script/interact/InteractAssetVault.s.sol:InteractAssetVault \
+  --sig "viewFundingStatus()" \
+  --rpc-url $RPC_URL
+
+# View leverage configuration
+forge script script/interact/InteractAssetVault.s.sol:InteractAssetVault \
+  --sig "viewLeverageConfig()" \
+  --rpc-url $RPC_URL
+
+# View total OI configuration
+forge script script/interact/InteractAssetVault.s.sol:InteractAssetVault \
+  --sig "viewTotalOIConfig()" \
+  --rpc-url $RPC_URL
+
+# ========== USER FUNCTIONS (LP) ==========
 
 # Add liquidity
 forge script script/interact/InteractAssetVault.s.sol:InteractAssetVault \
@@ -37,23 +71,78 @@ forge script script/interact/InteractAssetVault.s.sol:InteractAssetVault \
   --sig "claimRewards()" \
   --rpc-url $RPC_URL --broadcast
 
-# View LP position
-forge script script/interact/InteractAssetVault.s.sol:InteractAssetVault \
-  --sig "viewLPPosition(address)" 0xYourAddress \
-  --rpc-url $RPC_URL
+# ========== ADMIN FUNCTIONS (require admin rights) ==========
 
-# View fee configuration
+# Set fees (feeType: 0=staking, 1=earlyWithdrawal, 2=openPosition, 3=closePosition)
 forge script script/interact/InteractAssetVault.s.sol:InteractAssetVault \
-  --sig "viewFeeConfig()" \
-  --rpc-url $RPC_URL
+  --sig "setFee(uint8,uint16)" 0 50 \
+  --rpc-url $RPC_URL --broadcast
 
-# View funding status
+# Set leverage tier config (thresholds in wei, max leverage values)
 forge script script/interact/InteractAssetVault.s.sol:InteractAssetVault \
-  --sig "viewFundingStatus()" \
-  --rpc-url $RPC_URL
+  --sig "setLeverageTierConfig(uint256,uint256,uint16,uint16,uint16)" \
+  100000000000000000000000 500000000000000000000000 100 200 500 \
+  --rpc-url $RPC_URL --broadcast
+
+# Setup standard leverage tiers (100K/500K thresholds, 100x/200x/500x)
+forge script script/interact/InteractAssetVault.s.sol:InteractAssetVault \
+  --sig "setupStandardLeverageTiers()" \
+  --rpc-url $RPC_URL --broadcast
+
+# Set funding config (5 tier rates in bps)
+forge script script/interact/InteractAssetVault.s.sol:InteractAssetVault \
+  --sig "setFundingConfig(uint16,uint16,uint16,uint16,uint16)" 1 3 5 8 10 \
+  --rpc-url $RPC_URL --broadcast
+
+# Set funding enabled/disabled
+forge script script/interact/InteractAssetVault.s.sol:InteractAssetVault \
+  --sig "setFundingEnabled(bool)" true \
+  --rpc-url $RPC_URL --broadcast
+
+# Update hourly funding (permissionless)
+forge script script/interact/InteractAssetVault.s.sol:InteractAssetVault \
+  --sig "updateHourlyFunding()" \
+  --rpc-url $RPC_URL --broadcast
+
+# Set max directional exposure
+forge script script/interact/InteractAssetVault.s.sol:InteractAssetVault \
+  --sig "setMaxDirectionalExposure(uint16)" 5000 \
+  --rpc-url $RPC_URL --broadcast
+
+# Set trading enabled/disabled
+forge script script/interact/InteractAssetVault.s.sol:InteractAssetVault \
+  --sig "setTradingEnabled(bool)" true \
+  --rpc-url $RPC_URL --broadcast
+
+# Set graduation threshold
+forge script script/interact/InteractAssetVault.s.sol:InteractAssetVault \
+  --sig "setGraduationThreshold(uint256)" 1000000000000000000000 \
+  --rpc-url $RPC_URL --broadcast
+
+# Pause/Unpause vault
+forge script script/interact/InteractAssetVault.s.sol:InteractAssetVault \
+  --sig "pauseVault()" \
+  --rpc-url $RPC_URL --broadcast
+
+forge script script/interact/InteractAssetVault.s.sol:InteractAssetVault \
+  --sig "unpauseVault()" \
+  --rpc-url $RPC_URL --broadcast
+
+# Add/Remove admin
+forge script script/interact/InteractAssetVault.s.sol:InteractAssetVault \
+  --sig "addAdmin(address)" 0xAdminAddress \
+  --rpc-url $RPC_URL --broadcast
+
+# Set treasury
+forge script script/interact/InteractAssetVault.s.sol:InteractAssetVault \
+  --sig "setTreasury(address)" 0xTreasuryAddress \
+  --rpc-url $RPC_URL --broadcast
+
+# Withdraw fees
+forge script script/interact/InteractAssetVault.s.sol:InteractAssetVault \
+  --sig "withdrawFees(uint256)" 0 \
+  --rpc-url $RPC_URL --broadcast
 ```
-
-**Lưu ý:** Các admin functions (setMaxDirectionalExposure, setLeverageTierMaxValues, pauseVault, etc.) đã được chuyển sang `InteractVaultAdminConfig`. Xem phần 6 bên dưới.
 
 ### 2. InteractPositionManager
 
@@ -150,84 +239,7 @@ forge script script/interact/InteractSettlementEngine.s.sol:InteractSettlementEn
   --rpc-url $RPC_URL --broadcast
 ```
 
-### 6. InteractVaultAdminConfig
-
-Quản lý cấu hình admin cho vault (cần quyền admin, cần broadcast):
-
-```bash
-# Set vault address
-export VAULT_ADDRESS=0x...
-
-# View all configurations
-forge script script/interact/InteractVaultAdminConfig.s.sol:InteractVaultAdminConfig \
-  --sig "viewAllConfigs()" \
-  --rpc-url $RPC_URL
-
-# Set fees
-forge script script/interact/InteractVaultAdminConfig.s.sol:InteractVaultAdminConfig \
-  --sig "setStakingFeeBps(uint16)" 50 \
-  --rpc-url $RPC_URL --broadcast
-
-forge script script/interact/InteractVaultAdminConfig.s.sol:InteractVaultAdminConfig \
-  --sig "setOpenPositionFeeBps(uint16)" 5 \
-  --rpc-url $RPC_URL --broadcast
-
-# Set total OI configuration
-forge script script/interact/InteractVaultAdminConfig.s.sol:InteractVaultAdminConfig \
-  --sig "setTotalOIRiskMultiplier(uint16)" 20000 \
-  --rpc-url $RPC_URL --broadcast
-
-# Set leverage tiers
-forge script script/interact/InteractVaultAdminConfig.s.sol:InteractVaultAdminConfig \
-  --sig "setLeverageTierMaxValues(uint16,uint16,uint16)" 100 200 500 \
-  --rpc-url $RPC_URL --broadcast
-
-# Setup standard leverage tiers
-forge script script/interact/InteractVaultAdminConfig.s.sol:InteractVaultAdminConfig \
-  --sig "setupStandardLeverageTiers()" \
-  --rpc-url $RPC_URL --broadcast
-
-# Set funding configuration
-forge script script/interact/InteractVaultAdminConfig.s.sol:InteractVaultAdminConfig \
-  --sig "setFundingConfig(uint16,uint16,uint16,uint16,uint16)" 1 3 5 8 10 \
-  --rpc-url $RPC_URL --broadcast
-
-# Set max directional exposure
-forge script script/interact/InteractVaultAdminConfig.s.sol:InteractVaultAdminConfig \
-  --sig "setMaxDirectionalExposure(uint16)" 5000 \
-  --rpc-url $RPC_URL --broadcast
-
-# Enable/disable trading
-forge script script/interact/InteractVaultAdminConfig.s.sol:InteractVaultAdminConfig \
-  --sig "setTradingEnabled(bool)" true \
-  --rpc-url $RPC_URL --broadcast
-
-# Enable/disable funding
-forge script script/interact/InteractVaultAdminConfig.s.sol:InteractVaultAdminConfig \
-  --sig "setFundingEnabled(bool)" true \
-  --rpc-url $RPC_URL --broadcast
-
-# Update hourly funding rate
-forge script script/interact/InteractVaultAdminConfig.s.sol:InteractVaultAdminConfig \
-  --sig "updateHourlyFunding()" \
-  --rpc-url $RPC_URL --broadcast
-
-# Pause/Unpause vault
-forge script script/interact/InteractVaultAdminConfig.s.sol:InteractVaultAdminConfig \
-  --sig "pauseVault()" \
-  --rpc-url $RPC_URL --broadcast
-
-forge script script/interact/InteractVaultAdminConfig.s.sol:InteractVaultAdminConfig \
-  --sig "unpauseVault()" \
-  --rpc-url $RPC_URL --broadcast
-
-# View all configurations
-forge script script/interact/InteractVaultAdminConfig.s.sol:InteractVaultAdminConfig \
-  --sig "viewAllConfigs()" \
-  --rpc-url $RPC_URL
-```
-
-### 7. InteractVaultViewer
+### 6. InteractVaultViewer
 
 Truy vấn thông tin vault chi tiết thông qua VaultViewer contract (view-only, không cần broadcast):
 
@@ -292,6 +304,145 @@ forge script script/interact/InteractVaultViewer.s.sol:InteractVaultViewer \
   --rpc-url $RPC_URL
 ```
 
+### 7. InteractMultisigWallet
+
+Quản lý MultisigWallet (M-of-N multisig):
+
+```bash
+export MULTISIG_WALLET_ADDRESS=0x...
+
+# View multisig info
+forge script script/interact/InteractMultisigWallet.s.sol:InteractMultisigWallet \
+  --sig "viewInfo()" \
+  --rpc-url $RPC_URL
+
+# View owners
+forge script script/interact/InteractMultisigWallet.s.sol:InteractMultisigWallet \
+  --sig "viewOwners()" \
+  --rpc-url $RPC_URL
+
+# View transaction
+forge script script/interact/InteractMultisigWallet.s.sol:InteractMultisigWallet \
+  --sig "viewTransaction(uint256)" 0 \
+  --rpc-url $RPC_URL
+
+# View pending transactions
+forge script script/interact/InteractMultisigWallet.s.sol:InteractMultisigWallet \
+  --sig "viewPendingTransactions()" \
+  --rpc-url $RPC_URL
+
+# Submit transaction
+forge script script/interact/InteractMultisigWallet.s.sol:InteractMultisigWallet \
+  --sig "submitTransaction(address,uint256,bytes)" 0xTarget 0 0x \
+  --rpc-url $RPC_URL --broadcast
+
+# Confirm transaction
+forge script script/interact/InteractMultisigWallet.s.sol:InteractMultisigWallet \
+  --sig "confirmTransaction(uint256)" 0 \
+  --rpc-url $RPC_URL --broadcast
+
+# Execute transaction
+forge script script/interact/InteractMultisigWallet.s.sol:InteractMultisigWallet \
+  --sig "executeTransaction(uint256)" 0 \
+  --rpc-url $RPC_URL --broadcast
+
+# Propose add owner (requires multisig approval)
+forge script script/interact/InteractMultisigWallet.s.sol:InteractMultisigWallet \
+  --sig "proposeAddOwner(address)" 0xNewOwner \
+  --rpc-url $RPC_URL --broadcast
+```
+
+### 8. InteractVersionedBeacon
+
+Quản lý VersionedBeacon (vault upgrade management):
+
+```bash
+export VAULT_BEACON_ADDRESS=0x...
+
+# View beacon info
+forge script script/interact/InteractVersionedBeacon.s.sol:InteractVersionedBeacon \
+  --sig "viewInfo()" \
+  --rpc-url $RPC_URL
+
+# View current version details
+forge script script/interact/InteractVersionedBeacon.s.sol:InteractVersionedBeacon \
+  --sig "viewCurrentVersionInfo()" \
+  --rpc-url $RPC_URL
+
+# View all versions
+forge script script/interact/InteractVersionedBeacon.s.sol:InteractVersionedBeacon \
+  --sig "viewAllVersions()" \
+  --rpc-url $RPC_URL
+
+# View version history (from version 1 to 5)
+forge script script/interact/InteractVersionedBeacon.s.sol:InteractVersionedBeacon \
+  --sig "viewVersionHistory(uint256,uint256)" 1 5 \
+  --rpc-url $RPC_URL
+
+# Check specific version
+forge script script/interact/InteractVersionedBeacon.s.sol:InteractVersionedBeacon \
+  --sig "checkVersion(uint256)" 1 \
+  --rpc-url $RPC_URL
+
+# Upgrade to new version (owner only - should be Timelock)
+forge script script/interact/InteractVersionedBeacon.s.sol:InteractVersionedBeacon \
+  --sig "upgradeToVersion(address,bytes32)" 0xNewImpl 0x0 \
+  --rpc-url $RPC_URL --broadcast
+
+# Rollback to previous version (owner only)
+forge script script/interact/InteractVersionedBeacon.s.sol:InteractVersionedBeacon \
+  --sig "rollbackTo(uint256)" 1 \
+  --rpc-url $RPC_URL --broadcast
+```
+
+### 9. InteractVaultGovernor
+
+Quản lý VaultGovernor (vault-specific governance):
+
+```bash
+export VAULT_GOVERNOR_ADDRESS=0x...
+
+# View governor info
+forge script script/interact/InteractVaultGovernor.s.sol:InteractVaultGovernor \
+  --sig "viewInfo()" \
+  --rpc-url $RPC_URL
+
+# View roles
+forge script script/interact/InteractVaultGovernor.s.sol:InteractVaultGovernor \
+  --sig "viewRoles()" \
+  --rpc-url $RPC_URL
+
+# Check roles for address
+forge script script/interact/InteractVaultGovernor.s.sol:InteractVaultGovernor \
+  --sig "checkRole(address)" 0xYourAddress \
+  --rpc-url $RPC_URL
+
+# Propose pause vault via governance
+forge script script/interact/InteractVaultGovernor.s.sol:InteractVaultGovernor \
+  --sig "proposePauseVault(address,bytes32)" 0xProjectToken 0x0 \
+  --rpc-url $RPC_URL --broadcast
+
+# Emergency pause by vault address (Guardian only, no timelock)
+forge script script/interact/InteractVaultGovernor.s.sol:InteractVaultGovernor \
+  --sig "emergencyPauseVaultByAddress(address)" 0xVaultAddress \
+  --rpc-url $RPC_URL --broadcast
+
+# Emergency pause by project token (Guardian only, no timelock)
+forge script script/interact/InteractVaultGovernor.s.sol:InteractVaultGovernor \
+  --sig "emergencyPauseVault(address)" 0xProjectToken \
+  --rpc-url $RPC_URL --broadcast
+
+# Propose beacon upgrade
+forge script script/interact/InteractVaultGovernor.s.sol:InteractVaultGovernor \
+  --sig "proposeBeaconUpgrade(address,bytes32,bytes32)" 0xNewImpl 0x0 0x0 \
+  --rpc-url $RPC_URL --broadcast
+
+# Add guardian
+forge script script/interact/InteractVaultGovernor.s.sol:InteractVaultGovernor \
+  --sig "addGuardian(address)" 0xGuardianAddress \
+  --rpc-url $RPC_URL --broadcast
+```
+
 ## Environment Variables
 
 Cần thiết lập trong `.env`:
@@ -304,27 +455,33 @@ PRIVATE_KEY=0x...
 RPC_URL=https://...
 
 # Deployed addresses (từ DeployAll)
-POSITION_MANAGER_PROXY=0x...
-VAULT_MANAGER_PROXY=0x...
-SETTLEMENT_ENGINE_PROXY=0x...
-PRICE_FEED_MANAGER_PROXY=0x...
+POSITION_MANAGER_ADDRESS=0x...
+VAULT_MANAGER_ADDRESS=0x...
+SETTLEMENT_ENGINE_ADDRESS=0x...
+PRICE_FEED_MANAGER_ADDRESS=0x...
 
 # Vault specific
 VAULT_ADDRESS=0x...
 
-# VaultViewer (optional, for InteractVaultViewer)
+# Helper contracts
 VAULT_VIEWER_ADDRESS=0x...
+
+# Governance contracts
+MULTISIG_WALLET_ADDRESS=0x...
+TIMELOCK_ADDRESS=0x...
+VAULT_BEACON_ADDRESS=0x...
+VAULT_GOVERNOR_ADDRESS=0x...
 ```
 
 ## Lưu ý
 
 1. **Admin Functions**: 
-   - Các admin functions đã được tập trung trong `InteractVaultAdminConfig` (xem phần 6)
-   - Tất cả admin functions cần quyền admin và flag `--broadcast`
-   - Các functions như `setMaxDirectionalExposure`, `pauseVault`, `setLeverageTierMaxValues` đều ở trong `InteractVaultAdminConfig`
+   - Admin functions được gọi trực tiếp qua `InteractAssetVault` (xem phần 1)
+   - Tất cả admin functions cần quyền admin/owner và flag `--broadcast`
+   - Các functions như `setMaxDirectionalExposure`, `pauseVault`, `setLeverageTierConfig` đều ở trong `InteractAssetVault`
 
 2. **User Functions**: 
-   - `InteractAssetVault` chỉ chứa user functions (addLiquidity, removeLiquidity, claimRewards) và view functions
+   - User functions: `addLiquidity`, `removeLiquidity`, `claimRewards`
    - User functions cần `--broadcast` nhưng không cần quyền admin
 
 3. **Gas**: Đảm bảo có đủ native token để trả gas

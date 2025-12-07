@@ -13,7 +13,7 @@ import "../../src/AssetVaultUpgradeable.sol";
  * @dev All functions are view-only, no transactions needed
  */
 contract InteractVaultViewer is DeployHelper {
-    VaultViewer public vaultViewer;
+    VaultViewer public viewer;
     address public vaultAddress;
 
     function setUp() public override {
@@ -27,13 +27,13 @@ contract InteractVaultViewer is DeployHelper {
             vaultViewerAddr != address(0),
             "VaultViewer address not set. Set VAULT_VIEWER_ADDRESS in .env or deploy VaultViewer first"
         );
-        vaultViewer = VaultViewer(vaultViewerAddr);
+        viewer = VaultViewer(vaultViewerAddr);
 
         // Load vault address from env
         vaultAddress = vm.envAddress("VAULT_ADDRESS");
         require(vaultAddress != address(0), "VAULT_ADDRESS not set");
 
-        console.log("VaultViewer Address:", address(vaultViewer));
+        console.log("VaultViewer Address:", address(viewer));
         console.log("Vault Address:", vaultAddress);
     }
 
@@ -55,7 +55,7 @@ contract InteractVaultViewer is DeployHelper {
             uint256 remainingCapacity,
             uint8 currentTier,
             uint16 currentMultiplierBps
-        ) = vaultViewer.getTotalOIBreakdown(vaultAddress);
+        ) = viewer.getTotalOIBreakdown(vaultAddress);
 
         console.log("\n=== Total OI Breakdown ===");
         console.log("TVL:", tvl);
@@ -79,7 +79,7 @@ contract InteractVaultViewer is DeployHelper {
             uint256 currentTotalOI,
             uint256 utilizationBps,
             bool canOpenMore
-        ) = vaultViewer.getTotalOICapStatus(vaultAddress);
+        ) = viewer.getTotalOICapStatus(vaultAddress);
 
         console.log("\n=== Total OI Cap Status ===");
         console.log("Current Multiplier BPS:", currentMultiplierBps);
@@ -103,7 +103,7 @@ contract InteractVaultViewer is DeployHelper {
             uint256 utilizationBps,
             uint8 utilizationTier,
             string memory tierDescription
-        ) = vaultViewer.getEffectiveMaxLeverage(vaultAddress);
+        ) = viewer.getEffectiveMaxLeverage(vaultAddress);
 
         console.log("\n=== Effective Max Leverage ===");
         console.log("Effective Max Leverage:", effectiveMaxLeverage);
@@ -118,7 +118,7 @@ contract InteractVaultViewer is DeployHelper {
      */
     function viewVaultMaxLeverage() public view {
         (uint16 maxLeverage, uint256 currentTVL, string memory currentPhase) =
-            vaultViewer.getVaultMaxLeverage(vaultAddress);
+            viewer.getVaultMaxLeverage(vaultAddress);
 
         console.log("\n=== Vault Max Leverage ===");
         console.log("Max Leverage:", maxLeverage);
@@ -136,7 +136,7 @@ contract InteractVaultViewer is DeployHelper {
             uint16 tier1Max,
             uint16 tier2Max,
             uint16 tier3Max
-        ) = vaultViewer.getLeverageTierConfig(vaultAddress);
+        ) = viewer.getLeverageTierConfig(vaultAddress);
 
         console.log("\n=== Leverage Tier Config ===");
         console.log("Tier 1 Threshold:", tier1Threshold);
@@ -151,7 +151,7 @@ contract InteractVaultViewer is DeployHelper {
      */
     function checkLeverageAllowed(uint16 requestedLeverage) public view {
         (bool isAllowed, uint16 effectiveMaxLeverage, string memory reason) =
-            vaultViewer.checkLeverageAllowed(vaultAddress, requestedLeverage);
+            viewer.checkLeverageAllowed(vaultAddress, requestedLeverage);
 
         console.log("\n=== Leverage Check ===");
         console.log("Requested Leverage:", requestedLeverage);
@@ -167,7 +167,7 @@ contract InteractVaultViewer is DeployHelper {
      */
     function simulateLeverageAtTVL(uint256 targetTVL) public view {
         (uint16 maxLeverageAtTarget, string memory phase) =
-            vaultViewer.simulateLeverageAtTVL(vaultAddress, targetTVL);
+            viewer.simulateLeverageAtTVL(vaultAddress, targetTVL);
 
         console.log("\n=== Leverage Simulation ===");
         console.log("Target TVL:", targetTVL);
@@ -190,7 +190,7 @@ contract InteractVaultViewer is DeployHelper {
             uint256 maxExposure,
             uint256 netUtilization,
             bool isLongBias
-        ) = vaultViewer.getDirectionalExposure(vaultAddress);
+        ) = viewer.getDirectionalExposure(vaultAddress);
 
         console.log("\n=== Directional Exposure ===");
         console.log("Long Exposure:", longExposure);
@@ -216,7 +216,7 @@ contract InteractVaultViewer is DeployHelper {
             uint256 currentHourlyRateBps,
             bool longsPayShorts,
             uint256 imbalanceBps
-        ) = vaultViewer.getFundingStats(vaultAddress);
+        ) = viewer.getFundingStats(vaultAddress);
 
         console.log("\n=== Funding Stats ===");
         console.log("Cumulative Long Rate:", uint256(cumulativeLongRate));
@@ -241,7 +241,7 @@ contract InteractVaultViewer is DeployHelper {
             uint256 currentTotalOI,
             uint256 remainingCapacity,
             string memory reason
-        ) = vaultViewer.checkTotalOICap(vaultAddress, positionSize);
+        ) = viewer.checkTotalOICap(vaultAddress, positionSize);
 
         console.log("\n=== Total OI Cap Check ===");
         console.log("Position Size:", positionSize);
@@ -263,7 +263,7 @@ contract InteractVaultViewer is DeployHelper {
             uint256 newMaxTotalOI,
             uint256 currentTotalOI,
             bool wouldExceedCap
-        ) = vaultViewer.simulateTVLChange(vaultAddress, newTVL);
+        ) = viewer.simulateTVLChange(vaultAddress, newTVL);
 
         console.log("\n=== TVL Change Simulation ===");
         console.log("New TVL:", newTVL);
@@ -278,7 +278,7 @@ contract InteractVaultViewer is DeployHelper {
      */
     function viewVaultUtilization() public view {
         (uint256 utilizationBps, uint256 totalOI, uint256 tvl, uint256 remainingCapacity) =
-            vaultViewer.getVaultUtilization(vaultAddress);
+            viewer.getVaultUtilization(vaultAddress);
 
         console.log("\n=== Vault Utilization ===");
         console.log("Utilization BPS:", utilizationBps);
@@ -296,7 +296,7 @@ contract InteractVaultViewer is DeployHelper {
      */
     function calculateWithdrawalAmount(address user, uint256 shares) public view {
         (uint256 grossAmount, uint256 fee, uint256 netAmount, bool isEarlyWithdrawal) =
-            vaultViewer.calculateWithdrawalAmount(vaultAddress, user, shares);
+            viewer.calculateWithdrawalAmount(vaultAddress, user, shares);
 
         console.log("\n=== Withdrawal Calculation ===");
         console.log("User:", user);
@@ -312,7 +312,7 @@ contract InteractVaultViewer is DeployHelper {
      */
     function calculatePendingRewards(address user) public view {
         (uint256 pendingRewards, uint256 lastProcessedDay) =
-            vaultViewer.calculatePendingRewards(vaultAddress, user);
+            viewer.calculatePendingRewards(vaultAddress, user);
 
         console.log("\n=== Pending Rewards ===");
         console.log("User:", user);

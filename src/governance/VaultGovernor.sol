@@ -56,8 +56,6 @@ contract VaultGovernor is GovernanceManager {
 
     event VaultBeaconUpdated(address indexed oldBeacon, address indexed newBeacon);
 
-    // DEPRECATED: OptInUpgradeManagerUpdated removed in V2
-
     event EmergencyMultisigUpdated(address indexed oldMultisig, address indexed newMultisig);
 
     event BeaconUpgradeProposed(
@@ -243,9 +241,6 @@ contract VaultGovernor is GovernanceManager {
         return scheduleOperation(vaultBeacon, 0, data, bytes32(0), salt, 0);
     }
 
-    // DEPRECATED: proposeOptInUpgrade removed in V2
-    // Opt-in mechanism has been removed. Timelock delay serves as grace period.
-
     // ========================================================================
     // EMERGENCY FUNCTIONS (NO TIMELOCK)
     // ========================================================================
@@ -319,8 +314,6 @@ contract VaultGovernor is GovernanceManager {
 
         emit VaultBeaconUpdated(oldBeacon, _vaultBeacon);
     }
-
-    // DEPRECATED: updateOptInUpgradeManager removed in V2
 
     /**
      * @notice Update emergency multisig

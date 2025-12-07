@@ -206,6 +206,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
     uint256 public constant DEFAULT_EARLY_WITHDRAWAL_FEE_BPS = 1000; // 10%
     uint256 public constant DEFAULT_MAX_DIRECTIONAL_EXPOSURE_BPS = 5000; // 50% of TVL
 
+    /// @dev 8.4 FIX: This value MUST match MathLib.BASIS_POINTS (10_000)
     uint256 public constant BASIS_POINTS = 10_000;
     uint256 public constant INITIAL_SHARE_MULTIPLIER = 1e18;
 

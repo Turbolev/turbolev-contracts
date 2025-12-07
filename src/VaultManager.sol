@@ -73,6 +73,13 @@ contract VaultManager is
     uint256[35] private __gap;
 
     // ========================================================================
+    // CONSTANTS (L-01 & L-08 FIX)
+    // ========================================================================
+
+    /// @notice Maximum number of vaults that can be created in a single batch
+    uint256 public constant MAX_BATCH_SIZE = 10;
+
+    // ========================================================================
     // EVENTS
     // ========================================================================
 
@@ -92,12 +99,13 @@ contract VaultManager is
     );
 
     event VaultBeaconUpdated(address indexed oldBeacon, address indexed newBeacon);
-    // DEPRECATED: OptInUpgradeManagerUpdated removed in V2
     event TimelockControllerUpdated(address indexed oldController, address indexed newController);
     event MultisigWalletUpdated(address indexed oldWallet, address indexed newWallet);
     event VaultGovernorUpdated(address indexed oldGovernor, address indexed newGovernor);
     event VaultDeactivated(address indexed vaultAddress, uint256 timestamp);
     event VaultReactivated(address indexed vaultAddress, uint256 timestamp);
+    event EmergencyPauseAllTriggered(address indexed caller, uint256 timestamp);
+    event EmergencyUnpauseAllTriggered(address indexed caller, uint256 timestamp);
 
     // ========================================================================
     // ERRORS
@@ -110,6 +118,8 @@ contract VaultManager is
     error DirectTransferNotAllowed();
     error DeploymentFailed();
     error NotAuthorized();
+    error LengthMismatch(); // L-03 FIX: Custom error instead of string
+    error BatchTooLarge(); // L-08 FIX: Limit batch size
 
     // ========================================================================
     // MODIFIERS
@@ -261,12 +271,15 @@ contract VaultManager is
         uint256[] calldata maxBetAmounts,
         uint256[] calldata graduationThresholds
     ) external onlyOwner returns (address[] memory vaultAddresses) {
-        require(
-            projectTokens.length == minBetAmounts.length
-                && projectTokens.length == maxBetAmounts.length
-                && projectTokens.length == graduationThresholds.length,
-            "Length mismatch"
-        );
+        // L-03 FIX: Use custom error instead of string
+        if (
+            projectTokens.length != minBetAmounts.length
+                || projectTokens.length != maxBetAmounts.length
+                || projectTokens.length != graduationThresholds.length
+        ) revert LengthMismatch();
+
+        // L-08 FIX: Limit batch size to prevent gas issues
+        if (projectTokens.length > MAX_BATCH_SIZE) revert BatchTooLarge();
 
         vaultAddresses = new address[](projectTokens.length);
 
@@ -402,6 +415,68 @@ contract VaultManager is
         }
     }
 
+    /**
+     * @notice Emergency pause all vaults and VaultManager
+     * @dev Pauses all active vaults + this contract in case of emergency
+     *      Only MultisigWallet can call this (no timelock delay for emergency)
+     */
+    function emergencyPauseAll() external onlyMultisig {
+        // Pause VaultManager first
+        _pause();
+
+        // Pause all active vaults
+        for (uint256 i = 0; i < allVaults.length; i++) {
+            address vault = allVaults[i];
+            // Only pause if vault is active and not already paused
+            if (vaultInfos[vault].isActive) {
+                try IAssetVault(vault).paused() returns (bool isPaused) {
+                    if (!isPaused) {
+                        try IAssetVault(vault).pause() {
+                            // Success
+                        } catch {
+                            // Continue even if pause fails for individual vault
+                        }
+                    }
+                } catch {
+                    // Continue even if check fails
+                }
+            }
+        }
+
+        emit EmergencyPauseAllTriggered(msg.sender, block.timestamp);
+    }
+
+    /**
+     * @notice Emergency unpause all vaults and VaultManager
+     * @dev Unpause all vaults + this contract after emergency is resolved
+     *      Only MultisigWallet can call this
+     */
+    function emergencyUnpauseAll() external onlyMultisig {
+        // Unpause VaultManager first
+        _unpause();
+
+        // Unpause all active vaults
+        for (uint256 i = 0; i < allVaults.length; i++) {
+            address vault = allVaults[i];
+            // Only unpause if vault is active and currently paused
+            if (vaultInfos[vault].isActive) {
+                try IAssetVault(vault).paused() returns (bool isPaused) {
+                    if (isPaused) {
+                        try IAssetVault(vault).unpause() {
+                            // Success
+                        } catch {
+                            // Continue even if unpause fails for individual vault
+                        }
+                    }
+                } catch {
+                    // Continue even if check fails
+                }
+            }
+        }
+
+        emit EmergencyUnpauseAllTriggered(msg.sender, block.timestamp);
+    }
+
     // ========================================================================
     // VAULT MANAGEMENT
     // ========================================================================
@@ -464,8 +539,6 @@ contract VaultManager is
 
         emit VaultBeaconUpdated(oldBeacon, _vaultBeacon);
     }
-
-    // DEPRECATED: setOptInUpgradeManager removed in V2
 
     /**
      * @notice Set TimelockController address
