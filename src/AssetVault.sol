@@ -389,6 +389,8 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
     error DirectTransferNotAllowed();
     error VaultManagerHelperNotSet();
     error NativeTokenNotAllowed();
+    error InsufficientRewards(uint256 actual, uint256 minimum); // H-05 FIX: Slippage protection
+    error ZeroPayoutAmount(); // M-04 FIX: Revert instead of silent return
 
     // ========================================================================
     // MODIFIERS
@@ -724,7 +726,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         // CHECKS
         // ============================================================
         if (user == address(0)) revert InvalidAddress();
-        if (amount == 0) return; // No payout
+        if (amount == 0) revert ZeroPayoutAmount(); // M-04 FIX: Revert instead of silent return
 
         // Get bet collateral for this position
         uint256 collateral = betCollateral[positionId];
@@ -808,6 +810,7 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
      * @param fee Fee collected
      * @param positionSize Position size to remove from exposure
      * @param direction Position direction (1 = LONG, 2 = SHORT)
+     * @param user User address for event tracking (M-05 FIX: Replace tx.origin)
      */
     function updateVaultPnL(
         uint64 positionId,
@@ -815,7 +818,8 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         int256 vaultPnL,
         uint256 fee,
         uint256 positionSize,
-        uint8 direction
+        uint8 direction,
+        address user
     ) external onlyPositionManager {
         // Process collateral based on outcome
         if (vaultPnL >= 0) {
@@ -1153,11 +1157,32 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
     }
 
     /**
-     * @notice Claim pending rewards
-     * @dev Processes rewards in batches to prevent out of gas errors
-     *      If there are more days to process, user can call this function again
+     * @notice Claim pending rewards (no slippage protection)
+     * @dev Backward compatible - calls _claimRewardsInternal with minExpectedRewards = 0
      */
     function claimRewards() external nonReentrant whenNotPaused {
+        _claimRewardsInternal(0);
+    }
+
+    /**
+     * @notice Claim pending rewards with slippage protection
+     * @param minExpectedRewards Minimum rewards expected (reverts if actual < min)
+     * @dev H-05 FIX: Added slippage protection to prevent front-running attacks
+     */
+    function claimRewardsProtected(uint256 minExpectedRewards)
+        external
+        nonReentrant
+        whenNotPaused
+    {
+        _claimRewardsInternal(minExpectedRewards);
+    }
+
+    /**
+     * @notice Internal function to claim rewards with optional slippage protection
+     * @param minExpectedRewards Minimum rewards expected (0 = no protection)
+     * @dev H-05 FIX: Centralized logic with slippage check
+     */
+    function _claimRewardsInternal(uint256 minExpectedRewards) internal {
         LPPosition storage lpPos = lpPositions[msg.sender];
 
         // Get claimable rewards (already accumulated from all days)
@@ -1190,6 +1215,11 @@ contract AssetVault is Ownable, ReentrancyGuard, Pausable, AdminAccessControl {
         // Only revert if there's absolutely nothing to pay
         if (actualRewards == 0) {
             revert InsufficientLiquidity();
+        }
+
+        // H-05 FIX: Slippage protection - revert if actual rewards less than minimum expected
+        if (actualRewards < minExpectedRewards) {
+            revert InsufficientRewards(actualRewards, minExpectedRewards);
         }
 
         // Update LP position

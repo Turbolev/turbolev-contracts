@@ -144,6 +144,11 @@ contract PriceFeedManager is
     event CircuitBreakerBypassUpdated(address indexed projectToken, bool bypassed);
     event LastPriceRecordUpdated(address indexed projectToken, uint256 price, uint256 timestamp);
 
+    // Initial Price Setup Events (NEW-H-01 FIX)
+    event InitialPriceSet(
+        address indexed projectToken, uint256 price, uint256 publishTime, bytes32 indexed providerId
+    );
+
     // ========================================================================
     // ERRORS
     // ========================================================================
@@ -162,6 +167,11 @@ contract PriceFeedManager is
     // Circuit Breaker Errors (L-10 FIX)
     error CircuitBreakerTripped(uint256 deviationBps, uint256 maxAllowedBps);
     error InvalidCircuitBreakerConfig();
+
+    // Initial Price Setup Errors (NEW-H-01 FIX)
+    error InitialPriceNotSet(address projectToken);
+    error InitialPriceFetchFailed(address projectToken, bytes32 providerId);
+    error RefundFailed();
 
     // ========================================================================
     // CONSTRUCTOR / INITIALIZER
@@ -191,7 +201,7 @@ contract PriceFeedManager is
      * @notice Initialize circuit breaker for existing deployments (upgrade scenario)
      * @dev Call this after upgrading if circuit breaker was not initialized
      */
-    function initializeCircuitBreaker() external onlyOwner {
+    function initializeCircuitBreaker() external onlyOwner whenNotPaused {
         // Only initialize if not already set (maxDeviationBps == 0 means uninitialized)
         if (circuitBreakerConfig.maxDeviationBps == 0) {
             _initCircuitBreaker();
@@ -391,6 +401,70 @@ contract PriceFeedManager is
         emit PriceFeedConfigUpdated(
             projectToken, config.primaryProviderId, config.secondaryProviderId
         );
+    }
+
+    /**
+     * @notice Set price feed configuration and initialize circuit breaker with first price
+     * @param projectToken Project token address
+     * @param config Complete price feed configuration
+     * @param updateData Price update data for pull oracles (empty bytes for push oracles)
+     * @param maxAge Maximum acceptable price age in seconds
+     * @dev NEW-H-01 FIX: This ensures circuit breaker has a valid baseline price from the start
+     * @dev For pull oracles (e.g., Pyth), caller must send ETH for update fee and provide updateData
+     * @dev For push oracles (e.g., Chainlink), updateData can be empty and no ETH needed
+     */
+    function setPriceFeedConfigWithInit(
+        address projectToken,
+        PriceFeedConfig calldata config,
+        bytes calldata updateData,
+        uint256 maxAge
+    ) external payable onlyOwner whenNotPaused {
+        // ========== STEP 1: Validate config (same as setPriceFeedConfig) ==========
+        if (projectToken == address(0)) revert InvalidAddress();
+        if (config.primaryProviderId == bytes32(0)) revert NoPrimaryProvider();
+        if (!providerRegistered[config.primaryProviderId]) {
+            revert ProviderNotFound(config.primaryProviderId);
+        }
+        if (
+            config.secondaryProviderId != bytes32(0)
+                && !providerRegistered[config.secondaryProviderId]
+        ) {
+            revert ProviderNotFound(config.secondaryProviderId);
+        }
+
+        // ========== STEP 2: Save config ==========
+        priceFeedConfigs[projectToken] = config;
+
+        // ========== STEP 3: Fetch initial price ==========
+        OracleProvider memory primary = oracleProviders[config.primaryProviderId];
+
+        (bool success, uint256 initialPrice, uint256 publishTime) = _tryGetPriceFromProviderWithUpdate(
+            primary,
+            config.primaryFeed,
+            config.primaryProviderId,
+            config.usePullMode,
+            maxAge,
+            updateData
+        );
+
+        if (!success || initialPrice == 0) {
+            revert InitialPriceFetchFailed(projectToken, config.primaryProviderId);
+        }
+
+        // ========== STEP 4: Set initial price record for circuit breaker ==========
+        _updateLastPriceRecord(projectToken, initialPrice);
+
+        // ========== STEP 5: Emit events ==========
+        emit PriceFeedConfigUpdated(
+            projectToken, config.primaryProviderId, config.secondaryProviderId
+        );
+        emit InitialPriceSet(projectToken, initialPrice, publishTime, config.primaryProviderId);
+
+        // ========== STEP 6: Refund excess ETH (for pull oracle fee) ==========
+        if (address(this).balance > 0) {
+            (bool sent,) = payable(msg.sender).call{value: address(this).balance}("");
+            if (!sent) revert RefundFailed();
+        }
     }
 
     /**
@@ -945,7 +1019,7 @@ contract PriceFeedManager is
      * @param bypassed Whether to bypass circuit breaker for this token
      * @dev Use with caution - bypassing removes price manipulation protection
      */
-    function setCircuitBreakerBypass(address projectToken, bool bypassed) external onlyOwner {
+    function setCircuitBreakerBypass(address projectToken, bool bypassed) external onlyOwner whenNotPaused {
         if (projectToken == address(0)) revert InvalidAddress();
         circuitBreakerBypassed[projectToken] = bypassed;
         emit CircuitBreakerBypassUpdated(projectToken, bypassed);
@@ -970,10 +1044,10 @@ contract PriceFeedManager is
 
         LastPriceRecord memory lastRecord = lastPriceRecords[projectToken];
 
-        // First price for this token - always accept and record
+        // NEW-H-01 FIX: First price MUST be set via setPriceFeedConfigWithInit
+        // This prevents circuit breaker bypass by manipulating the first price
         if (lastRecord.price == 0 || lastRecord.timestamp == 0) {
-            _updateLastPriceRecord(projectToken, newPrice);
-            return true;
+            revert InitialPriceNotSet(projectToken);
         }
 
         // Check time window - only validate deviation if within the deviation window
@@ -1119,7 +1193,7 @@ contract PriceFeedManager is
      * @param price Price to set
      * @dev Use to bootstrap circuit breaker or reset after known manipulation
      */
-    function setLastPriceRecord(address projectToken, uint256 price) external onlyOwner {
+    function setLastPriceRecord(address projectToken, uint256 price) external onlyOwner whenNotPaused {
         if (projectToken == address(0)) revert InvalidAddress();
         if (price == 0) revert InvalidOraclePrice();
 

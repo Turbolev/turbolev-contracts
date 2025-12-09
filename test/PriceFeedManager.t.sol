@@ -104,6 +104,13 @@ contract PriceFeedManagerTest is Test {
         bytes32 indexed primaryProviderId,
         bytes32 indexed secondaryProviderId
     );
+    event InitialPriceSet(
+        address indexed projectToken,
+        uint256 price,
+        uint256 publishTime,
+        bytes32 indexed providerId
+    );
+    event LastPriceRecordUpdated(address indexed projectToken, uint256 price, uint256 timestamp);
 
     function setUp() public {
         // Deploy mock adapter
@@ -442,7 +449,8 @@ contract PriceFeedManagerTest is Test {
             usePullMode: false
         });
 
-        priceFeedManager.setPriceFeedConfig(token, config);
+        // NEW-H-01 FIX: Use setPriceFeedConfigWithInit to set initial price
+        priceFeedManager.setPriceFeedConfigWithInit(token, config, "", 3600);
 
         // Get price with fallback
         (uint256 price, uint256 publishTime) = priceFeedManager.getPriceWithFallback(token, 3600);
@@ -510,5 +518,307 @@ contract PriceFeedManagerTest is Test {
 
         vm.expectRevert();
         priceFeedManager.setPriceFeedConfig(token, config);
+    }
+
+    // ========================================================================
+    // NEW-H-01 FIX: INITIAL PRICE SETUP TESTS
+    // ========================================================================
+
+    function testSetPriceFeedConfigWithInit_Success() public {
+        // Setup provider
+        bytes32 chainlink = priceFeedManager.CHAINLINK_PROVIDER();
+
+        IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager.OracleProvider({
+            oracleContract: address(chainlinkOracle),
+            oracleType: IBaseOracle.OracleType.PUSH,
+            enabled: true
+        });
+
+        priceFeedManager.registerOracleProvider(chainlink, provider);
+
+        // Configure token with initial price fetch
+        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
+            primaryProviderId: chainlink,
+            secondaryProviderId: bytes32(0),
+            primaryFeed: address(mockAdapter),
+            secondaryFeed: address(0),
+            usePullMode: false
+        });
+
+        // Should succeed and fetch initial price
+        priceFeedManager.setPriceFeedConfigWithInit(token, config, "", 3600);
+
+        // Verify config was saved
+        IPriceFeedManager.PriceFeedConfig memory saved = priceFeedManager.getPriceFeedConfig(token);
+        assertEq(saved.primaryProviderId, chainlink);
+
+        // Verify initial price was set
+        (uint256 lastPrice, uint256 lastTimestamp) = priceFeedManager.getLastPriceRecord(token);
+        assertGt(lastPrice, 0, "Initial price should be set");
+        assertGt(lastTimestamp, 0, "Initial timestamp should be set");
+    }
+
+    function testSetPriceFeedConfigWithInit_EmitsEvents() public {
+        // Setup provider
+        bytes32 chainlink = priceFeedManager.CHAINLINK_PROVIDER();
+
+        IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager.OracleProvider({
+            oracleContract: address(chainlinkOracle),
+            oracleType: IBaseOracle.OracleType.PUSH,
+            enabled: true
+        });
+
+        priceFeedManager.registerOracleProvider(chainlink, provider);
+
+        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
+            primaryProviderId: chainlink,
+            secondaryProviderId: bytes32(0),
+            primaryFeed: address(mockAdapter),
+            secondaryFeed: address(0),
+            usePullMode: false
+        });
+
+        // Expect PriceFeedConfigUpdated event
+        vm.expectEmit(true, true, true, true);
+        emit PriceFeedConfigUpdated(token, chainlink, bytes32(0));
+
+        priceFeedManager.setPriceFeedConfigWithInit(token, config, "", 3600);
+    }
+
+    function testSetPriceFeedConfigWithInit_RevertIfFetchFails() public {
+        // Setup provider with wrong feed address (will fail to fetch)
+        bytes32 chainlink = priceFeedManager.CHAINLINK_PROVIDER();
+
+        IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager.OracleProvider({
+            oracleContract: address(chainlinkOracle),
+            oracleType: IBaseOracle.OracleType.PUSH,
+            enabled: true
+        });
+
+        priceFeedManager.registerOracleProvider(chainlink, provider);
+
+        // Use invalid feed address
+        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
+            primaryProviderId: chainlink,
+            secondaryProviderId: bytes32(0),
+            primaryFeed: address(0x1), // Invalid feed - will fail
+            secondaryFeed: address(0),
+            usePullMode: false
+        });
+
+        // Should revert with InitialPriceFetchFailed
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                PriceFeedManager.InitialPriceFetchFailed.selector, token, chainlink
+            )
+        );
+        priceFeedManager.setPriceFeedConfigWithInit(token, config, "", 3600);
+    }
+
+    function testGetPrice_WorksAfterSetPriceFeedConfigWithInit() public {
+        // Setup provider
+        bytes32 chainlink = priceFeedManager.CHAINLINK_PROVIDER();
+
+        IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager.OracleProvider({
+            oracleContract: address(chainlinkOracle),
+            oracleType: IBaseOracle.OracleType.PUSH,
+            enabled: true
+        });
+
+        priceFeedManager.registerOracleProvider(chainlink, provider);
+
+        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
+            primaryProviderId: chainlink,
+            secondaryProviderId: bytes32(0),
+            primaryFeed: address(mockAdapter),
+            secondaryFeed: address(0),
+            usePullMode: false
+        });
+
+        // Setup with initial price
+        priceFeedManager.setPriceFeedConfigWithInit(token, config, "", 3600);
+
+        // getPrice should work
+        (uint256 price, uint256 publishTime) = priceFeedManager.getPrice(token, 3600);
+        assertGt(price, 0, "Price should be returned");
+        assertGt(publishTime, 0, "Publish time should be returned");
+    }
+
+    function testGetPriceWithFallback_RevertIfNoInitialPrice_SingleProvider() public {
+        // Setup provider
+        bytes32 chainlink = priceFeedManager.CHAINLINK_PROVIDER();
+
+        IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager.OracleProvider({
+            oracleContract: address(chainlinkOracle),
+            oracleType: IBaseOracle.OracleType.PUSH,
+            enabled: true
+        });
+
+        priceFeedManager.registerOracleProvider(chainlink, provider);
+
+        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
+            primaryProviderId: chainlink,
+            secondaryProviderId: bytes32(0),
+            primaryFeed: address(mockAdapter),
+            secondaryFeed: address(0),
+            usePullMode: false
+        });
+
+        // Use old setPriceFeedConfig (no initial price)
+        priceFeedManager.setPriceFeedConfig(token, config);
+
+        // Verify no initial price was set
+        (uint256 lastPrice,) = priceFeedManager.getLastPriceRecord(token);
+        assertEq(lastPrice, 0, "No initial price should be set");
+
+        // NOTE: getPrice() is a view function and does NOT check circuit breaker
+        // Only getPriceWithFallback() and getPriceWithUpdate() check circuit breaker
+        // So we test getPriceWithFallback instead
+        vm.expectRevert(
+            abi.encodeWithSelector(PriceFeedManager.InitialPriceNotSet.selector, token)
+        );
+        priceFeedManager.getPriceWithFallback(token, 3600);
+    }
+
+    function testGetPriceWithFallback_RevertIfNoInitialPrice() public {
+        // Setup providers
+        bytes32 chainlink = priceFeedManager.CHAINLINK_PROVIDER();
+        bytes32 blocksense = priceFeedManager.BLOCKSENSE_PROVIDER();
+
+        IPriceFeedManager.OracleProvider memory provider1 = IPriceFeedManager.OracleProvider({
+            oracleContract: address(chainlinkOracle),
+            oracleType: IBaseOracle.OracleType.PUSH,
+            enabled: true
+        });
+
+        IPriceFeedManager.OracleProvider memory provider2 = IPriceFeedManager.OracleProvider({
+            oracleContract: address(blocksenseOracle),
+            oracleType: IBaseOracle.OracleType.PUSH,
+            enabled: true
+        });
+
+        priceFeedManager.registerOracleProvider(chainlink, provider1);
+        priceFeedManager.registerOracleProvider(blocksense, provider2);
+
+        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
+            primaryProviderId: chainlink,
+            secondaryProviderId: blocksense,
+            primaryFeed: address(mockAdapter),
+            secondaryFeed: address(mockAdapter),
+            usePullMode: false
+        });
+
+        // Use old setPriceFeedConfig (no initial price)
+        priceFeedManager.setPriceFeedConfig(token, config);
+
+        // getPriceWithFallback should also revert with InitialPriceNotSet
+        vm.expectRevert(
+            abi.encodeWithSelector(PriceFeedManager.InitialPriceNotSet.selector, token)
+        );
+        priceFeedManager.getPriceWithFallback(token, 3600);
+    }
+
+    function testCircuitBreaker_WorksAfterInitialPriceSet() public {
+        // Setup provider
+        bytes32 chainlink = priceFeedManager.CHAINLINK_PROVIDER();
+
+        IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager.OracleProvider({
+            oracleContract: address(chainlinkOracle),
+            oracleType: IBaseOracle.OracleType.PUSH,
+            enabled: true
+        });
+
+        priceFeedManager.registerOracleProvider(chainlink, provider);
+
+        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
+            primaryProviderId: chainlink,
+            secondaryProviderId: bytes32(0),
+            primaryFeed: address(mockAdapter),
+            secondaryFeed: address(0),
+            usePullMode: false
+        });
+
+        // Setup with initial price (2000e18)
+        priceFeedManager.setPriceFeedConfigWithInit(token, config, "", 3600);
+
+        // Verify initial price
+        (uint256 initialPrice,) = priceFeedManager.getLastPriceRecord(token);
+        assertEq(initialPrice, 2000e18, "Initial price should be 2000e18");
+
+        // Change price slightly (within circuit breaker threshold)
+        mockAdapter.setLatestRoundData(1, 2100e18, 0, block.timestamp, 1);
+
+        // getPrice should still work (5% deviation is within 50% threshold)
+        (uint256 newPrice,) = priceFeedManager.getPrice(token, 3600);
+        assertEq(newPrice, 2100e18, "New price should be returned");
+    }
+
+    function testCircuitBreaker_TripsOnExtremeDeviation() public {
+        // Setup provider
+        bytes32 chainlink = priceFeedManager.CHAINLINK_PROVIDER();
+
+        IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager.OracleProvider({
+            oracleContract: address(chainlinkOracle),
+            oracleType: IBaseOracle.OracleType.PUSH,
+            enabled: true
+        });
+
+        priceFeedManager.registerOracleProvider(chainlink, provider);
+
+        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
+            primaryProviderId: chainlink,
+            secondaryProviderId: bytes32(0),
+            primaryFeed: address(mockAdapter),
+            secondaryFeed: address(0),
+            usePullMode: false
+        });
+
+        // Setup with initial price (2000e18)
+        priceFeedManager.setPriceFeedConfigWithInit(token, config, "", 3600);
+
+        // Change price dramatically (>50% deviation) within time window
+        // Price update must be within minDeviationWindow (60s) for circuit breaker to check
+        mockAdapter.setLatestRoundData(1, 200e18, 0, block.timestamp, 1); // 90% drop
+
+        // NOTE: Circuit breaker only checked in getPriceWithFallback/getPriceWithUpdate, not getPrice (view)
+        // Also, circuit breaker only triggers within minDeviationWindow (60s)
+        // Since we're calling immediately after setup, we're within the window
+        vm.expectRevert(); // CircuitBreakerTripped
+        priceFeedManager.getPriceWithFallback(token, 3600);
+    }
+
+    function testSetLastPriceRecord_ManualOverride() public {
+        // Setup provider
+        bytes32 chainlink = priceFeedManager.CHAINLINK_PROVIDER();
+
+        IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager.OracleProvider({
+            oracleContract: address(chainlinkOracle),
+            oracleType: IBaseOracle.OracleType.PUSH,
+            enabled: true
+        });
+
+        priceFeedManager.registerOracleProvider(chainlink, provider);
+
+        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
+            primaryProviderId: chainlink,
+            secondaryProviderId: bytes32(0),
+            primaryFeed: address(mockAdapter),
+            secondaryFeed: address(0),
+            usePullMode: false
+        });
+
+        // Use old setPriceFeedConfig
+        priceFeedManager.setPriceFeedConfig(token, config);
+
+        // Admin can manually set initial price
+        priceFeedManager.setLastPriceRecord(token, 2000e18);
+
+        // Verify price was set
+        (uint256 lastPrice,) = priceFeedManager.getLastPriceRecord(token);
+        assertEq(lastPrice, 2000e18, "Manual price should be set");
+
+        // getPrice should now work
+        (uint256 price,) = priceFeedManager.getPrice(token, 3600);
+        assertGt(price, 0, "Price should be returned after manual override");
     }
 }

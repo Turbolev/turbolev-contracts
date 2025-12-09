@@ -42,9 +42,6 @@ contract VaultGovernor is GovernanceManager {
     /// @notice VersionedBeacon contract (replaces VaultBeacon in V2)
     address public vaultBeacon;
 
-    /// @dev DEPRECATED: optInUpgradeManager removed in V2
-    address private __deprecated_optInUpgradeManager;
-
     /// @notice Emergency multisig (higher threshold)
     address public emergencyMultisig;
 
@@ -67,6 +64,8 @@ contract VaultGovernor is GovernanceManager {
     event GuardianRemoved(address indexed guardian);
 
     event EmergencyPause(address indexed vault, address indexed guardian);
+
+    event EmergencyUnpause(address indexed vault, address indexed caller);
 
     // ========================================================================
     // ERRORS
@@ -282,6 +281,52 @@ contract VaultGovernor is GovernanceManager {
 
         for (uint256 i = 0; i < vaults.length; i++) {
             emit EmergencyPause(vaults[i], msg.sender);
+        }
+    }
+
+    // ========================================================================
+    // EMERGENCY UNPAUSE FUNCTIONS (NO TIMELOCK - ADMIN ONLY)
+    // ========================================================================
+
+    /**
+     * @notice Emergency unpause vault by project token (Admin only, NO DELAY)
+     * @param projectToken Project token address
+     * @dev Allows quick recovery if vault was paused incorrectly
+     * @dev Only admin can unpause to prevent guardian abuse (NEW-M-03 fix)
+     */
+    function emergencyUnpauseVault(address projectToken) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (vaultManager == address(0)) revert VaultManagerNotSet();
+
+        IVaultManager(vaultManager).unpauseVault(projectToken);
+
+        emit EmergencyUnpause(projectToken, msg.sender);
+    }
+
+    /**
+     * @notice Emergency unpause vault by address (Admin only, NO DELAY)
+     * @param vault Vault address
+     * @dev Allows quick recovery if vault was paused incorrectly
+     */
+    function emergencyUnpauseVaultByAddress(address vault) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (vaultManager == address(0)) revert VaultManagerNotSet();
+
+        IVaultManager(vaultManager).unpauseVaultByAddress(vault);
+
+        emit EmergencyUnpause(vault, msg.sender);
+    }
+
+    /**
+     * @notice Emergency batch unpause vaults (Admin only, NO DELAY)
+     * @param vaults Array of vault addresses
+     * @dev Allows quick recovery of multiple vaults
+     */
+    function emergencyBatchUnpause(address[] calldata vaults) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (vaultManager == address(0)) revert VaultManagerNotSet();
+
+        IVaultManager(vaultManager).batchUnpauseVaults(vaults);
+
+        for (uint256 i = 0; i < vaults.length; i++) {
+            emit EmergencyUnpause(vaults[i], msg.sender);
         }
     }
 

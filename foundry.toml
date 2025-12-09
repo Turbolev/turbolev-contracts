@@ -4,7 +4,7 @@ out = "out"
 libs = ["lib"]
 solc_version = "0.8.22"
 optimizer = true
-optimizer_runs = 1000
+optimizer_runs = 100
 via_ir = true
 
 # Formatter settings

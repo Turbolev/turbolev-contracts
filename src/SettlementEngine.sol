@@ -395,7 +395,7 @@ contract SettlementEngine is
         uint16 _winMultiplierBps,
         uint256 _minBetAmount,
         uint256 _maxBetAmount
-    ) external onlyOwner {
+    ) external onlyOwner whenNotPaused {
         // Validate
         if (_houseEdgeBps > 1000) revert InvalidConfig(); // Max 10% house edge
         if (_winMultiplierBps < BASIS_POINTS) revert InvalidConfig(); // Min 1x multiplier (10000 bps)
@@ -414,7 +414,7 @@ contract SettlementEngine is
     /**
      * @notice Set BinaryBet contract address
      */
-    function setPositionManager(address _positionManager) external onlyOwner {
+    function setPositionManager(address _positionManager) external onlyOwner whenNotPaused {
         if (_positionManager == address(0)) revert InvalidAddress();
         address oldAddress = positionManager;
         positionManager = _positionManager;
@@ -424,7 +424,7 @@ contract SettlementEngine is
     /**
      * @notice Set VaultManager address
      */
-    function setVaultManager(address _vaultManager) external onlyOwner {
+    function setVaultManager(address _vaultManager) external onlyOwner whenNotPaused {
         if (_vaultManager == address(0)) revert InvalidAddress();
         address oldAddress = vaultManager;
         vaultManager = _vaultManager;
@@ -434,7 +434,7 @@ contract SettlementEngine is
     /**
      * @notice Set PriceFeedManager address
      */
-    function setPriceFeedManager(address _priceFeedManager) external onlyOwner {
+    function setPriceFeedManager(address _priceFeedManager) external onlyOwner whenNotPaused {
         if (_priceFeedManager == address(0)) revert InvalidAddress();
         address oldAddress = priceFeedManager;
         priceFeedManager = _priceFeedManager;
@@ -459,7 +459,7 @@ contract SettlementEngine is
      * @notice Set max profit cap in basis points
      * @param _maxProfitCapBps New max profit cap (max 1000 = 10%)
      */
-    function setMaxProfitCapBps(uint16 _maxProfitCapBps) external onlyOwner {
+    function setMaxProfitCapBps(uint16 _maxProfitCapBps) external onlyOwner whenNotPaused {
         if (_maxProfitCapBps > 1000) revert InvalidConfig();
         uint16 oldBps = maxProfitCapBps;
         maxProfitCapBps = _maxProfitCapBps;

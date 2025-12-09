@@ -17,6 +17,14 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
  */
 abstract contract AdminAccessControlUpgradeable is Initializable {
     // ========================================================================
+    // CONSTANTS
+    // ========================================================================
+
+    /// @notice Maximum number of admins allowed
+    /// @dev NEW-M-01 FIX: Prevents gas DOS in _clearAdmins() by capping admin list size
+    uint256 public constant MAX_ADMINS = 50;
+
+    // ========================================================================
     // STATE VARIABLES
     // ========================================================================
 
@@ -44,6 +52,8 @@ abstract contract AdminAccessControlUpgradeable is Initializable {
     error InvalidAdminAddress();
     error AdminAlreadyExists();
     error AdminNotFound();
+    /// @dev NEW-M-01 FIX: Thrown when trying to add admin beyond MAX_ADMINS limit
+    error MaxAdminsReached();
 
     // ========================================================================
     // INITIALIZER
@@ -109,10 +119,12 @@ abstract contract AdminAccessControlUpgradeable is Initializable {
     /**
      * @notice Add an admin address (internal)
      * @param admin Address to add as admin
+     * @dev NEW-M-01 FIX: Added MAX_ADMINS check to prevent gas DOS in _clearAdmins()
      */
     function _addAdmin(address admin) internal {
         if (admin == address(0)) revert InvalidAdminAddress();
         if (_admins[admin]) revert AdminAlreadyExists();
+        if (_adminList.length >= MAX_ADMINS) revert MaxAdminsReached();
 
         _admins[admin] = true;
         _adminList.push(admin);

@@ -106,6 +106,7 @@ interface IAssetVault {
      * @param fee Fee collected
      * @param positionSize Position size
      * @param direction Position direction (1 = LONG, 2 = SHORT)
+     * @param user User address for event tracking (M-05 FIX: Replace tx.origin)
      */
     function updateVaultPnL(
         uint64 positionId,
@@ -113,7 +114,8 @@ interface IAssetVault {
         int256 vaultPnL,
         uint256 fee,
         uint256 positionSize,
-        uint8 direction
+        uint8 direction,
+        address user
     ) external;
 
     function updateVaultParams(uint256 _minBetAmount, uint256 _maxBetAmount) external;
@@ -318,8 +320,16 @@ interface IAssetVault {
     /**
      * @notice Claim pending rewards (processes up to MAX_DAYS_PER_CALCULATION days per call)
      * @dev Processes rewards in batches to prevent out of gas errors
+     *      No slippage protection - use claimRewardsProtected for front-running protection
      */
     function claimRewards() external;
+
+    /**
+     * @notice Claim pending rewards with slippage protection
+     * @param minExpectedRewards Minimum rewards expected (reverts if actual < min)
+     * @dev H-05 FIX: Added slippage protection to prevent front-running attacks
+     */
+    function claimRewardsProtected(uint256 minExpectedRewards) external;
 
     /**
      * @notice Claim pending rewards with custom batch size
@@ -623,6 +633,23 @@ interface IAssetVault {
             uint16 tier3MaxLeverage
         );
 
+    /**
+     * @notice Get utilization-based leverage configuration
+     * @dev Controls how max leverage is reduced as vault utilization increases
+     */
+    function getUtilizationConfig()
+        external
+        view
+        returns (
+            uint16 tier1Bps,
+            uint16 tier2Bps,
+            uint16 tier3Bps,
+            uint16 factorTier1Bps,
+            uint16 factorTier2Bps,
+            uint16 factorTier3Bps,
+            uint16 factorEmergencyBps
+        );
+
     // Note: getFeeConfig() is defined above in FEE-RELATED FUNCTIONS section
 
     /**
@@ -687,4 +714,22 @@ interface IAssetVault {
      * @notice Get queue start index
      */
     function queueStartIndex() external view returns (uint256);
+
+    // ========================================================================
+    // EXPLICIT ARRAY LENGTH GETTERS (M-08 FIX: Avoid silent failures in VaultViewer)
+    // ========================================================================
+
+    /**
+     * @notice Get total number of active LPs in the vault
+     * @return length Number of LPs in the vaultLPs array
+     * @dev M-08 FIX: Explicit getter to avoid try-catch iteration in VaultViewer
+     */
+    function getVaultLPsLength() external view returns (uint256 length);
+
+    /**
+     * @notice Get total length of pending payout queue
+     * @return length Total length of pendingPayoutQueue array
+     * @dev M-08 FIX: Explicit getter to avoid try-catch iteration in VaultViewer
+     */
+    function getPendingPayoutQueueLength() external view returns (uint256 length);
 }

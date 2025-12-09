@@ -710,25 +710,17 @@ contract VaultViewer {
 
     // ========================================================================
     // LP ARRAY VIEW FUNCTIONS (moved from AssetVaultUpgradeable)
+    // M-08 FIX: Use explicit array length getters instead of try-catch iteration
     // ========================================================================
 
     /**
      * @notice Get total number of active LPs
      * @param vault Address of the vault
      * @return count Number of LPs currently in the vault
+     * @dev M-08 FIX: Now uses explicit getter instead of try-catch iteration
      */
     function getVaultLPsCount(address vault) external view returns (uint256 count) {
-        IAssetVault v = IAssetVault(vault);
-        // Iterate to find length since we can't get array length directly
-        uint256 i = 0;
-        while (true) {
-            try v.vaultLPs(i) returns (address) {
-                i++;
-            } catch {
-                break;
-            }
-        }
-        return i;
+        return IAssetVault(vault).getVaultLPsLength();
     }
 
     /**
@@ -755,20 +747,12 @@ contract VaultViewer {
      * @notice Get all active LPs (use with caution for large arrays)
      * @param vault Address of the vault
      * @return lps Array of all LP addresses
-     * @dev May be gas-expensive for large LP counts
+     * @dev M-08 FIX: Now uses explicit getter instead of try-catch iteration
+     *      May be gas-expensive for large LP counts
      */
     function getAllVaultLPs(address vault) external view returns (address[] memory lps) {
         IAssetVault v = IAssetVault(vault);
-        // First count LPs
-        uint256 count = 0;
-        while (true) {
-            try v.vaultLPs(count) returns (address) {
-                count++;
-            } catch {
-                break;
-            }
-        }
-        // Then collect them
+        uint256 count = v.getVaultLPsLength();
         lps = new address[](count);
         for (uint256 i = 0; i < count; i++) {
             lps[i] = v.vaultLPs(i);
@@ -779,6 +763,7 @@ contract VaultViewer {
      * @notice Get effective queue length (items not yet processed)
      * @param vault Address of the vault
      * @return effectiveLength Number of pending payout items
+     * @dev M-08 FIX: Now uses explicit getter instead of try-catch iteration
      */
     function getEffectiveQueueLength(address vault)
         external
@@ -787,15 +772,11 @@ contract VaultViewer {
     {
         IAssetVault v = IAssetVault(vault);
         uint256 startIdx = v.queueStartIndex();
-        // Count items from startIdx
-        uint256 i = startIdx;
-        while (true) {
-            try v.pendingPayoutQueue(i) returns (uint64) {
-                i++;
-            } catch {
-                break;
-            }
+        uint256 totalLength = v.getPendingPayoutQueueLength();
+        
+        if (totalLength > startIdx) {
+            return totalLength - startIdx;
         }
-        return i - startIdx;
+        return 0;
     }
 }

@@ -74,6 +74,10 @@ contract PositionManager is
     /// @notice Maximum allowed min position hold time (1 hour)
     uint256 private constant MAX_MIN_POSITION_HOLD_TIME = 3600;
 
+    /// @notice H-01 FIX: Maximum allowed price age for oracle validation (1 hour)
+    /// @dev Push oracles may have stale prices, so we allow up to 1 hour
+    uint256 private constant MAX_ALLOWED_PRICE_AGE = 1 hours;
+
     /// @notice Pending close reason enum
     enum PendingCloseReason {
         NONE, // 0 - Default/not set
@@ -350,10 +354,9 @@ contract PositionManager is
         IERC20(projectToken).safeTransferFrom(msg.sender, address(this), amount);
 
         // Get price from PriceFeedManager
-        // Use deadline as maxAge for price validation
-        // M-04 FIX: Since deadline is already validated above, calculate maxAge directly
+        // H-01 FIX: Use _calculateMaxAge to cap price staleness
         if (priceFeedManager == address(0)) revert InvalidAddress();
-        uint256 maxAge = deadline - block.timestamp;
+        uint256 maxAge = _calculateMaxAge(deadline);
 
         // Use getPriceWithUpdate for pull oracles (Pyth) if updateData provided
         if (priceUpdateData.length > 0) {
@@ -492,9 +495,8 @@ contract PositionManager is
         // Try to get close price from Blocksense Oracle via SettlementEngine
         if (settlementEngine == address(0)) revert InvalidAddress();
 
-        // Use deadline as maxAge for price validation
-        // M-04 FIX: Since deadline is already validated above, calculate maxAge directly
-        uint256 maxAge = deadline - block.timestamp;
+        // H-01 FIX: Use _calculateMaxAge to cap price staleness
+        uint256 maxAge = _calculateMaxAge(deadline);
 
         // Try to get price - if stale, move to pending instead of reverting
         if (priceFeedManager == address(0)) {
@@ -599,9 +601,8 @@ contract PositionManager is
         // Get current price from PriceFeedManager to verify position is not liquidated
         uint256 currentPrice;
         if (priceFeedManager != address(0)) {
-            // Use deadline as maxAge for price validation
-            // M-04 FIX: Since deadline is already validated above, calculate maxAge directly
-            uint256 maxAge = deadline - block.timestamp;
+            // H-01 FIX: Use _calculateMaxAge to cap price staleness
+            uint256 maxAge = _calculateMaxAge(deadline);
             (currentPrice,) = IPriceFeedManager(priceFeedManager).getPrice(pos.projectToken, maxAge);
 
             // Check maxAcceptablePrice if specified
@@ -712,8 +713,8 @@ contract PositionManager is
 
         // Get close price from PriceFeedManager
         if (priceFeedManager == address(0)) revert InvalidAddress();
-        // M-04 FIX: Since deadline is now validated, calculate maxAge directly
-        uint256 maxAge = deadline - block.timestamp;
+        // H-01 FIX: Use _calculateMaxAge to cap price staleness
+        uint256 maxAge = _calculateMaxAge(deadline);
         (uint256 closePrice, uint256 pricePublishTime) =
             IPriceFeedManager(priceFeedManager).getPrice(pos.projectToken, maxAge);
         if (closePrice == 0) revert InvalidPrice();
@@ -963,6 +964,19 @@ contract PositionManager is
     // ========================================================================
 
     /**
+     * @notice Calculate max age for price validation with cap
+     * @dev H-01 FIX: Prevents accepting very stale prices by capping maxAge
+     * @param deadline The deadline timestamp from user
+     * @return maxAge The capped max age for price validation
+     */
+    function _calculateMaxAge(uint256 deadline) internal view returns (uint256 maxAge) {
+        maxAge = deadline - block.timestamp;
+        if (maxAge > MAX_ALLOWED_PRICE_AGE) {
+            maxAge = MAX_ALLOWED_PRICE_AGE;
+        }
+    }
+
+    /**
      * @notice Process settlement logic with synthetic leverage and funding
      * @dev Delegates to SettlementEngine for settlement calculation, then adjusts for funding
      */
@@ -1032,7 +1046,8 @@ contract PositionManager is
                 vaultPnL,
                 fee,
                 pos.positionSize,
-                pos.direction // Pass position direction
+                pos.direction, // Pass position direction
+                pos.user // M-05 FIX: Pass user address instead of tx.origin
             );
         }
 
@@ -1079,6 +1094,7 @@ contract PositionManager is
     function setSettlementEngine(address _settlementEngine)
         external
         onlyOwner
+        whenNotPaused
         validAddress(_settlementEngine)
     {
         address oldAddress = settlementEngine;
@@ -1092,6 +1108,7 @@ contract PositionManager is
     function setVaultManager(address _vaultManager)
         external
         onlyOwner
+        whenNotPaused
         validAddress(_vaultManager)
     {
         address oldAddress = vaultManager;
@@ -1105,6 +1122,7 @@ contract PositionManager is
     function setPriceFeedManager(address _priceFeedManager)
         external
         onlyOwner
+        whenNotPaused
         validAddress(_priceFeedManager)
     {
         address oldAddress = priceFeedManager;
@@ -1116,7 +1134,7 @@ contract PositionManager is
      * @notice Add an admin address
      * @param _admin Admin address to add
      */
-    function addAdmin(address _admin) external onlyOwner validAddress(_admin) {
+    function addAdmin(address _admin) external onlyOwner whenNotPaused validAddress(_admin) {
         _addAdmin(_admin);
     }
 
@@ -1124,7 +1142,7 @@ contract PositionManager is
      * @notice Remove an admin address
      * @param _admin Admin address to remove
      */
-    function removeAdmin(address _admin) external onlyOwner validAddress(_admin) {
+    function removeAdmin(address _admin) external onlyOwner whenNotPaused validAddress(_admin) {
         _removeAdmin(_admin);
     }
 
@@ -1146,7 +1164,7 @@ contract PositionManager is
      * @notice Update maintenance margin ratio
      * @param newRatio New maintenance margin ratio in bps (e.g., 2000 = 20%)
      */
-    function setMaintenanceMarginRatio(uint256 newRatio) external onlyOwner {
+    function setMaintenanceMarginRatio(uint256 newRatio) external onlyOwner whenNotPaused {
         if (newRatio > 5000) revert InvalidMaintenanceMarginRatio();
         uint256 oldRatio = maintenanceMarginRatio;
         maintenanceMarginRatio = newRatio;
@@ -1158,7 +1176,7 @@ contract PositionManager is
      * @param _minLeverage Min leverage (e.g., 1)
      * @param _maxLeverage Max leverage (e.g., 100)
      */
-    function setLeverageLimits(uint8 _minLeverage, uint8 _maxLeverage) external onlyOwner {
+    function setLeverageLimits(uint8 _minLeverage, uint8 _maxLeverage) external onlyOwner whenNotPaused {
         if (_minLeverage < 1 || _maxLeverage > 100 || _minLeverage > _maxLeverage) {
             revert InvalidLeverage();
         }
@@ -1171,7 +1189,7 @@ contract PositionManager is
      * @notice Update minimum position hold time
      * @param _minPositionHoldTime New minimum hold time in seconds
      */
-    function setMinPositionHoldTime(uint256 _minPositionHoldTime) external onlyOwner {
+    function setMinPositionHoldTime(uint256 _minPositionHoldTime) external onlyOwner whenNotPaused {
         if (_minPositionHoldTime > MAX_MIN_POSITION_HOLD_TIME) {
             revert InvalidHoldTime();
         }

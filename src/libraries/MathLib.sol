@@ -359,6 +359,122 @@ library MathLib {
     }
 
     // ========================================================================
+    // MULDIV OPERATIONS (C-03 FIX: Prevent overflow in funding calculations)
+    // ========================================================================
+
+    /**
+     * @notice Safe multiplication then division for unsigned integers
+     * @param a First multiplicand
+     * @param b Second multiplicand
+     * @param denominator Divisor
+     * @return result (a * b) / denominator without intermediate overflow
+     * @dev Uses 512-bit intermediate for large values, falls back to direct calc for small values
+     */
+    function mulDiv(uint256 a, uint256 b, uint256 denominator) internal pure returns (uint256 result) {
+        if (denominator == 0) revert DivisionByZero();
+        if (a == 0 || b == 0) return 0;
+
+        // Check if we can do direct multiplication without overflow
+        // If a * b won't overflow, do it directly for gas efficiency
+        unchecked {
+            uint256 prod0 = a * b;
+            // Check for overflow: if a != 0 and prod0 / a != b, we overflowed
+            if (a != 0 && prod0 / a == b) {
+                // No overflow, safe to divide directly
+                return prod0 / denominator;
+            }
+        }
+
+        // Need 512-bit precision
+        // We use the fact that (a * b) = (a * b / 2^256) * 2^256 + (a * b % 2^256)
+        // prod1 = high 256 bits, prod0 = low 256 bits
+        uint256 prod0;
+        uint256 prod1;
+
+        assembly {
+            let mm := mulmod(a, b, not(0))
+            prod0 := mul(a, b)
+            prod1 := sub(sub(mm, prod0), lt(mm, prod0))
+        }
+
+        // If prod1 == 0, result fits in 256 bits (shouldn't happen if we reached here, but safety check)
+        if (prod1 == 0) {
+            return prod0 / denominator;
+        }
+
+        // Make sure result won't overflow
+        if (prod1 >= denominator) revert MathOverflow();
+
+        // 512-bit division by denominator
+        uint256 remainder;
+        assembly {
+            remainder := mulmod(a, b, denominator)
+            prod1 := sub(prod1, gt(remainder, prod0))
+            prod0 := sub(prod0, remainder)
+        }
+
+        // Factor out powers of 2 from denominator
+        uint256 twos = denominator & (~denominator + 1);
+        assembly {
+            denominator := div(denominator, twos)
+            prod0 := div(prod0, twos)
+            twos := add(div(sub(0, twos), twos), 1)
+        }
+        prod0 |= prod1 * twos;
+
+        // Compute modular inverse of denominator
+        uint256 inverse = (3 * denominator) ^ 2;
+        inverse *= 2 - denominator * inverse;
+        inverse *= 2 - denominator * inverse;
+        inverse *= 2 - denominator * inverse;
+        inverse *= 2 - denominator * inverse;
+        inverse *= 2 - denominator * inverse;
+        inverse *= 2 - denominator * inverse;
+
+        result = prod0 * inverse;
+    }
+
+    /**
+     * @notice Safe multiplication then division for signed integers
+     * @param a First multiplicand (signed)
+     * @param b Second multiplicand (signed, typically position size cast to int256)
+     * @param denominator Divisor (signed, must be positive)
+     * @return result (a * b) / denominator without intermediate overflow
+     * @dev C-03 FIX: Prevents overflow in funding rate calculations
+     *      Handles sign separately, uses mulDiv for magnitude
+     *
+     * Example usage in FundingRateLib:
+     *   fundingOwed = MathLib.mulDivSigned(rateDiff, int256(positionSize), int256(FUNDING_PRECISION));
+     */
+    function mulDivSigned(int256 a, int256 b, int256 denominator) internal pure returns (int256 result) {
+        if (denominator == 0) revert DivisionByZero();
+        if (a == 0 || b == 0) return 0;
+
+        // Determine sign of result
+        // Result is negative if exactly one of a or b is negative (XOR on signs)
+        bool resultNegative = (a < 0) != (b < 0);
+
+        // Convert to absolute values
+        uint256 absA = a < 0 ? uint256(-a) : uint256(a);
+        uint256 absB = b < 0 ? uint256(-b) : uint256(b);
+        uint256 absDenom = denominator < 0 ? uint256(-denominator) : uint256(denominator);
+
+        // If denominator is negative, flip the result sign
+        if (denominator < 0) {
+            resultNegative = !resultNegative;
+        }
+
+        // Use unsigned mulDiv for the magnitude
+        uint256 absResult = mulDiv(absA, absB, absDenom);
+
+        // Check that result fits in int256
+        if (absResult > uint256(type(int256).max)) revert SignedOverflow();
+
+        // Apply sign
+        result = resultNegative ? -int256(absResult) : int256(absResult);
+    }
+
+    // ========================================================================
     // BPS VALIDATION
     // ========================================================================
 

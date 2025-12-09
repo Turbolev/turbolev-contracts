@@ -45,9 +45,6 @@ contract VaultManager is
     /// @notice VersionedBeacon address (replaces VaultBeacon in V2)
     address public vaultBeacon;
 
-    /// @dev DEPRECATED: optInUpgradeManager removed in V2
-    address private __deprecated_optInUpgradeManager;
-
     /// @notice TimelockController address
     address public timelockController;
 
@@ -213,7 +210,7 @@ contract VaultManager is
         uint256 _minBetAmount,
         uint256 _maxBetAmount,
         uint256 _graduationThreshold
-    ) public onlyOwner returns (address vaultAddress) {
+    ) public onlyOwner whenNotPaused returns (address vaultAddress) {
         if (_projectToken == address(0) || vaultManagerHelper == address(0)) {
             revert InvalidAddress();
         }
@@ -270,7 +267,7 @@ contract VaultManager is
         uint256[] calldata minBetAmounts,
         uint256[] calldata maxBetAmounts,
         uint256[] calldata graduationThresholds
-    ) external onlyOwner returns (address[] memory vaultAddresses) {
+    ) external onlyOwner whenNotPaused returns (address[] memory vaultAddresses) {
         // L-03 FIX: Use custom error instead of string
         if (
             projectTokens.length != minBetAmounts.length
@@ -336,6 +333,7 @@ contract VaultManager is
     /**
      * @notice Update vault P&L
      * @param direction Position direction (1 = LONG, 2 = SHORT)
+     * @param user User address for event tracking (M-05 FIX: Replace tx.origin)
      */
     function updateVaultPnLWithLeverage(
         address _projectToken,
@@ -344,10 +342,11 @@ contract VaultManager is
         int256 vaultPnL,
         uint256 fee,
         uint256 positionSize,
-        uint8 direction
+        uint8 direction,
+        address user
     ) external onlyPositionManager {
         IAssetVault(_getVault(_projectToken)).updateVaultPnL(
-            positionId, collateral, vaultPnL, fee, positionSize, direction
+            positionId, collateral, vaultPnL, fee, positionSize, direction, user
         );
     }
 
@@ -485,7 +484,7 @@ contract VaultManager is
      * @notice Deactivate vault
      * @param vault Vault address
      */
-    function deactivateVault(address vault) external onlyOwner {
+    function deactivateVault(address vault) external onlyOwner whenNotPaused {
         IVaultManager.VaultInfo storage info = vaultInfos[vault];
         if (info.vaultAddress == address(0)) revert VaultNotFound();
 
@@ -498,7 +497,7 @@ contract VaultManager is
      * @notice Reactivate vault
      * @param vault Vault address
      */
-    function reactivateVault(address vault) external onlyOwner {
+    function reactivateVault(address vault) external onlyOwner whenNotPaused {
         IVaultManager.VaultInfo storage info = vaultInfos[vault];
         if (info.vaultAddress == address(0)) revert VaultNotFound();
 
@@ -514,7 +513,7 @@ contract VaultManager is
     /**
      * @notice Set PositionManager contract address
      */
-    function setPositionManager(address _positionManager) external onlyOwner {
+    function setPositionManager(address _positionManager) external onlyOwner whenNotPaused {
         if (_positionManager == address(0)) revert InvalidAddress();
         positionManager = _positionManager;
     }
@@ -522,7 +521,7 @@ contract VaultManager is
     /**
      * @notice Set VaultManagerHelper contract address
      */
-    function setVaultManagerHelper(address _vaultManagerHelper) external onlyOwner {
+    function setVaultManagerHelper(address _vaultManagerHelper) external onlyOwner whenNotPaused {
         if (_vaultManagerHelper == address(0)) revert InvalidAddress();
         vaultManagerHelper = _vaultManagerHelper;
     }
@@ -531,7 +530,7 @@ contract VaultManager is
      * @notice Set Vault Beacon address
      * @param _vaultBeacon New beacon address
      */
-    function setVaultBeacon(address _vaultBeacon) external onlyOwner {
+    function setVaultBeacon(address _vaultBeacon) external onlyOwner whenNotPaused {
         if (_vaultBeacon == address(0)) revert InvalidAddress();
 
         address oldBeacon = vaultBeacon;
@@ -544,7 +543,7 @@ contract VaultManager is
      * @notice Set TimelockController address
      * @param _timelockController New timelock controller address
      */
-    function setTimelockController(address _timelockController) external onlyOwner {
+    function setTimelockController(address _timelockController) external onlyOwner whenNotPaused {
         if (_timelockController == address(0)) revert InvalidAddress();
 
         address oldController = timelockController;
@@ -557,7 +556,7 @@ contract VaultManager is
      * @notice Set MultisigWallet address
      * @param _multisigWallet New multisig wallet address
      */
-    function setMultisigWallet(address _multisigWallet) external onlyOwner {
+    function setMultisigWallet(address _multisigWallet) external onlyOwner whenNotPaused {
         if (_multisigWallet == address(0)) revert InvalidAddress();
 
         address oldWallet = multisigWallet;
@@ -570,7 +569,7 @@ contract VaultManager is
      * @notice Set VaultGovernor address
      * @param _vaultGovernor New vault governor address
      */
-    function setVaultGovernor(address _vaultGovernor) external onlyOwner {
+    function setVaultGovernor(address _vaultGovernor) external onlyOwner whenNotPaused {
         if (_vaultGovernor == address(0)) revert InvalidAddress();
 
         address oldGovernor = vaultGovernor;

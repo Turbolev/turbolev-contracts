@@ -8,6 +8,7 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./libraries/AdminAccessControl.sol";
+import "./libraries/VaultConfigLib.sol";
 import "./libraries/VaultRiskLib.sol";
 import "./libraries/FundingRateLib.sol";
 import "./libraries/VaultPayoutLib.sol";
@@ -133,19 +134,6 @@ contract AssetVaultUpgradeable is
     uint16 public tier3MaxLeverage; // Mature Phase max leverage
 
     // ========================================================================
-    // DEPRECATED STATE VARIABLES (kept for storage layout compatibility)
-    // ========================================================================
-
-    /// @dev DEPRECATED: Opt-in mechanism removed in V2
-    bool private __deprecated_optInUpgrade;
-
-    /// @dev DEPRECATED: Opt-in mechanism removed in V2
-    uint256 private __deprecated_optInTimestamp;
-
-    /// @dev DEPRECATED: Opt-in mechanism removed in V2
-    address private __deprecated_upgradeManager;
-
-    // ========================================================================
     // FUNDING RATE STATE VARIABLES
     // ========================================================================
 
@@ -178,10 +166,18 @@ contract AssetVaultUpgradeable is
     mapping(address => uint256) public lpIndex;
 
     // ========================================================================
+    // UTILIZATION-BASED LEVERAGE CONFIG
+    // ========================================================================
+
+    /// @notice Configuration for utilization-based leverage adjustment
+    /// @dev Controls how max leverage is reduced as vault utilization increases
+    VaultConfigLib.UtilizationConfig public utilizationConfig;
+
+    // ========================================================================
     // STORAGE GAP
     // ========================================================================
 
-    uint256[20] private __gap; // Reduced from 21 to 20 (added lpIndex mapping - 1 slot)
+    uint256[19] private __gap; // Reduced from 20 to 19 (added utilizationConfig - 1 slot)
 
     // ========================================================================
     // STRUCTS (copy từ AssetVault)
@@ -400,6 +396,17 @@ contract AssetVaultUpgradeable is
         uint16 tier3Max
     );
 
+    // Utilization-based Leverage Config Events
+    event UtilizationConfigUpdated(
+        uint16 tier1Bps,
+        uint16 tier2Bps,
+        uint16 tier3Bps,
+        uint16 factorTier1Bps,
+        uint16 factorTier2Bps,
+        uint16 factorTier3Bps,
+        uint16 factorEmergencyBps
+    );
+
     // ========== FUNDING RATE EVENTS ==========
     event HourlyFundingUpdated(
         int256 cumulativeLongRate,
@@ -473,6 +480,8 @@ contract AssetVaultUpgradeable is
     error VaultManagerHelperNotSet();
     error NativeTokenNotAllowed();
     error TotalOICapExceeded();
+    error InsufficientRewards(uint256 actual, uint256 minimum); // H-05 FIX: Slippage protection
+    error ZeroPayoutAmount(); // M-04 FIX: Revert instead of silent return
 
     // ========================================================================
     // MODIFIERS
@@ -598,23 +607,13 @@ contract AssetVaultUpgradeable is
         lastFundingUpdateTime = block.timestamp;
         lastFundingUpdateHour = block.timestamp / FundingRateLib.SECONDS_PER_HOUR;
 
+        // Initialize utilization-based leverage config with defaults
+        utilizationConfig = VaultConfigLib.getDefaultUtilizationConfig();
+
         emit VaultInitialized(
             _projectToken, bytes32(0), address(0), address(0), address(0), false, block.timestamp
         );
     }
-
-    // ========================================================================
-    // UPGRADE MANAGEMENT FUNCTIONS
-    // ========================================================================
-
-    // ========================================================================
-    // DEPRECATED OPT-IN FUNCTIONS (Removed in V2)
-    // ========================================================================
-    // Opt-in mechanism has been removed. Upgrades are now managed through:
-    // 1. VersionedBeacon - tracks versions, allows rollback
-    // 2. Timelock - provides grace period for LP review
-    // 3. VaultGovernor - proposal/vote system with multisig
-    // ========================================================================
 
     // ========================================================================
     // RECEIVE / FALLBACK
@@ -916,7 +915,7 @@ contract AssetVaultUpgradeable is
         nonReentrant
     {
         if (user == address(0)) revert InvalidAddress();
-        if (amount == 0) return;
+        if (amount == 0) revert ZeroPayoutAmount(); // M-04 FIX: Revert instead of silent return
 
         // Use library to calculate payout requirements
         VaultPayoutLib.PayoutParams memory params = VaultPayoutLib.PayoutParams({
@@ -996,6 +995,7 @@ contract AssetVaultUpgradeable is
      * @param vaultPnL Vault P&L (negative of user P&L)
      * @param positionSize Position size to remove from exposure
      * @param direction Position direction (1 = LONG, 2 = SHORT)
+     * @param user User address for event tracking (M-05 FIX: Replace tx.origin)
      */
     function updateVaultPnL(
         uint64 positionId,
@@ -1003,7 +1003,8 @@ contract AssetVaultUpgradeable is
         int256 vaultPnL,
         uint256, /* fee */
         uint256 positionSize,
-        uint8 direction
+        uint8 direction,
+        address user
     ) external onlyPositionManager {
         // Calculate close fee and PnL update using library
         uint256 closeFee = VaultPayoutLib.calculateCloseFee(collateral, closePositionFeeBps);
@@ -1012,7 +1013,7 @@ contract AssetVaultUpgradeable is
             vaultInfo.totalLiquidity += closeFee;
             vaultInfo.totalFeesCollected += closeFee;
             withdrawableFees += closeFee;
-            emit ClosePositionFeeCollected(positionId, tx.origin, closeFee, block.timestamp);
+            emit ClosePositionFeeCollected(positionId, user, closeFee, block.timestamp); // M-05 FIX: Use user parameter instead of tx.origin
         }
 
         // Use library to calculate PnL update
@@ -1162,7 +1163,15 @@ contract AssetVaultUpgradeable is
             maxDirectionalExposureBps: maxDirectionalExposureBps,
             // Leverage & OI cap
             vaultMaxLeverage: vaultMaxLeverage,
-            totalOIRiskMultiplierBps: currentMultiplier
+            totalOIRiskMultiplierBps: currentMultiplier,
+            // Utilization-based leverage adjustment
+            utilizationTier1Bps: utilizationConfig.tier1Bps,
+            utilizationTier2Bps: utilizationConfig.tier2Bps,
+            utilizationTier3Bps: utilizationConfig.tier3Bps,
+            leverageFactorTier1Bps: utilizationConfig.factorTier1Bps,
+            leverageFactorTier2Bps: utilizationConfig.factorTier2Bps,
+            leverageFactorTier3Bps: utilizationConfig.factorTier3Bps,
+            leverageFactorEmergencyBps: utilizationConfig.factorEmergencyBps
         });
 
         // Delegate to library for risk check - reverts on failure
@@ -1350,11 +1359,32 @@ contract AssetVaultUpgradeable is
     }
 
     /**
-     * @notice Claim pending rewards
-     * @dev Processes rewards in batches to prevent out of gas errors
-     *      If there are more days to process, user can call this function again
+     * @notice Claim pending rewards (no slippage protection)
+     * @dev Backward compatible - calls claimRewardsProtected with minExpectedRewards = 0
      */
     function claimRewards() external nonReentrant whenNotPaused {
+        _claimRewardsInternal(0);
+    }
+
+    /**
+     * @notice Claim pending rewards with slippage protection
+     * @param minExpectedRewards Minimum rewards expected (reverts if actual < min)
+     * @dev H-05 FIX: Added slippage protection to prevent front-running attacks
+     */
+    function claimRewardsProtected(uint256 minExpectedRewards)
+        external
+        nonReentrant
+        whenNotPaused
+    {
+        _claimRewardsInternal(minExpectedRewards);
+    }
+
+    /**
+     * @notice Internal function to claim rewards with optional slippage protection
+     * @param minExpectedRewards Minimum rewards expected (0 = no protection)
+     * @dev H-05 FIX: Centralized logic with slippage check
+     */
+    function _claimRewardsInternal(uint256 minExpectedRewards) internal {
         LPPosition storage lpPos = lpPositions[msg.sender];
         uint256 rewards = claimableRewards[msg.sender];
 
@@ -1372,6 +1402,11 @@ contract AssetVaultUpgradeable is
             emit RewardsCapped(msg.sender, rewards, actualRewards, block.timestamp);
         }
         if (actualRewards == 0) revert InsufficientLiquidity();
+
+        // H-05 FIX: Slippage protection - revert if actual rewards less than minimum expected
+        if (actualRewards < minExpectedRewards) {
+            revert InsufficientRewards(actualRewards, minExpectedRewards);
+        }
 
         // Update state
         lpPos.lastProcessedDay = lastSnapshotDay;
@@ -2058,6 +2093,70 @@ contract AssetVaultUpgradeable is
     }
 
     // ========================================================================
+    // UTILIZATION-BASED LEVERAGE CONFIG - ADMIN FUNCTIONS
+    // ========================================================================
+
+    /**
+     * @notice Set utilization-based leverage adjustment configuration
+     * @dev Controls how max leverage is reduced as vault utilization increases
+     *      Utilization = (Total OI / TVL)
+     *      - Below tier1: Full leverage (factorTier1)
+     *      - tier1 to tier2: Reduced leverage (factorTier2)
+     *      - tier2 to tier3: Further reduced (factorTier3)
+     *      - Above tier3: Emergency mode (factorEmergency)
+     * @param config New utilization configuration
+     */
+    function setUtilizationConfig(VaultConfigLib.UtilizationConfig calldata config)
+        external
+        onlyVaultManagerOrHelper
+    {
+        // Validate config using library helper
+        if (!VaultConfigLib.validateUtilizationConfig(config)) {
+            revert InvalidParameters();
+        }
+
+        utilizationConfig = config;
+
+        emit UtilizationConfigUpdated(
+            config.tier1Bps,
+            config.tier2Bps,
+            config.tier3Bps,
+            config.factorTier1Bps,
+            config.factorTier2Bps,
+            config.factorTier3Bps,
+            config.factorEmergencyBps
+        );
+    }
+
+    /**
+     * @notice Get current utilization configuration
+     * @dev Returns individual values for interface compatibility
+     */
+    function getUtilizationConfig()
+        external
+        view
+        returns (
+            uint16 tier1Bps,
+            uint16 tier2Bps,
+            uint16 tier3Bps,
+            uint16 factorTier1Bps,
+            uint16 factorTier2Bps,
+            uint16 factorTier3Bps,
+            uint16 factorEmergencyBps
+        )
+    {
+        return (
+            utilizationConfig.tier1Bps,
+            utilizationConfig.tier2Bps,
+            utilizationConfig.tier3Bps,
+            utilizationConfig.factorTier1Bps,
+            utilizationConfig.factorTier2Bps,
+            utilizationConfig.factorTier3Bps,
+            utilizationConfig.factorEmergencyBps
+        );
+    }
+
+    // ========================================================================
     // FUNDING RATE FUNCTIONS
     // ========================================================================
 
@@ -2289,6 +2388,28 @@ contract AssetVaultUpgradeable is
             fundingConfig.tier4RateBps,
             fundingConfig.tier5RateBps
         );
+    }
+
+    // ========================================================================
+    // EXPLICIT ARRAY LENGTH GETTERS (M-08 FIX)
+    // ========================================================================
+
+    /**
+     * @notice Get total number of active LPs in the vault
+     * @return length Number of LPs in the vaultLPs array
+     * @dev M-08 FIX: Explicit getter to avoid try-catch iteration in VaultViewer
+     */
+    function getVaultLPsLength() external view returns (uint256 length) {
+        return vaultLPs.length;
+    }
+
+    /**
+     * @notice Get total length of pending payout queue
+     * @return length Total length of pendingPayoutQueue array
+     * @dev M-08 FIX: Explicit getter to avoid try-catch iteration in VaultViewer
+     */
+    function getPendingPayoutQueueLength() external view returns (uint256 length) {
+        return pendingPayoutQueue.length;
     }
 
     /**

@@ -83,6 +83,7 @@ interface IVaultManager {
      * @param fee Fee collected
      * @param positionSize Position size
      * @param direction Position direction (1 = LONG, 2 = SHORT)
+     * @param user User address for event tracking (M-05 FIX: Replace tx.origin)
      */
     function updateVaultPnLWithLeverage(
         address _projectToken,
@@ -91,7 +92,8 @@ interface IVaultManager {
         int256 vaultPnL,
         uint256 fee,
         uint256 positionSize,
-        uint8 direction
+        uint8 direction,
+        address user
     ) external;
 
     /**

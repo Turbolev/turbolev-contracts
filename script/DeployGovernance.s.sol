@@ -134,11 +134,13 @@ contract DeployGovernance is DeployHelper {
         console.log("\n--- Deploying VersionedBeacon ---");
 
         // Owner is Timelock for governance control
-        deployedBeacon = address(new VersionedBeacon(deployedVaultImpl, deployedTimelock));
+        // Initial admin is deployer for emergency operations
+        deployedBeacon = address(new VersionedBeacon(deployedVaultImpl, deployedTimelock, deployer));
 
         console.log("VersionedBeacon deployed:", deployedBeacon);
         console.log("Initial implementation:", deployedVaultImpl);
         console.log("Owner (Timelock):", deployedTimelock);
+        console.log("Initial Admin:", deployer);
     }
 
     function _deployVaultGovernor() internal {

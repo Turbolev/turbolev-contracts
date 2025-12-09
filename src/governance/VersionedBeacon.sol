@@ -5,16 +5,24 @@ import "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 
 /**
  * @title VersionedBeacon
- * @notice UpgradeableBeacon with version tracking for rollback support
+ * @notice UpgradeableBeacon with version tracking and emergency upgrade support
  * @dev Extends OpenZeppelin UpgradeableBeacon, adds version history
  *
  * Features:
  * - Version tracking for all upgrades
- * - Rollback to any previous version
+ * - Emergency upgrade for critical bug fixes (admin/guardian only)
  * - Changelog hash storage (IPFS or keccak256)
  * - Timestamp tracking for audit trail
  *
- * Owner should be Timelock for governance control.
+ * Security Model:
+ * - Owner (Timelock): Normal upgrades via governance
+ * - Admin/Guardian: Emergency upgrades when vault is paused
+ *
+ * NEW-H-02 FIX: Removed rollbackTo() function
+ * Reason: Rollback to previous version can break active positions due to:
+ * - Storage layout incompatibility (new fields not understood by old code)
+ * - Logic incompatibility (new features not handled by old code)
+ * Solution: Use emergency upgrade to new hotfix version instead of rollback
  */
 contract VersionedBeacon is UpgradeableBeacon {
     // ========================================================================
@@ -33,20 +41,37 @@ contract VersionedBeacon is UpgradeableBeacon {
     /// @notice Version → Description/changelog hash (IPFS or keccak256)
     mapping(uint256 => bytes32) public versionInfo;
 
+    /// @notice Version → Is emergency upgrade
+    mapping(uint256 => bool) public isEmergencyUpgrade;
+
+    /// @notice Emergency mode - allows emergency upgrades
+    bool public emergencyMode;
+
+    /// @notice Admin addresses that can perform emergency upgrades
+    mapping(address => bool) public admins;
+
+    /// @notice Guardian addresses that can perform emergency upgrades
+    mapping(address => bool) public guardians;
+
     // ========================================================================
     // EVENTS
     // ========================================================================
 
     event VersionRegistered(
-        uint256 indexed version, address indexed implementation, bytes32 infoHash, uint256 timestamp
-    );
-
-    event RolledBack(
-        uint256 indexed fromVersion,
-        uint256 indexed toVersion,
+        uint256 indexed version,
         address indexed implementation,
+        bytes32 infoHash,
+        bool isEmergency,
         uint256 timestamp
     );
+
+    event EmergencyModeActivated(address indexed activatedBy, uint256 timestamp);
+    event EmergencyModeDeactivated(address indexed deactivatedBy, uint256 timestamp);
+
+    event AdminAdded(address indexed admin, address indexed addedBy);
+    event AdminRemoved(address indexed admin, address indexed removedBy);
+    event GuardianAdded(address indexed guardian, address indexed addedBy);
+    event GuardianRemoved(address indexed guardian, address indexed removedBy);
 
     // ========================================================================
     // ERRORS
@@ -54,6 +79,34 @@ contract VersionedBeacon is UpgradeableBeacon {
 
     error InvalidVersion();
     error VersionNotFound();
+    error NotInEmergencyMode();
+    error AlreadyInEmergencyMode();
+    error NotAdminOrGuardian();
+    error NotAdmin();
+    error ZeroAddress();
+    error AlreadyAdmin();
+    error AlreadyGuardian();
+    error NotGuardian();
+
+    // ========================================================================
+    // MODIFIERS
+    // ========================================================================
+
+    /// @notice Only admin or guardian can call
+    modifier onlyAdminOrGuardian() {
+        if (!admins[msg.sender] && !guardians[msg.sender]) {
+            revert NotAdminOrGuardian();
+        }
+        _;
+    }
+
+    /// @notice Only admin can call
+    modifier onlyAdmin() {
+        if (!admins[msg.sender]) {
+            revert NotAdmin();
+        }
+        _;
+    }
 
     // ========================================================================
     // CONSTRUCTOR
@@ -63,20 +116,77 @@ contract VersionedBeacon is UpgradeableBeacon {
      * @notice Constructor
      * @param initialImplementation Initial implementation address
      * @param initialOwner Owner address (should be Timelock)
+     * @param initialAdmin Initial admin address for emergency operations
      */
-    constructor(address initialImplementation, address initialOwner)
+    constructor(address initialImplementation, address initialOwner, address initialAdmin)
         UpgradeableBeacon(initialImplementation, initialOwner)
     {
+        if (initialAdmin == address(0)) revert ZeroAddress();
+
         // Register V1
         currentVersion = 1;
         implementations[1] = initialImplementation;
         versionTimestamps[1] = block.timestamp;
 
-        emit VersionRegistered(1, initialImplementation, bytes32(0), block.timestamp);
+        // Set initial admin
+        admins[initialAdmin] = true;
+
+        emit VersionRegistered(1, initialImplementation, bytes32(0), false, block.timestamp);
+        emit AdminAdded(initialAdmin, address(0));
     }
 
     // ========================================================================
-    // UPGRADE FUNCTIONS
+    // ADMIN/GUARDIAN MANAGEMENT (Owner only)
+    // ========================================================================
+
+    /**
+     * @notice Add an admin
+     * @param admin Address to add as admin
+     */
+    function addAdmin(address admin) external onlyOwner {
+        if (admin == address(0)) revert ZeroAddress();
+        if (admins[admin]) revert AlreadyAdmin();
+
+        admins[admin] = true;
+        emit AdminAdded(admin, msg.sender);
+    }
+
+    /**
+     * @notice Remove an admin
+     * @param admin Address to remove from admin
+     */
+    function removeAdmin(address admin) external onlyOwner {
+        if (!admins[admin]) revert NotAdmin();
+
+        admins[admin] = false;
+        emit AdminRemoved(admin, msg.sender);
+    }
+
+    /**
+     * @notice Add a guardian
+     * @param guardian Address to add as guardian
+     */
+    function addGuardian(address guardian) external onlyOwner {
+        if (guardian == address(0)) revert ZeroAddress();
+        if (guardians[guardian]) revert AlreadyGuardian();
+
+        guardians[guardian] = true;
+        emit GuardianAdded(guardian, msg.sender);
+    }
+
+    /**
+     * @notice Remove a guardian
+     * @param guardian Address to remove from guardian
+     */
+    function removeGuardian(address guardian) external onlyOwner {
+        if (!guardians[guardian]) revert NotGuardian();
+
+        guardians[guardian] = false;
+        emit GuardianRemoved(guardian, msg.sender);
+    }
+
+    // ========================================================================
+    // NORMAL UPGRADE FUNCTIONS (Owner/Timelock only)
     // ========================================================================
 
     /**
@@ -85,15 +195,74 @@ contract VersionedBeacon is UpgradeableBeacon {
      * @param infoHash IPFS hash or keccak256 of changelog (optional)
      */
     function upgradeToVersion(address newImplementation, bytes32 infoHash) public onlyOwner {
-        _upgradeToVersionInternal(newImplementation, infoHash);
+        _registerAndUpgrade(newImplementation, infoHash, false);
     }
 
     /**
-     * @notice Internal function to perform versioned upgrade
+     * @notice Override parent upgradeTo to use versioned upgrade
+     * @dev Redirects to _registerAndUpgrade with empty info hash
+     * @param newImplementation New implementation address
+     */
+    function upgradeTo(address newImplementation) public override onlyOwner {
+        _registerAndUpgrade(newImplementation, bytes32(0), false);
+    }
+
+    // ========================================================================
+    // EMERGENCY UPGRADE FUNCTIONS (Admin/Guardian only)
+    // ========================================================================
+
+    /**
+     * @notice Activate emergency mode
+     * @dev Allows emergency upgrades without timelock
+     *      Should only be used for critical bug fixes
+     */
+    function activateEmergencyMode() external onlyAdminOrGuardian {
+        if (emergencyMode) revert AlreadyInEmergencyMode();
+
+        emergencyMode = true;
+        emit EmergencyModeActivated(msg.sender, block.timestamp);
+    }
+
+    /**
+     * @notice Deactivate emergency mode
+     */
+    function deactivateEmergencyMode() external onlyAdminOrGuardian {
+        if (!emergencyMode) revert NotInEmergencyMode();
+
+        emergencyMode = false;
+        emit EmergencyModeDeactivated(msg.sender, block.timestamp);
+    }
+
+    /**
+     * @notice Emergency upgrade - use when critical bug is found
+     * @param newImplementation Hotfix implementation address
+     * @param infoHash Description of the fix (IPFS hash or keccak256)
+     * @dev Requirements:
+     *      - emergencyMode must be active
+     *      - Caller must be admin or guardian
+     *      - Vault should be paused before calling this
+     *
+     * NEW-H-02 FIX: This replaces rollbackTo()
+     * Instead of rolling back to an old version (which can break positions),
+     * we upgrade to a new hotfix version that is forward-compatible.
+     */
+    function emergencyUpgrade(address newImplementation, bytes32 infoHash) external onlyAdminOrGuardian {
+        if (!emergencyMode) revert NotInEmergencyMode();
+
+        _registerAndUpgrade(newImplementation, infoHash, true);
+    }
+
+    // ========================================================================
+    // INTERNAL FUNCTIONS
+    // ========================================================================
+
+    /**
+     * @notice Internal function to register and perform upgrade
      * @param newImplementation New implementation address
      * @param infoHash IPFS hash or keccak256 of changelog
+     * @param _isEmergency Whether this is an emergency upgrade
      */
-    function _upgradeToVersionInternal(address newImplementation, bytes32 infoHash) internal {
+    function _registerAndUpgrade(address newImplementation, bytes32 infoHash, bool _isEmergency) internal {
         // Increment version
         uint256 newVersion = currentVersion + 1;
 
@@ -101,6 +270,7 @@ contract VersionedBeacon is UpgradeableBeacon {
         implementations[newVersion] = newImplementation;
         versionTimestamps[newVersion] = block.timestamp;
         versionInfo[newVersion] = infoHash;
+        isEmergencyUpgrade[newVersion] = _isEmergency;
 
         // Update current version
         currentVersion = newVersion;
@@ -108,39 +278,7 @@ contract VersionedBeacon is UpgradeableBeacon {
         // Call parent upgradeTo (updates the actual beacon implementation)
         super.upgradeTo(newImplementation);
 
-        emit VersionRegistered(newVersion, newImplementation, infoHash, block.timestamp);
-    }
-
-    /**
-     * @notice Rollback to a previous version
-     * @param targetVersion Version to rollback to
-     * @dev Does not create new version entry, just points beacon to old impl
-     */
-    function rollbackTo(uint256 targetVersion) external onlyOwner {
-        if (targetVersion == 0 || targetVersion > currentVersion) {
-            revert InvalidVersion();
-        }
-
-        address targetImpl = implementations[targetVersion];
-        if (targetImpl == address(0)) {
-            revert VersionNotFound();
-        }
-
-        uint256 fromVersion = currentVersion;
-
-        // Update beacon to point to old implementation
-        super.upgradeTo(targetImpl);
-
-        emit RolledBack(fromVersion, targetVersion, targetImpl, block.timestamp);
-    }
-
-    /**
-     * @notice Override parent upgradeTo to use versioned upgrade
-     * @dev Redirects to _upgradeToVersionInternal with empty info hash
-     * @param newImplementation New implementation address
-     */
-    function upgradeTo(address newImplementation) public override onlyOwner {
-        _upgradeToVersionInternal(newImplementation, bytes32(0));
+        emit VersionRegistered(newVersion, newImplementation, infoHash, _isEmergency, block.timestamp);
     }
 
     // ========================================================================
@@ -162,17 +300,19 @@ contract VersionedBeacon is UpgradeableBeacon {
      * @return impl Current implementation address
      * @return timestamp When current version was registered
      * @return info Changelog hash
+     * @return _isEmergency Whether current version was emergency upgrade
      */
     function getCurrentVersionInfo()
         external
         view
-        returns (uint256 version, address impl, uint256 timestamp, bytes32 info)
+        returns (uint256 version, address impl, uint256 timestamp, bytes32 info, bool _isEmergency)
     {
         return (
             currentVersion,
             implementations[currentVersion],
             versionTimestamps[currentVersion],
-            versionInfo[currentVersion]
+            versionInfo[currentVersion],
+            isEmergencyUpgrade[currentVersion]
         );
     }
 
@@ -183,11 +323,17 @@ contract VersionedBeacon is UpgradeableBeacon {
      * @return impls Array of implementation addresses
      * @return timestamps Array of registration timestamps
      * @return infos Array of changelog hashes
+     * @return emergencyFlags Array of emergency upgrade flags
      */
     function getVersionHistory(uint256 fromVersion, uint256 toVersion)
         external
         view
-        returns (address[] memory impls, uint256[] memory timestamps, bytes32[] memory infos)
+        returns (
+            address[] memory impls,
+            uint256[] memory timestamps,
+            bytes32[] memory infos,
+            bool[] memory emergencyFlags
+        )
     {
         if (fromVersion == 0 || fromVersion > toVersion || toVersion > currentVersion) {
             revert InvalidVersion();
@@ -197,12 +343,14 @@ contract VersionedBeacon is UpgradeableBeacon {
         impls = new address[](count);
         timestamps = new uint256[](count);
         infos = new bytes32[](count);
+        emergencyFlags = new bool[](count);
 
         for (uint256 i = 0; i < count; i++) {
             uint256 v = fromVersion + i;
             impls[i] = implementations[v];
             timestamps[i] = versionTimestamps[v];
             infos[i] = versionInfo[v];
+            emergencyFlags[i] = isEmergencyUpgrade[v];
         }
     }
 
@@ -213,5 +361,32 @@ contract VersionedBeacon is UpgradeableBeacon {
      */
     function versionExists(uint256 version) external view returns (bool) {
         return version > 0 && version <= currentVersion && implementations[version] != address(0);
+    }
+
+    /**
+     * @notice Check if an address is admin
+     * @param account Address to check
+     * @return True if admin
+     */
+    function isAdmin(address account) external view returns (bool) {
+        return admins[account];
+    }
+
+    /**
+     * @notice Check if an address is guardian
+     * @param account Address to check
+     * @return True if guardian
+     */
+    function isGuardian(address account) external view returns (bool) {
+        return guardians[account];
+    }
+
+    /**
+     * @notice Check if an address can perform emergency operations
+     * @param account Address to check
+     * @return True if admin or guardian
+     */
+    function canEmergencyUpgrade(address account) external view returns (bool) {
+        return admins[account] || guardians[account];
     }
 }

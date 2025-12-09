@@ -50,6 +50,7 @@ library VaultLiquidityLib {
         uint256 minLockPeriod;
         uint256 earlyWithdrawalFeeBps;
         bool isGraduated;
+        uint256 currentTimestamp; // Passed from caller for testability
     }
 
     struct WithdrawalResult {
@@ -100,12 +101,13 @@ library VaultLiquidityLib {
 
     /**
      * @notice Calculate withdrawal result including fees
-     * @param params Withdrawal parameters
+     * @param params Withdrawal parameters (includes currentTimestamp for testability)
      * @return result Withdrawal calculation result
+     * @dev Uses params.currentTimestamp instead of block.timestamp for deterministic testing
      */
     function calculateWithdrawal(WithdrawalParams memory params)
         internal
-        view
+        pure
         returns (WithdrawalResult memory result)
     {
         if (params.shares == 0) revert InvalidAmount();
@@ -114,9 +116,9 @@ library VaultLiquidityLib {
         // Calculate gross amount based on total liquidity
         result.grossAmount = (params.shares * params.totalLiquidity) / params.totalShares;
 
-        // Check early withdrawal
+        // Check early withdrawal using passed timestamp
         result.lockEndTime = params.stakedAt + params.minLockPeriod;
-        result.isEarlyWithdrawal = block.timestamp < result.lockEndTime;
+        result.isEarlyWithdrawal = params.currentTimestamp < result.lockEndTime;
 
         // Calculate fee and net payout
         result.withdrawalFee = 0;
@@ -199,19 +201,22 @@ library VaultLiquidityLib {
      * @param stakedAt Timestamp when staked
      * @param minLockPeriod Minimum lock period
      * @param isGraduated Whether vault has graduated
+     * @param currentTimestamp Current timestamp (passed for testability)
      * @return fee Calculated fee (0 if not early or not graduated)
      * @return netAmount Amount after fee
      * @return isEarly Whether this is early withdrawal
+     * @dev Uses currentTimestamp parameter instead of block.timestamp for deterministic testing
      */
     function calculateEarlyWithdrawalFee(
         uint256 amount,
         uint256 earlyWithdrawalFeeBps,
         uint256 stakedAt,
         uint256 minLockPeriod,
-        bool isGraduated
-    ) internal view returns (uint256 fee, uint256 netAmount, bool isEarly) {
+        bool isGraduated,
+        uint256 currentTimestamp
+    ) internal pure returns (uint256 fee, uint256 netAmount, bool isEarly) {
         uint256 lockEndTime = stakedAt + minLockPeriod;
-        isEarly = block.timestamp < lockEndTime;
+        isEarly = currentTimestamp < lockEndTime;
 
         if (isEarly && isGraduated) {
             fee = (amount * earlyWithdrawalFeeBps) / BASIS_POINTS;
@@ -228,15 +233,17 @@ library VaultLiquidityLib {
      * @notice Get remaining lock time for a user
      * @param stakedAt Timestamp when staked
      * @param minLockPeriod Minimum lock period
+     * @param currentTimestamp Current timestamp (passed for testability)
      * @return remainingTime Remaining lock time in seconds (0 if unlocked)
+     * @dev Uses currentTimestamp parameter instead of block.timestamp for deterministic testing
      */
-    function getRemainingLockTime(uint256 stakedAt, uint256 minLockPeriod)
+    function getRemainingLockTime(uint256 stakedAt, uint256 minLockPeriod, uint256 currentTimestamp)
         internal
-        view
+        pure
         returns (uint256 remainingTime)
     {
         uint256 lockEndTime = stakedAt + minLockPeriod;
-        if (block.timestamp >= lockEndTime) return 0;
-        return lockEndTime - block.timestamp;
+        if (currentTimestamp >= lockEndTime) return 0;
+        return lockEndTime - currentTimestamp;
     }
 }

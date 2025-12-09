@@ -345,9 +345,10 @@ contract BaseTest is Test {
         VaultManager vaultImpl = new VaultManager();
 
         // Deploy VersionedBeacon for AssetVault (V2 - opt-in mechanism removed)
+        // NEW-H-02 FIX: Added admin parameter for emergency upgrades
         AssetVaultUpgradeable vaultImplementation = new AssetVaultUpgradeable();
         VersionedBeacon vaultBeaconContract =
-            new VersionedBeacon(address(vaultImplementation), owner);
+            new VersionedBeacon(address(vaultImplementation), owner, admin);
         mockTimelockController = makeAddr("mockTimelockController");
         mockMultisigWallet = makeAddr("mockMultisigWallet");
         address mockVaultGovernor = makeAddr("mockVaultGovernor");

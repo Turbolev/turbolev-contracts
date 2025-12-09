@@ -10,6 +10,9 @@ import "../../src/governance/VersionedBeacon.sol";
  * @title InteractVersionedBeacon
  * @notice Script to interact with VersionedBeacon contract
  * @dev Usage: Set VAULT_BEACON_ADDRESS in .env
+ *
+ * NEW-H-02 FIX: Removed rollbackTo function
+ * Added emergency upgrade functions for admin/guardian
  */
 contract InteractVersionedBeacon is DeployHelper {
     VersionedBeacon public beacon;
@@ -32,17 +35,19 @@ contract InteractVersionedBeacon is DeployHelper {
         console.log("Owner:", beacon.owner());
         console.log("Current Version:", beacon.currentVersion());
         console.log("Current Implementation:", beacon.implementation());
+        console.log("Emergency Mode:", beacon.emergencyMode());
     }
 
     function viewCurrentVersionInfo() public view {
         console.log("\n=== Current Version Details ===");
-        (uint256 version, address impl, uint256 timestamp, bytes32 info) =
+        (uint256 version, address impl, uint256 timestamp, bytes32 info, bool isEmergency) =
             beacon.getCurrentVersionInfo();
 
         console.log("Version:", version);
         console.log("Implementation:", impl);
         console.log("Timestamp:", timestamp);
         console.log("Info Hash:", vm.toString(info));
+        console.log("Is Emergency Upgrade:", isEmergency);
     }
 
     function viewVersionHistory(uint256 fromVersion, uint256 toVersion) public view {
@@ -50,8 +55,12 @@ contract InteractVersionedBeacon is DeployHelper {
         console.log("From Version:", fromVersion);
         console.log("To Version:", toVersion);
 
-        (address[] memory impls, uint256[] memory timestamps, bytes32[] memory infos) =
-            beacon.getVersionHistory(fromVersion, toVersion);
+        (
+            address[] memory impls,
+            uint256[] memory timestamps,
+            bytes32[] memory infos,
+            bool[] memory emergencyFlags
+        ) = beacon.getVersionHistory(fromVersion, toVersion);
 
         for (uint256 i = 0; i < impls.length; i++) {
             uint256 v = fromVersion + i;
@@ -59,6 +68,7 @@ contract InteractVersionedBeacon is DeployHelper {
             console.log("Implementation:", impls[i]);
             console.log("Timestamp:", timestamps[i]);
             console.log("Info Hash:", vm.toString(infos[i]));
+            console.log("Emergency:", emergencyFlags[i]);
         }
     }
 
@@ -76,6 +86,14 @@ contract InteractVersionedBeacon is DeployHelper {
         address impl = beacon.getImplementation(version);
         console.log("Implementation:", impl);
         console.log("Exists:", beacon.versionExists(version));
+    }
+
+    function viewAdminStatus(address account) public view {
+        console.log("\n=== Admin/Guardian Status ===");
+        console.log("Account:", account);
+        console.log("Is Admin:", beacon.isAdmin(account));
+        console.log("Is Guardian:", beacon.isGuardian(account));
+        console.log("Can Emergency Upgrade:", beacon.canEmergencyUpgrade(account));
     }
 
     // ========================================================================
@@ -110,15 +128,124 @@ contract InteractVersionedBeacon is DeployHelper {
         vm.stopBroadcast();
     }
 
+    // ========================================================================
+    // EMERGENCY UPGRADE FUNCTIONS (Admin/Guardian only)
+    // ========================================================================
+
     /**
-     * @notice Rollback to a previous version
-     * @param targetVersion Version to rollback to
+     * @notice Activate emergency mode
+     * @dev Only callable by admin or guardian
      */
-    function rollbackTo(uint256 targetVersion) public {
+    function activateEmergencyMode() public {
         vm.startBroadcast(deployer);
-        beacon.rollbackTo(targetVersion);
-        console.log("Rolled back to version:", targetVersion);
-        console.log("Current Implementation:", beacon.implementation());
+        beacon.activateEmergencyMode();
+        console.log("Emergency mode activated");
+        vm.stopBroadcast();
+    }
+
+    /**
+     * @notice Deactivate emergency mode
+     * @dev Only callable by admin or guardian
+     */
+    function deactivateEmergencyMode() public {
+        vm.startBroadcast(deployer);
+        beacon.deactivateEmergencyMode();
+        console.log("Emergency mode deactivated");
+        vm.stopBroadcast();
+    }
+
+    /**
+     * @notice Emergency upgrade - use when critical bug is found
+     * @param newImplementation Hotfix implementation address
+     * @param infoHash Description of the fix
+     * @dev Only callable by admin or guardian when emergencyMode is active
+     *
+     * NEW-H-02 FIX: This replaces the removed rollbackTo() function
+     * Instead of rolling back to a potentially incompatible old version,
+     * deploy a new hotfix version that is forward-compatible.
+     */
+    function emergencyUpgrade(address newImplementation, bytes32 infoHash) public {
+        vm.startBroadcast(deployer);
+        beacon.emergencyUpgrade(newImplementation, infoHash);
+        console.log("Emergency upgrade completed");
+        console.log("New Implementation:", newImplementation);
+        console.log("New Version:", beacon.currentVersion());
+        vm.stopBroadcast();
+    }
+
+    /**
+     * @notice Full emergency upgrade flow
+     * @param newImplementation Hotfix implementation address
+     * @param infoHash Description of the fix
+     * @dev Activates emergency mode, upgrades, then deactivates
+     */
+    function executeFullEmergencyUpgrade(address newImplementation, bytes32 infoHash) public {
+        vm.startBroadcast(deployer);
+
+        // 1. Activate emergency mode
+        beacon.activateEmergencyMode();
+        console.log("1. Emergency mode activated");
+
+        // 2. Perform upgrade
+        beacon.emergencyUpgrade(newImplementation, infoHash);
+        console.log("2. Emergency upgrade completed");
+
+        // 3. Deactivate emergency mode
+        beacon.deactivateEmergencyMode();
+        console.log("3. Emergency mode deactivated");
+
+        console.log("\n=== Emergency Upgrade Summary ===");
+        console.log("New Implementation:", newImplementation);
+        console.log("New Version:", beacon.currentVersion());
+
+        vm.stopBroadcast();
+    }
+
+    // ========================================================================
+    // ADMIN/GUARDIAN MANAGEMENT (Owner only)
+    // ========================================================================
+
+    /**
+     * @notice Add an admin
+     * @param admin Address to add as admin
+     */
+    function addAdmin(address admin) public {
+        vm.startBroadcast(deployer);
+        beacon.addAdmin(admin);
+        console.log("Admin added:", admin);
+        vm.stopBroadcast();
+    }
+
+    /**
+     * @notice Remove an admin
+     * @param admin Address to remove from admin
+     */
+    function removeAdmin(address admin) public {
+        vm.startBroadcast(deployer);
+        beacon.removeAdmin(admin);
+        console.log("Admin removed:", admin);
+        vm.stopBroadcast();
+    }
+
+    /**
+     * @notice Add a guardian
+     * @param guardian Address to add as guardian
+     */
+    function addGuardian(address guardian) public {
+        vm.startBroadcast(deployer);
+        beacon.addGuardian(guardian);
+        console.log("Guardian added:", guardian);
+        vm.stopBroadcast();
+    }
+
+    /**
+     * @notice Remove a guardian
+     * @param guardian Address to remove from guardian
+     */
+    function removeGuardian(address guardian) public {
+        vm.startBroadcast(deployer);
+        beacon.removeGuardian(guardian);
+        console.log("Guardian removed:", guardian);
         vm.stopBroadcast();
     }
 

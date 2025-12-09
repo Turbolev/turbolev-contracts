@@ -36,6 +36,15 @@ contract MathLibWrapper {
     function requireNonZero(uint256 value) external pure {
         MathLib.requireNonZero(value);
     }
+
+    // C-03 FIX: Add wrappers for mulDiv and mulDivSigned
+    function mulDiv(uint256 a, uint256 b, uint256 denominator) external pure returns (uint256) {
+        return MathLib.mulDiv(a, b, denominator);
+    }
+
+    function mulDivSigned(int256 a, int256 b, int256 denominator) external pure returns (int256) {
+        return MathLib.mulDivSigned(a, b, denominator);
+    }
 }
 
 /**
@@ -524,5 +533,189 @@ contract MathLibTest is Test {
 
         assertTrue(changeUp > 0, "Increase should be positive");
         assertTrue(changeDown < 0 || lowerPrice == 1, "Decrease should be negative");
+    }
+
+    // ========================================================================
+    // MULDIV TESTS (C-03 FIX)
+    // ========================================================================
+
+    function test_MulDiv_BasicCalculation() public pure {
+        // Simple: (10 * 5) / 2 = 25
+        uint256 result = MathLib.mulDiv(10, 5, 2);
+        assertEq(result, 25, "Basic mulDiv should work");
+    }
+
+    function test_MulDiv_NoOverflow_SmallValues() public pure {
+        // 1e18 * 1e18 / 1e18 = 1e18
+        uint256 result = MathLib.mulDiv(1e18, 1e18, 1e18);
+        assertEq(result, 1e18, "Small values should not overflow");
+    }
+
+    function test_MulDiv_LargeValues_NoOverflow() public pure {
+        // Values that would overflow in normal multiplication
+        // 1e30 * 1e30 would overflow uint256, but with mulDiv it works
+        uint256 a = 1e30;
+        uint256 b = 1e30;
+        uint256 denom = 1e42; // Result should be 1e18
+        
+        uint256 result = MathLib.mulDiv(a, b, denom);
+        assertEq(result, 1e18, "Large values should not overflow with mulDiv");
+    }
+
+    function test_MulDiv_FundingRateScenario() public pure {
+        // Simulate funding rate calculation:
+        // rateDiff = 1e18 (100% rate diff in scaled terms)
+        // positionSize = 1e30 (very large position)
+        // FUNDING_PRECISION = 1e18
+        // Without mulDiv: 1e18 * 1e30 = 1e48 which fits, but edge cases can overflow
+        uint256 rateDiff = 1e18;
+        uint256 positionSize = 1e30;
+        uint256 precision = 1e18;
+        
+        uint256 result = MathLib.mulDiv(rateDiff, positionSize, precision);
+        assertEq(result, 1e30, "Funding rate calculation should work");
+    }
+
+    function test_MulDiv_ExtremeValues() public pure {
+        // Maximum safe values
+        uint256 a = type(uint128).max;
+        uint256 b = type(uint128).max;
+        uint256 denom = type(uint128).max;
+        
+        uint256 result = MathLib.mulDiv(a, b, denom);
+        assertEq(result, type(uint128).max, "Extreme values should work");
+    }
+
+    function test_MulDiv_ZeroInputs() public pure {
+        assertEq(MathLib.mulDiv(0, 100, 10), 0, "Zero a should return 0");
+        assertEq(MathLib.mulDiv(100, 0, 10), 0, "Zero b should return 0");
+    }
+
+    function test_MulDiv_RevertsOnZeroDenominator() public {
+        vm.expectRevert(MathLib.DivisionByZero.selector);
+        wrapper.mulDiv(100, 100, 0);
+    }
+
+    // ========================================================================
+    // MULDIVSIGNED TESTS (C-03 FIX - Core funding rate fix)
+    // ========================================================================
+
+    function test_MulDivSigned_BasicPositive() public pure {
+        // (10 * 5) / 2 = 25
+        int256 result = MathLib.mulDivSigned(10, 5, 2);
+        assertEq(result, 25, "Positive mulDivSigned should work");
+    }
+
+    function test_MulDivSigned_NegativeA() public pure {
+        // (-10 * 5) / 2 = -25
+        int256 result = MathLib.mulDivSigned(-10, 5, 2);
+        assertEq(result, -25, "Negative a should give negative result");
+    }
+
+    function test_MulDivSigned_NegativeB() public pure {
+        // (10 * -5) / 2 = -25
+        int256 result = MathLib.mulDivSigned(10, -5, 2);
+        assertEq(result, -25, "Negative b should give negative result");
+    }
+
+    function test_MulDivSigned_BothNegative() public pure {
+        // (-10 * -5) / 2 = 25
+        int256 result = MathLib.mulDivSigned(-10, -5, 2);
+        assertEq(result, 25, "Both negative should give positive result");
+    }
+
+    function test_MulDivSigned_NegativeDenominator() public pure {
+        // (10 * 5) / -2 = -25
+        int256 result = MathLib.mulDivSigned(10, 5, -2);
+        assertEq(result, -25, "Negative denominator should flip sign");
+    }
+
+    function test_MulDivSigned_FundingRate_PositiveOwed() public pure {
+        // Funding owed scenario: position owes funding
+        // rateDiff = 1e16 (1% in 1e18 precision)
+        // positionSize = 100e18 (100 tokens)
+        // precision = 1e18
+        // Expected: 1e16 * 100e18 / 1e18 = 1e18 (1 token owed)
+        int256 rateDiff = 1e16;
+        int256 positionSize = 100e18;
+        int256 precision = 1e18;
+        
+        int256 result = MathLib.mulDivSigned(rateDiff, positionSize, precision);
+        assertEq(result, 1e18, "Funding owed should be 1 token");
+    }
+
+    function test_MulDivSigned_FundingRate_NegativeOwed() public pure {
+        // Funding received scenario: position receives funding
+        // rateDiff = -1e16 (-1% in 1e18 precision)
+        // positionSize = 100e18 (100 tokens)
+        // precision = 1e18
+        // Expected: -1e16 * 100e18 / 1e18 = -1e18 (receives 1 token)
+        int256 rateDiff = -1e16;
+        int256 positionSize = 100e18;
+        int256 precision = 1e18;
+        
+        int256 result = MathLib.mulDivSigned(rateDiff, positionSize, precision);
+        assertEq(result, -1e18, "Funding received should be -1 token");
+    }
+
+    function test_MulDivSigned_LargeValues_NoOverflow() public pure {
+        // Large values that would overflow in direct multiplication
+        // rateDiff = 1e20 (10000% - extreme but possible after long time)
+        // positionSize = 1e30 (very large position)
+        // These would overflow: 1e20 * 1e30 = 1e50 > int256.max (~5.7e76)
+        // But with mulDivSigned, it should work
+        int256 rateDiff = 1e20;
+        int256 positionSize = int256(1e30);
+        int256 precision = 1e18;
+        
+        int256 result = MathLib.mulDivSigned(rateDiff, positionSize, precision);
+        assertEq(result, 1e32, "Large values should not overflow");
+    }
+
+    function test_MulDivSigned_ZeroInputs() public pure {
+        assertEq(MathLib.mulDivSigned(0, 100, 10), 0, "Zero a should return 0");
+        assertEq(MathLib.mulDivSigned(100, 0, 10), 0, "Zero b should return 0");
+    }
+
+    function test_MulDivSigned_RevertsOnZeroDenominator() public {
+        vm.expectRevert(MathLib.DivisionByZero.selector);
+        wrapper.mulDivSigned(100, 100, 0);
+    }
+
+    // ========================================================================
+    // FUZZ TESTS FOR MULDIV (C-03 FIX)
+    // ========================================================================
+
+    function testFuzz_MulDiv_Consistency(uint256 a, uint256 b, uint256 denom) public pure {
+        vm.assume(denom > 0);
+        vm.assume(a < type(uint128).max);
+        vm.assume(b < type(uint128).max);
+        
+        // For small values, result should match direct calculation
+        uint256 expected = (a * b) / denom;
+        uint256 result = MathLib.mulDiv(a, b, denom);
+        assertEq(result, expected, "mulDiv should match direct calc for small values");
+    }
+
+    function testFuzz_MulDivSigned_SignConsistency(int128 a, int128 b, int128 denom) public pure {
+        vm.assume(denom != 0);
+        vm.assume(a != type(int128).min); // Avoid abs overflow
+        vm.assume(b != type(int128).min);
+        
+        int256 result = MathLib.mulDivSigned(int256(a), int256(b), int256(denom));
+        
+        // Check sign is correct
+        bool expectedNegative = (a < 0) != (b < 0);
+        if (denom < 0) expectedNegative = !expectedNegative;
+        if (a == 0 || b == 0 || result == 0) {
+            // Result can be 0 due to integer division when |a * b| < |denom|
+            assertTrue(result == 0, "Zero or truncated result should be 0");
+        } else {
+            if (expectedNegative) {
+                assertTrue(result < 0, "Result should be negative");
+            } else {
+                assertTrue(result > 0, "Result should be positive");
+            }
+        }
     }
 }

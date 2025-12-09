@@ -57,6 +57,7 @@ contract MultisigWallet {
     event TransactionSubmitted(uint256 indexed txId, address indexed to, uint256 value, bytes data);
     event TransactionConfirmed(uint256 indexed txId, address indexed owner);
     event TransactionRevoked(uint256 indexed txId, address indexed owner);
+    event TransactionReady(uint256 indexed txId);
     event TransactionExecuted(uint256 indexed txId);
     event TransactionFailed(uint256 indexed txId);
     event Deposit(address indexed sender, uint256 amount);
@@ -169,6 +170,7 @@ contract MultisigWallet {
     /**
      * @notice Confirm một transaction
      * @param txId Transaction ID
+     * @dev Không auto-execute, phải gọi executeTransaction() riêng (giống Gnosis Safe pattern)
      */
     function confirmTransaction(uint256 txId)
         public
@@ -182,9 +184,9 @@ contract MultisigWallet {
 
         emit TransactionConfirmed(txId, msg.sender);
 
-        // Auto-execute if threshold reached
-        if (transactions[txId].confirmationCount >= threshold) {
-            executeTransaction(txId);
+        // Emit event khi đủ threshold để notify off-chain systems
+        if (transactions[txId].confirmationCount == threshold) {
+            emit TransactionReady(txId);
         }
     }
 
@@ -204,6 +206,8 @@ contract MultisigWallet {
     /**
      * @notice Execute một transaction đã được confirm đủ
      * @param txId Transaction ID
+     * @dev Phải gọi riêng sau khi đủ confirmations (không auto-execute)
+     *      Người gọi execute sẽ chịu gas cost, có thể estimate trước bằng canExecute()
      */
     function executeTransaction(uint256 txId) public onlyOwner txExists(txId) notExecuted(txId) {
         Transaction storage txn = transactions[txId];
@@ -320,6 +324,17 @@ contract MultisigWallet {
     // ========================================================================
     // VIEW FUNCTIONS
     // ========================================================================
+
+    /**
+     * @notice Kiểm tra xem transaction có thể execute được không
+     * @param txId Transaction ID
+     * @return True nếu đủ confirmations và chưa executed
+     */
+    function canExecute(uint256 txId) external view returns (bool) {
+        if (txId >= transactionCount) return false;
+        Transaction storage txn = transactions[txId];
+        return txn.confirmationCount >= threshold && !txn.executed;
+    }
 
     /**
      * @notice Lấy số lượng owners
