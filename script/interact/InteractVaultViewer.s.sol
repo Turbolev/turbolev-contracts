@@ -5,7 +5,7 @@ import "forge-std/Script.sol";
 import "forge-std/console.sol";
 import "../DeployHelper.s.sol";
 import "../../src/vault-helpers/VaultViewer.sol";
-import "../../src/AssetVaultUpgradeable.sol";
+import "../../src/legacy/AssetVaultUpgradeable.sol";
 
 /**
  * @title InteractVaultViewer

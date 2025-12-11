@@ -49,6 +49,10 @@ broadcast/
 deployments/
 
 .claude
+.cursor
 
 # Node scripts
 node_scripts/
+
+# Legacy contracts (deprecated)
+src/legacy/

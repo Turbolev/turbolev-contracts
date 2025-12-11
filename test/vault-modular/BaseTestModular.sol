@@ -4,24 +4,135 @@ pragma solidity ^0.8.22;
 import "forge-std/Test.sol";
 import "forge-std/console.sol";
 
-import "../src/PositionManager.sol";
-import "../src/legacy/AssetVault.sol";
-import "../src/legacy/AssetVaultUpgradeable.sol";
-import "../src/legacy/VaultManager.sol";
-import "../src/SettlementEngine.sol";
-import "../src/oracles/BlocksenseOracle.sol";
-import "../src/oracles/ChainlinkOracle.sol";
-import "../src/PriceFeedManager.sol";
-import "../src/legacy/VaultManagerHelper.sol";
-import "../src/governance/VersionedBeacon.sol";
-import "../src/interfaces/ICLFeedRegistryAdapter.sol";
-import "../src/interfaces/ICLAggregatorAdapter.sol";
-import "../src/interfaces/IChainlinkAggregatorV3.sol";
-import "../src/interfaces/chainlink/IChainlinkAggregator.sol";
+import "../../src/PositionManager.sol";
+import "../../src/SettlementEngine.sol";
+import "../../src/oracles/BlocksenseOracle.sol";
+import "../../src/oracles/ChainlinkOracle.sol";
+import "../../src/PriceFeedManager.sol";
+import "../../src/interfaces/IPriceFeedManager.sol";
+import "../../src/legacy/VaultManagerHelper.sol";
+
+// Modular Vault imports
+import "../../src/vault-modular/VaultRouter.sol";
+import "../../src/vault-modular/VaultAccessController.sol";
+import "../../src/vault-modular/VaultManager.sol" as ModularVM;
+import "../../src/vault-modular/modules/VaultCore.sol";
+import "../../src/vault-modular/modules/VaultFunding.sol";
+import "../../src/vault-modular/modules/VaultRewards.sol";
+import "../../src/vault-modular/libraries/VaultStorageLib.sol";
+import "../../src/interfaces/IVaultRouter.sol";
+
+import "../../src/interfaces/ICLFeedRegistryAdapter.sol";
+import "../../src/interfaces/ICLAggregatorAdapter.sol";
+import "../../src/interfaces/IChainlinkAggregatorV3.sol";
+import "../../src/interfaces/chainlink/IChainlinkAggregator.sol";
+import "../../src/interfaces/IPriceFeedManager.sol";
+import "../../src/interfaces/oracles/IBaseOracle.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
+// ========================================================================
+// MOCK CONTRACTS
+// ========================================================================
+
+contract MockRegistry is ICLFeedRegistryAdapter {
+    mapping(address => mapping(address => int256)) private prices;
+    mapping(address => mapping(address => uint8)) private decimalsMapping;
+    mapping(address => mapping(address => uint256)) private timestamps;
+
+    function setPrice(address base, address quote, int256 price) external {
+        prices[base][quote] = price;
+        timestamps[base][quote] = block.timestamp;
+    }
+
+    function setDecimals(address base, address quote, uint8 _decimals) external {
+        decimalsMapping[base][quote] = _decimals;
+    }
+
+    function decimals(address base, address quote) external view override returns (uint8) {
+        uint8 d = decimalsMapping[base][quote];
+        return d == 0 ? 18 : d;
+    }
+
+    function latestRoundData(address base, address quote)
+        external
+        view
+        override
+        returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)
+    {
+        int256 price = prices[base][quote];
+        uint256 ts = timestamps[base][quote];
+        if (ts == 0) ts = block.timestamp;
+        return (1, price == 0 ? int256(100e18) : price, ts, ts, 1);
+    }
+
+    function latestAnswer(address base, address quote) external view returns (int256) {
+        int256 price = prices[base][quote];
+        return price == 0 ? int256(100e18) : price;
+    }
+
+    function description(address, address) external pure override returns (string memory) {
+        return "Mock Registry";
+    }
+
+    function version(address, address) external pure returns (uint256) {
+        return 1;
+    }
+
+    function getRoundData(address, address, uint80)
+        external
+        view
+        override
+        returns (uint80, int256, uint256, uint256, uint80)
+    {
+        return (1, int256(100e18), block.timestamp, block.timestamp, 1);
+    }
+
+    function latestRound(address, address) external pure override returns (uint256) {
+        return 1;
+    }
+
+    function getAnswer(address, address, uint256) external pure returns (int256) {
+        return int256(100e18);
+    }
+
+    function getTimestamp(address, address, uint256) external view returns (uint256) {
+        return block.timestamp;
+    }
+
+    function getFeed(address, address) external pure returns (address) {
+        return address(0);
+    }
+
+    function isFeedEnabled(address) external pure returns (bool) {
+        return true;
+    }
+
+    function getPhaseRange(address, address, uint16)
+        external
+        pure
+        returns (uint80, uint80)
+    {
+        return (1, 1);
+    }
+
+    function getCurrentPhaseId(address, address) external pure returns (uint16) {
+        return 1;
+    }
+
+    function getPhaseId(address, address, uint80) external pure returns (uint16) {
+        return 1;
+    }
+
+    function getPreviousRoundId(address, address, uint80) external pure returns (uint80) {
+        return 0;
+    }
+
+    function getNextRoundId(address, address, uint80) external pure returns (uint80) {
+        return 2;
+    }
+}
+
 contract MockAdapter is ICLAggregatorAdapter, IChainlinkAggregatorV3 {
-    // Implement both interfaces - functions are shared
     address public dataFeedStore;
     uint256 public id;
     uint256 public mockTimestamp;
@@ -43,7 +154,6 @@ contract MockAdapter is ICLAggregatorAdapter, IChainlinkAggregatorV3 {
         mockTimestamp = _timestamp;
     }
 
-    // Shared functions for both interfaces
     function latestRoundData()
         external
         view
@@ -51,7 +161,6 @@ contract MockAdapter is ICLAggregatorAdapter, IChainlinkAggregatorV3 {
         returns (uint80, int256, uint256, uint256, uint80)
     {
         if (baseToken != address(0) && quoteToken != address(0)) {
-            // Get price from MockRegistry
             int256 price = MockRegistry(dataFeedStore).latestAnswer(baseToken, quoteToken);
             return (1, price, mockTimestamp, mockTimestamp, 1);
         }
@@ -87,7 +196,6 @@ contract MockAdapter is ICLAggregatorAdapter, IChainlinkAggregatorV3 {
         returns (uint80, int256, uint256, uint256, uint80)
     {
         if (baseToken != address(0) && quoteToken != address(0)) {
-            // Get price from MockRegistry
             int256 price = MockRegistry(dataFeedStore).latestAnswer(baseToken, quoteToken);
             return (1, price, mockTimestamp, mockTimestamp, 1);
         }
@@ -103,71 +211,7 @@ contract MockAdapter is ICLAggregatorAdapter, IChainlinkAggregatorV3 {
     }
 }
 
-contract MockRegistry is ICLFeedRegistryAdapter {
-    mapping(address => mapping(address => int256)) public prices;
-    mapping(address => mapping(address => uint256)) public timestamps;
-    mapping(address => mapping(address => uint8)) public decimalsMap;
-
-    function setPrice(address base, address quote, int256 price) external {
-        prices[base][quote] = price;
-        timestamps[base][quote] = block.timestamp;
-    }
-
-    function setDecimals(address base, address quote, uint8 _decimals) external {
-        decimalsMap[base][quote] = _decimals;
-    }
-
-    function latestRoundData(address base, address quote)
-        external
-        view
-        returns (
-            uint80 roundId,
-            int256 answer,
-            uint256 startedAt,
-            uint256 updatedAt,
-            uint80 answeredInRound
-        )
-    {
-        return (1, prices[base][quote], block.timestamp, timestamps[base][quote], 1);
-    }
-
-    function getRoundData(address base, address quote, uint80)
-        external
-        view
-        returns (
-            uint80 roundId,
-            int256 answer,
-            uint256 startedAt,
-            uint256 updatedAt,
-            uint80 answeredInRound
-        )
-    {
-        return (1, prices[base][quote], block.timestamp, timestamps[base][quote], 1);
-    }
-
-    function latestAnswer(address base, address quote) external view returns (int256) {
-        return prices[base][quote];
-    }
-
-    function latestRound(address, address) external pure returns (uint256 roundId) {
-        return 1;
-    }
-
-    function decimals(address base, address quote) external view returns (uint8) {
-        uint8 dec = decimalsMap[base][quote];
-        return dec == 0 ? 18 : dec;
-    }
-
-    function description(address, address) external pure returns (string memory) {
-        return "Mock";
-    }
-
-    function version() external pure returns (uint256) {
-        return 1;
-    }
-}
-
-contract MockERC20 is Test {
+contract MockERC20 {
     string public name;
     string public symbol;
     uint8 public decimals = 18;
@@ -188,6 +232,13 @@ contract MockERC20 is Test {
         balanceOf[to] += amount;
         totalSupply += amount;
         emit Transfer(address(0), to, amount);
+    }
+
+    function burn(address from, uint256 amount) external {
+        require(balanceOf[from] >= amount, "Insufficient balance");
+        balanceOf[from] -= amount;
+        totalSupply -= amount;
+        emit Transfer(from, address(0), amount);
     }
 
     function approve(address spender, uint256 amount) external returns (bool) {
@@ -217,16 +268,29 @@ contract MockERC20 is Test {
     }
 }
 
-contract BaseTest is Test {
+// ========================================================================
+// BASE TEST CONTRACT FOR MODULAR VAULT
+// ========================================================================
+
+contract BaseTestModular is Test {
     // Core contracts
     PositionManager public positionManager;
-    VaultManager public vaultManager;
+    ModularVM.VaultManager public vaultManager;
     VaultManagerHelper public vaultManagerHelper;
     SettlementEngine public settlementEngine;
     BlocksenseOracle public blocksenseOracle;
     ChainlinkOracle public chainlinkOracle;
     PriceFeedManager public priceFeedManager;
-    AssetVaultUpgradeable public assetVault;
+
+    // Modular Vault contracts
+    VaultAccessController public accessController;
+    VaultRouter public vaultRouterImpl;
+    VaultCore public vaultCoreModule;
+    VaultFunding public vaultFundingModule;
+    VaultRewards public vaultRewardsModule;
+
+    // Deployed vault (proxy)
+    VaultRouter public vault;
 
     // Mock contracts
     MockRegistry public mockRegistry;
@@ -254,10 +318,6 @@ contract BaseTest is Test {
     uint16 public constant DEFAULT_WIN_MULTIPLIER_BPS = 18_000; // 1.8x
     uint256 public constant DEFAULT_MIN_BET = 0.01 ether;
     uint256 public constant DEFAULT_MAX_BET = 100 ether;
-
-    uint16 public constant DEFAULT_MAX_PAYOUT_BPS = 500; // 5%
-    uint16 public constant DEFAULT_PER_BET_UTIL_BPS = 1000; // 10%
-    uint16 public constant DEFAULT_MAX_UTIL_BPS = 8000; // 80%
     uint256 public constant DEFAULT_GRADUATION_THRESHOLD = 10_000 ether;
 
     function setUp() public virtual {
@@ -269,6 +329,9 @@ contract BaseTest is Test {
         liquidityProvider = makeAddr("liquidityProvider");
         priceUpdater = makeAddr("priceUpdater");
         backend = makeAddr("backend");
+        mockTimelockController = makeAddr("mockTimelockController");
+        mockMultisigWallet = makeAddr("mockMultisigWallet");
+
         // Deploy mock tokens
         projectToken = new MockERC20("Project Token", "PROJ");
         usdc = new MockERC20("USD Coin", "USDC");
@@ -294,6 +357,9 @@ contract BaseTest is Test {
 
         // Setup contracts
         _setupContracts();
+
+        // Create vault
+        _createVault();
     }
 
     function _deployContracts() internal {
@@ -316,11 +382,11 @@ contract BaseTest is Test {
         // Deploy ChainlinkOracle (upgradeable via ERC1967Proxy)
         ChainlinkOracle chainlinkImpl = new ChainlinkOracle();
         bytes memory chainlinkInitData =
-            abi.encodeWithSelector(ChainlinkOracle.initialize.selector, 3600); // max price age
+            abi.encodeWithSelector(ChainlinkOracle.initialize.selector, 3600);
         ERC1967Proxy chainlinkProxy = new ERC1967Proxy(address(chainlinkImpl), chainlinkInitData);
         chainlinkOracle = ChainlinkOracle(address(chainlinkProxy));
 
-        // Deploy PriceFeedManager (upgradeable via ERC1967Proxy) - V2.1
+        // Deploy PriceFeedManager (upgradeable via ERC1967Proxy)
         PriceFeedManager priceFeedImpl = new PriceFeedManager();
         bytes memory priceFeedInitData =
             abi.encodeWithSelector(PriceFeedManager.initialize.selector, owner);
@@ -341,33 +407,66 @@ contract BaseTest is Test {
         ERC1967Proxy positionProxy = new ERC1967Proxy(address(positionImpl), positionInitData);
         positionManager = PositionManager(payable(address(positionProxy)));
 
-        // Deploy VaultManager (upgradeable via ERC1967Proxy)
-        VaultManager vaultImpl = new VaultManager();
+        // Deploy Modular Vault components
+        _deployModularVault();
+    }
 
-        // Deploy VersionedBeacon for AssetVault (V2 - opt-in mechanism removed)
-        // NEW-H-02 FIX: Added admin parameter for emergency upgrades
-        AssetVaultUpgradeable vaultImplementation = new AssetVaultUpgradeable();
-        VersionedBeacon vaultBeaconContract =
-            new VersionedBeacon(address(vaultImplementation), owner, admin);
-        mockTimelockController = makeAddr("mockTimelockController");
-        mockMultisigWallet = makeAddr("mockMultisigWallet");
-        address mockVaultGovernor = makeAddr("mockVaultGovernor");
-
-        bytes memory vaultInitData = abi.encodeWithSelector(
-            VaultManager.initializeV2.selector,
-            owner,
-            address(vaultBeaconContract),
-            mockTimelockController,
-            mockMultisigWallet,
-            mockVaultGovernor
+    function _deployModularVault() internal {
+        // Deploy VaultAccessController
+        VaultAccessController accessControllerImpl = new VaultAccessController();
+        bytes memory accessControllerInitData = abi.encodeWithSelector(
+            VaultAccessController.initialize.selector,
+            mockTimelockController, // admin
+            address(0), // vaultManager - will set later
+            address(positionManager),
+            mockMultisigWallet
         );
-        ERC1967Proxy vaultProxy = new ERC1967Proxy(address(vaultImpl), vaultInitData);
-        vaultManager = VaultManager(payable(address(vaultProxy)));
+        // Note: Can't set vaultManager yet, so we deploy without init and initialize later
+
+        // Deploy modules (these are logic contracts, not proxies)
+        vaultCoreModule = new VaultCore();
+        vaultFundingModule = new VaultFunding();
+        vaultRewardsModule = new VaultRewards();
+
+        // Deploy VaultRouter implementation
+        vaultRouterImpl = new VaultRouter();
+
+        // Deploy VaultAccessController properly after we have all addresses
+        accessControllerImpl = new VaultAccessController();
+        ERC1967Proxy accessControllerProxy = new ERC1967Proxy(
+            address(accessControllerImpl),
+            "" // Initialize later
+        );
+        accessController = VaultAccessController(address(accessControllerProxy));
+
+        // Deploy VaultManager (modular)
+        ModularVM.VaultManager vaultManagerImpl = new ModularVM.VaultManager();
+        bytes memory vaultManagerInitData = abi.encodeWithSelector(
+            ModularVM.VaultManager.initialize.selector,
+            owner,
+            address(accessController),
+            address(vaultRouterImpl),
+            address(vaultCoreModule),
+            address(vaultFundingModule),
+            address(vaultRewardsModule),
+            mockTimelockController,
+            mockMultisigWallet
+        );
+        ERC1967Proxy vaultManagerProxy = new ERC1967Proxy(address(vaultManagerImpl), vaultManagerInitData);
+        vaultManager = ModularVM.VaultManager(payable(address(vaultManagerProxy)));
+
+        // Now initialize VaultAccessController
+        accessController.initialize(
+            mockTimelockController, // admin
+            address(vaultManager),
+            address(positionManager),
+            mockMultisigWallet
+        );
 
         // Deploy VaultManagerHelper
         vaultManagerHelper = new VaultManagerHelper(address(vaultManager));
 
-        // Set addresses (all these contracts are owned by 'owner')
+        // Set addresses
         vm.startPrank(owner);
 
         positionManager.setVaultManager(address(vaultManager));
@@ -380,7 +479,6 @@ contract BaseTest is Test {
         settlementEngine.setPositionManager(address(positionManager));
         settlementEngine.setVaultManager(address(vaultManager));
         settlementEngine.setPriceFeedManager(address(priceFeedManager));
-        // Note: Oracle logic moved to PriceFeedManager
 
         vaultManagerHelper.setPriceFeedManager(address(priceFeedManager));
 
@@ -419,70 +517,46 @@ contract BaseTest is Test {
         IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
             primaryProviderId: priceFeedManager.CHAINLINK_PROVIDER(),
             secondaryProviderId: priceFeedManager.BLOCKSENSE_PROVIDER(),
-            primaryFeed: address(mockAdapter), // Feed for Chainlink
-            secondaryFeed: address(mockAdapter), // Feed for Blocksense
+            primaryFeed: address(mockAdapter),
+            secondaryFeed: address(mockAdapter),
             usePullMode: false
         });
         priceFeedManager.setPriceFeedConfig(address(projectToken), config);
 
-        // Create vault using BeaconProxy (proper way)
-        address vaultAddr = vaultManager.createVaultWithBeacon(
-            address(projectToken), DEFAULT_MIN_BET, DEFAULT_MAX_BET, DEFAULT_GRADUATION_THRESHOLD
-        );
-        assetVault = AssetVaultUpgradeable(payable(vaultAddr));
-
-        // Transfer ownership to test contract for easier testing
-        address currentOwner = assetVault.owner();
-        if (currentOwner != owner) {
-            vm.prank(currentOwner);
-            assetVault.transferOwnership(owner);
-        }
-
-        console.log("AssetVault address:", address(assetVault));
-        console.log("PositionManager address:", address(positionManager));
-        console.log("PriceFeedManager address:", address(priceFeedManager));
-        console.log("Vault owner after transfer:", assetVault.owner());
+        // Set default price
+        mockRegistry.setPrice(address(projectToken), address(usdc), 100e18);
     }
 
-    // Helper functions
-    function _updatePrice(address base, address quote, int256 price) internal {
-        mockRegistry.setPrice(base, quote, price);
-    }
-
-    function _addLiquidity(address provider, uint256 amount) internal returns (uint256 shares) {
-        vm.startPrank(provider);
-        projectToken.approve(address(assetVault), amount);
-        assetVault.addLiquidity(amount);
-        vm.stopPrank();
-
-        // Get shares from LP position
-        AssetVaultUpgradeable.LPPosition memory lpPos = assetVault.getLPPosition(provider);
-        shares = lpPos.shares;
-    }
-
-    function _openPosition(address user, uint256 amount, uint8 leverage, uint8 direction)
-        internal
-        returns (uint64 positionId)
-    {
-        vm.startPrank(user);
-        projectToken.approve(address(positionManager), amount);
-        positionId = positionManager.openPosition(
+    function _createVault() internal {
+        vm.startPrank(owner);
+        address vaultAddress = vaultManager.createVault(
             address(projectToken),
-            amount,
-            leverage,
-            direction,
-            0, // no price limit
-            block.timestamp + 3600, // deadline = 1 hour
-            "" // No price update data
+            DEFAULT_MIN_BET,
+            DEFAULT_MAX_BET,
+            DEFAULT_GRADUATION_THRESHOLD
         );
+        vault = VaultRouter(payable(vaultAddress));
         vm.stopPrank();
     }
 
-    function _skipTime(uint256 seconds_) internal {
-        vm.warp(block.timestamp + seconds_);
+    // ========================================================================
+    // HELPER FUNCTIONS
+    // ========================================================================
+
+    function _addLiquidity(address user, uint256 amount) internal {
+        vm.startPrank(user);
+        projectToken.approve(address(vault), amount);
+        vault.addLiquidity(amount);
+        vm.stopPrank();
     }
 
-    function _getPosition(uint64 positionId) internal view returns (PositionLib.Position memory) {
-        return positionManager.getPosition(positionId);
+    function _enableTrading() internal {
+        vm.prank(address(vaultManager));
+        vault.setTradingEnabled(true);
+    }
+
+    function _graduateVault() internal {
+        // Add enough liquidity to graduate
+        _addLiquidity(liquidityProvider, DEFAULT_GRADUATION_THRESHOLD);
     }
 }

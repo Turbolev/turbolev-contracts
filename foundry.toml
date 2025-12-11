@@ -7,6 +7,13 @@ optimizer = true
 optimizer_runs = 100
 via_ir = true
 
+# Exclude legacy tests from forge test runs
+no_match_path = "**/vault-legacy/**"
+
+# Fuzz testing settings
+[profile.default.fuzz]
+runs = 256
+
 # Formatter settings
 [fmt]
 line_length = 100

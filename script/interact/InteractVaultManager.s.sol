@@ -4,8 +4,8 @@ pragma solidity ^0.8.22;
 import "forge-std/Script.sol";
 import "forge-std/console.sol";
 import "../DeployHelper.s.sol";
-import "../../src/VaultManager.sol";
-import "../../src/AssetVaultUpgradeable.sol";
+import "../../src/legacy/VaultManager.sol";
+import "../../src/legacy/AssetVaultUpgradeable.sol";
 
 contract InteractVaultManager is DeployHelper {
     VaultManager public vmgr;

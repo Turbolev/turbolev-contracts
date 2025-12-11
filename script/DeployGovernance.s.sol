@@ -7,7 +7,7 @@ import "./DeployHelper.s.sol";
 import "../src/governance/MultisigWallet.sol";
 import "../src/governance/VersionedBeacon.sol";
 import "../src/governance/VaultGovernor.sol";
-import "../src/AssetVaultUpgradeable.sol";
+import "../src/legacy/AssetVaultUpgradeable.sol";
 import "@openzeppelin/contracts/governance/TimelockController.sol";
 
 /**

@@ -4,8 +4,8 @@ pragma solidity ^0.8.22;
 import "forge-std/Script.sol";
 import "./DeployHelper.s.sol";
 
-import "../src/VaultManager.sol";
-import "../src/VaultManagerHelper.sol";
+import "../src/legacy/VaultManager.sol";
+import "../src/legacy/VaultManagerHelper.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 /**
