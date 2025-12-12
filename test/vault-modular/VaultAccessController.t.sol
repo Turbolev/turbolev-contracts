@@ -15,21 +15,29 @@ contract VaultAccessControllerTest is BaseTestModular {
     function test_AccessControllerInitialized() public view {
         // Check roles were granted
         assertTrue(
-            accessController.hasRole(accessController.DEFAULT_ADMIN_ROLE(), mockTimelockController)
-        );
-        assertTrue(
-            accessController.hasRole(accessController.VAULT_ADMIN_ROLE(), address(vaultManager))
-        );
-        assertTrue(
-            accessController.hasRole(
-                accessController.POSITION_MANAGER_ROLE(), address(positionManager)
+            vaultAccessController.hasRole(
+                vaultAccessController.DEFAULT_ADMIN_ROLE(), mockTimelockController
             )
         );
-        assertTrue(accessController.hasRole(accessController.EMERGENCY_ROLE(), mockMultisigWallet));
+        assertTrue(
+            vaultAccessController.hasRole(
+                vaultAccessController.VAULT_ADMIN_ROLE(), address(vaultManager)
+            )
+        );
+        assertTrue(
+            vaultAccessController.hasRole(
+                vaultAccessController.POSITION_MANAGER_ROLE(), address(positionManager)
+            )
+        );
+        assertTrue(
+            vaultAccessController.hasRole(
+                vaultAccessController.EMERGENCY_ROLE(), mockMultisigWallet
+            )
+        );
     }
 
     function test_AccessControllerVersion() public view {
-        string memory version = accessController.version();
+        string memory version = vaultAccessController.version();
         assertEq(version, "2.0.0");
     }
 
@@ -38,29 +46,29 @@ contract VaultAccessControllerTest is BaseTestModular {
     // ========================================================================
 
     function test_VaultRegistered() public view {
-        assertTrue(accessController.isVaultRegistered(address(vault)));
+        assertTrue(vaultAccessController.isVaultRegistered(address(vault)));
     }
 
     function test_GetAllVaults() public view {
-        address[] memory vaults = accessController.getAllVaults();
+        address[] memory vaults = vaultAccessController.getAllVaults();
         assertEq(vaults.length, 1);
         assertEq(vaults[0], address(vault));
     }
 
     function test_GetVaultCount() public view {
-        uint256 count = accessController.getVaultCount();
+        uint256 count = vaultAccessController.getVaultCount();
         assertEq(count, 1);
     }
 
     function test_GetActiveVaultCount() public view {
-        uint256 count = accessController.getActiveVaultCount();
+        uint256 count = vaultAccessController.getActiveVaultCount();
         assertEq(count, 1);
     }
 
     function test_RegisterVault_RevertDuplicate() public {
         vm.prank(address(vaultManager));
         vm.expectRevert();
-        accessController.registerVault(address(vault));
+        vaultAccessController.registerVault(address(vault));
     }
 
     function test_RegisterVault_RevertIfNotAdmin() public {
@@ -68,7 +76,7 @@ contract VaultAccessControllerTest is BaseTestModular {
 
         vm.prank(user1);
         vm.expectRevert();
-        accessController.registerVault(newVault);
+        vaultAccessController.registerVault(newVault);
     }
 
     // ========================================================================
@@ -76,28 +84,28 @@ contract VaultAccessControllerTest is BaseTestModular {
     // ========================================================================
 
     function test_IsVaultAdmin() public view {
-        assertTrue(accessController.isVaultAdmin(address(vault), address(vaultManager)));
-        assertFalse(accessController.isVaultAdmin(address(vault), user1));
+        assertTrue(vaultAccessController.isVaultAdmin(address(vault), address(vaultManager)));
+        assertFalse(vaultAccessController.isVaultAdmin(address(vault), user1));
     }
 
     function test_IsPositionManager() public view {
-        assertTrue(accessController.isPositionManager(address(positionManager)));
-        assertFalse(accessController.isPositionManager(user1));
+        assertTrue(vaultAccessController.isPositionManager(address(positionManager)));
+        assertFalse(vaultAccessController.isPositionManager(user1));
     }
 
     function test_IsVaultKeeper() public view {
-        assertFalse(accessController.isVaultKeeper(user1));
+        assertFalse(vaultAccessController.isVaultKeeper(user1));
     }
 
     function test_IsPositionKeeper() public view {
         // admin was granted POSITION_KEEPER_ROLE in BaseTestModular
-        assertTrue(accessController.isPositionKeeper(admin));
-        assertFalse(accessController.isPositionKeeper(user1));
+        assertTrue(vaultAccessController.isPositionKeeper(admin));
+        assertFalse(vaultAccessController.isPositionKeeper(user1));
     }
 
     function test_HasEmergencyRole() public view {
-        assertTrue(accessController.hasEmergencyRole(mockMultisigWallet));
-        assertFalse(accessController.hasEmergencyRole(user1));
+        assertTrue(vaultAccessController.hasEmergencyRole(mockMultisigWallet));
+        assertFalse(vaultAccessController.hasEmergencyRole(user1));
     }
 
     // ========================================================================
@@ -108,21 +116,21 @@ contract VaultAccessControllerTest is BaseTestModular {
         address keeper = makeAddr("vaultKeeper");
 
         vm.prank(address(vaultManager));
-        accessController.addVaultKeeper(keeper);
+        vaultAccessController.addVaultKeeper(keeper);
 
-        assertTrue(accessController.isVaultKeeper(keeper));
+        assertTrue(vaultAccessController.isVaultKeeper(keeper));
     }
 
     function test_RemoveVaultKeeper() public {
         address keeper = makeAddr("vaultKeeper");
 
         vm.prank(address(vaultManager));
-        accessController.addVaultKeeper(keeper);
-        assertTrue(accessController.isVaultKeeper(keeper));
+        vaultAccessController.addVaultKeeper(keeper);
+        assertTrue(vaultAccessController.isVaultKeeper(keeper));
 
         vm.prank(address(vaultManager));
-        accessController.removeVaultKeeper(keeper);
-        assertFalse(accessController.isVaultKeeper(keeper));
+        vaultAccessController.removeVaultKeeper(keeper);
+        assertFalse(vaultAccessController.isVaultKeeper(keeper));
     }
 
     function test_AddVaultKeeper_RevertIfNotAdmin() public {
@@ -130,28 +138,28 @@ contract VaultAccessControllerTest is BaseTestModular {
 
         vm.prank(user1);
         vm.expectRevert();
-        accessController.addVaultKeeper(keeper);
+        vaultAccessController.addVaultKeeper(keeper);
     }
 
     function test_AddPositionKeeper() public {
         address keeper = makeAddr("positionKeeper");
 
         vm.prank(address(vaultManager));
-        accessController.addPositionKeeper(keeper);
+        vaultAccessController.addPositionKeeper(keeper);
 
-        assertTrue(accessController.isPositionKeeper(keeper));
+        assertTrue(vaultAccessController.isPositionKeeper(keeper));
     }
 
     function test_RemovePositionKeeper() public {
         address keeper = makeAddr("positionKeeper");
 
         vm.prank(address(vaultManager));
-        accessController.addPositionKeeper(keeper);
-        assertTrue(accessController.isPositionKeeper(keeper));
+        vaultAccessController.addPositionKeeper(keeper);
+        assertTrue(vaultAccessController.isPositionKeeper(keeper));
 
         vm.prank(address(vaultManager));
-        accessController.removePositionKeeper(keeper);
-        assertFalse(accessController.isPositionKeeper(keeper));
+        vaultAccessController.removePositionKeeper(keeper);
+        assertFalse(vaultAccessController.isPositionKeeper(keeper));
     }
 
     function test_AddPositionKeeper_RevertIfNotAdmin() public {
@@ -159,7 +167,7 @@ contract VaultAccessControllerTest is BaseTestModular {
 
         vm.prank(user1);
         vm.expectRevert();
-        accessController.addPositionKeeper(keeper);
+        vaultAccessController.addPositionKeeper(keeper);
     }
 
     // ========================================================================
@@ -170,27 +178,27 @@ contract VaultAccessControllerTest is BaseTestModular {
         bytes32 customRole = keccak256("CUSTOM_ROLE");
 
         vm.prank(address(vaultManager));
-        accessController.grantVaultRole(address(vault), customRole, user1);
+        vaultAccessController.grantVaultRole(address(vault), customRole, user1);
 
-        assertTrue(accessController.vaultRoles(address(vault), customRole, user1));
+        assertTrue(vaultAccessController.vaultRoles(address(vault), customRole, user1));
     }
 
     function test_RevokeVaultRole() public {
         bytes32 customRole = keccak256("CUSTOM_ROLE");
 
         vm.prank(address(vaultManager));
-        accessController.grantVaultRole(address(vault), customRole, user1);
-        assertTrue(accessController.vaultRoles(address(vault), customRole, user1));
+        vaultAccessController.grantVaultRole(address(vault), customRole, user1);
+        assertTrue(vaultAccessController.vaultRoles(address(vault), customRole, user1));
 
         vm.prank(mockTimelockController);
-        accessController.revokeVaultRole(address(vault), customRole, user1);
-        assertFalse(accessController.vaultRoles(address(vault), customRole, user1));
+        vaultAccessController.revokeVaultRole(address(vault), customRole, user1);
+        assertFalse(vaultAccessController.vaultRoles(address(vault), customRole, user1));
     }
 
     function test_HasVaultRole_GlobalRole() public view {
         // VaultManager has global VAULT_ADMIN_ROLE
-        bool hasRole = accessController.hasVaultRole(
-            address(vault), accessController.VAULT_ADMIN_ROLE(), address(vaultManager)
+        bool hasRole = vaultAccessController.hasVaultRole(
+            address(vault), vaultAccessController.VAULT_ADMIN_ROLE(), address(vaultManager)
         );
         assertTrue(hasRole);
     }
@@ -199,36 +207,38 @@ contract VaultAccessControllerTest is BaseTestModular {
         bytes32 customRole = keccak256("CUSTOM_ROLE");
 
         vm.prank(address(vaultManager));
-        accessController.grantVaultRole(address(vault), customRole, user1);
+        vaultAccessController.grantVaultRole(address(vault), customRole, user1);
 
-        bool hasRole = accessController.hasVaultRole(address(vault), customRole, user1);
+        bool hasRole = vaultAccessController.hasVaultRole(address(vault), customRole, user1);
         assertTrue(hasRole);
 
         // Should NOT have role for different vault
         address otherVault = makeAddr("otherVault");
-        bool hasRoleOther = accessController.hasVaultRole(otherVault, customRole, user1);
+        bool hasRoleOther = vaultAccessController.hasVaultRole(otherVault, customRole, user1);
         assertFalse(hasRoleOther);
     }
 
     // ========================================================================
-    // VAULT HELPER MANAGEMENT
+    // VAULT ADMIN PROXY MANAGEMENT
     // ========================================================================
 
-    function test_AddVaultManagerHelper() public {
-        address newHelper = makeAddr("newHelper");
+    function test_AddVaultAdminProxy() public {
+        address adminProxy = makeAddr("adminProxy");
 
         vm.prank(mockTimelockController);
-        accessController.addVaultManagerHelper(newHelper);
+        vaultAccessController.addVaultAdminProxy(adminProxy);
 
-        assertTrue(accessController.hasRole(accessController.VAULT_ADMIN_ROLE(), newHelper));
+        assertTrue(
+            vaultAccessController.hasRole(vaultAccessController.VAULT_ADMIN_ROLE(), adminProxy)
+        );
     }
 
-    function test_AddVaultManagerHelper_RevertIfNotAdmin() public {
-        address newHelper = makeAddr("newHelper");
+    function test_AddVaultAdminProxy_RevertIfNotAdmin() public {
+        address adminProxy = makeAddr("adminProxy");
 
         vm.prank(user1);
         vm.expectRevert();
-        accessController.addVaultManagerHelper(newHelper);
+        vaultAccessController.addVaultAdminProxy(adminProxy);
     }
 
     // ========================================================================
@@ -236,18 +246,18 @@ contract VaultAccessControllerTest is BaseTestModular {
     // ========================================================================
 
     function test_UnregisterVault() public {
-        assertTrue(accessController.isVaultRegistered(address(vault)));
+        assertTrue(vaultAccessController.isVaultRegistered(address(vault)));
 
         vm.prank(mockTimelockController);
-        accessController.unregisterVault(address(vault));
+        vaultAccessController.unregisterVault(address(vault));
 
-        assertFalse(accessController.isVaultRegistered(address(vault)));
+        assertFalse(vaultAccessController.isVaultRegistered(address(vault)));
     }
 
     function test_UnregisterVault_RevertIfNotAdmin() public {
         vm.prank(user1);
         vm.expectRevert();
-        accessController.unregisterVault(address(vault));
+        vaultAccessController.unregisterVault(address(vault));
     }
 
     function test_UnregisterVault_RevertIfNotRegistered() public {
@@ -255,7 +265,7 @@ contract VaultAccessControllerTest is BaseTestModular {
 
         vm.prank(mockTimelockController);
         vm.expectRevert();
-        accessController.unregisterVault(fakeVault);
+        vaultAccessController.unregisterVault(fakeVault);
     }
 
     // ========================================================================
@@ -263,11 +273,11 @@ contract VaultAccessControllerTest is BaseTestModular {
     // ========================================================================
 
     function test_RoleConstants() public view {
-        assertEq(accessController.VAULT_ADMIN_ROLE(), keccak256("VAULT_ADMIN_ROLE"));
-        assertEq(accessController.POSITION_MANAGER_ROLE(), keccak256("POSITION_MANAGER_ROLE"));
-        assertEq(accessController.VAULT_KEEPER_ROLE(), keccak256("VAULT_KEEPER_ROLE"));
-        assertEq(accessController.POSITION_KEEPER_ROLE(), keccak256("POSITION_KEEPER_ROLE"));
-        assertEq(accessController.EMERGENCY_ROLE(), keccak256("EMERGENCY_ROLE"));
-        assertEq(accessController.UPGRADER_ROLE(), keccak256("UPGRADER_ROLE"));
+        assertEq(vaultAccessController.VAULT_ADMIN_ROLE(), keccak256("VAULT_ADMIN_ROLE"));
+        assertEq(vaultAccessController.POSITION_MANAGER_ROLE(), keccak256("POSITION_MANAGER_ROLE"));
+        assertEq(vaultAccessController.VAULT_KEEPER_ROLE(), keccak256("VAULT_KEEPER_ROLE"));
+        assertEq(vaultAccessController.POSITION_KEEPER_ROLE(), keccak256("POSITION_KEEPER_ROLE"));
+        assertEq(vaultAccessController.EMERGENCY_ROLE(), keccak256("EMERGENCY_ROLE"));
+        assertEq(vaultAccessController.UPGRADER_ROLE(), keccak256("UPGRADER_ROLE"));
     }
 }

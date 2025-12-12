@@ -30,7 +30,6 @@ contract InteractVaultManagerModular is DeployHelper {
         console.log("Address:", address(vmgr));
         console.log("Owner:", vmgr.owner());
         console.log("PositionManager:", vmgr.positionManager());
-        console.log("VaultManagerHelper:", vmgr.vaultManagerHelper());
         console.log("AccessController:", vmgr.accessController());
         console.log("TimelockController:", vmgr.timelockController());
         console.log("MultisigWallet:", vmgr.multisigWallet());
@@ -165,13 +164,6 @@ contract InteractVaultManagerModular is DeployHelper {
         vm.startBroadcast(deployer);
         vmgr.setPositionManager(_positionManager);
         console.log("Position Manager set:", _positionManager);
-        vm.stopBroadcast();
-    }
-
-    function setVaultManagerHelper(address _helper) public {
-        vm.startBroadcast(deployer);
-        vmgr.setVaultManagerHelper(_helper);
-        console.log("VaultManagerHelper set:", _helper);
         vm.stopBroadcast();
     }
 

@@ -19,7 +19,7 @@ The Boolean Contracts system consists of the following upgradeable core contract
 1. **PositionManager** - Position lifecycle management (open/close/liquidate)
 2. **SettlementEngine** - Position settlement and P&L calculation
 3. **VaultManager** - Vault factory and management
-4. **VaultManagerHelper** - Helper functions for vault operations
+4. **VaultAdminProxy** - Admin proxy for vault batch operations and configuration
 5. **PriceFeedManager** - Oracle registry and price feed management
 
 ### Oracle Contracts

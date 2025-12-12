@@ -68,7 +68,6 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
      * @notice Initialize the vault router
      * @param _projectToken Project token address
      * @param _vaultManager VaultManager address
-     * @param _vaultManagerHelper VaultManagerHelper address
      * @param _positionManager PositionManager address
      * @param _accessController VaultAccessController address
      * @param _coreModule VaultCore module address
@@ -81,7 +80,6 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
     function initialize(
         address _projectToken,
         address _vaultManager,
-        address _vaultManagerHelper,
         address _positionManager,
         address _accessController,
         address _coreModule,
@@ -96,7 +94,6 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
         // Validate addresses
         if (_projectToken == address(0)) revert InvalidAddress();
         if (_vaultManager == address(0)) revert InvalidAddress();
-        if (_vaultManagerHelper == address(0)) revert InvalidAddress();
         if (_positionManager == address(0)) revert InvalidAddress();
         if (_accessController == address(0)) revert InvalidAddress();
         if (_coreModule == address(0)) revert InvalidModule();
@@ -113,10 +110,9 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
         // Initialize core module via delegatecall
         (bool success,) = _coreModule.delegatecall(
             abi.encodeWithSignature(
-                "initialize(address,address,address,address,address,uint256,uint256,uint256)",
+                "initialize(address,address,address,address,uint256,uint256,uint256)",
                 _projectToken,
                 _vaultManager,
-                _vaultManagerHelper,
                 _positionManager,
                 _accessController,
                 _minBetAmount,

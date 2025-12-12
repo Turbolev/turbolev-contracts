@@ -28,10 +28,10 @@ contract DeployHelper is Script {
     address payable public settlementEngine;
     address payable public positionManager;
     address payable public vaultManager;
-    address payable public vaultManagerHelper;
     address payable public priceFeedManager;
     address payable public pythOracle;
     address payable public tokenFaucet;
+    address payable public vaultAdminProxy;
 
     // Governance contracts
     address public multisigWallet;
@@ -164,7 +164,7 @@ contract DeployHelper is Script {
         console.log("SettlementEngine:", settlementEngine);
         console.log("PositionManager:", positionManager);
         console.log("VaultManager:", vaultManager);
-        console.log("VaultManagerHelper:", vaultManagerHelper);
+        console.log("VaultAdminProxy:", vaultAdminProxy);
         console.log("PriceFeedManager:", priceFeedManager);
     }
 
@@ -185,7 +185,7 @@ contract DeployHelper is Script {
         settlementEngine = payable(vm.envOr("SETTLEMENT_ENGINE_ADDRESS", address(0)));
         positionManager = payable(vm.envOr("POSITION_MANAGER_ADDRESS", address(0)));
         vaultManager = payable(vm.envOr("VAULT_MANAGER_ADDRESS", address(0)));
-        vaultManagerHelper = payable(vm.envOr("VAULT_MANAGER_HELPER_ADDRESS", address(0)));
+        vaultAdminProxy = payable(vm.envOr("VAULT_ADMIN_PROXY_ADDRESS", address(0)));
         priceFeedManager = payable(vm.envOr("PRICE_FEED_MANAGER_ADDRESS", address(0)));
         tokenFaucet = payable(vm.envOr("TOKEN_FAUCET_ADDRESS", address(0)));
 
@@ -274,9 +274,7 @@ contract DeployHelper is Script {
         json = string.concat(json, '  "settlementEngine": "', vm.toString(settlementEngine), '",\n');
         json = string.concat(json, '  "positionManager": "', vm.toString(positionManager), '",\n');
         json = string.concat(json, '  "vaultManager": "', vm.toString(vaultManager), '",\n');
-        json = string.concat(
-            json, '  "vaultManagerHelper": "', vm.toString(vaultManagerHelper), '",\n'
-        );
+        json = string.concat(json, '  "vaultAdminProxy": "', vm.toString(vaultAdminProxy), '",\n');
         json = string.concat(json, '  "priceFeedManager": "', vm.toString(priceFeedManager), '",\n');
         json = string.concat(json, '  "tokenFaucet": "', vm.toString(tokenFaucet), '",\n');
         // Governance contracts
@@ -322,7 +320,7 @@ contract DeployHelper is Script {
         settlementEngine = payable(vm.parseJsonAddress(json, ".settlementEngine"));
         positionManager = payable(vm.parseJsonAddress(json, ".positionManager"));
         vaultManager = payable(vm.parseJsonAddress(json, ".vaultManager"));
-        vaultManagerHelper = payable(vm.parseJsonAddress(json, ".vaultManagerHelper"));
+        vaultAdminProxy = payable(vm.parseJsonAddress(json, ".vaultAdminProxy"));
         priceFeedManager = payable(vm.parseJsonAddress(json, ".priceFeedManager"));
         tokenFaucet = payable(vm.parseJsonAddress(json, ".tokenFaucet"));
 

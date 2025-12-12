@@ -13,7 +13,7 @@ import "../interfaces/IVaultManager.sol";
  *
  * Global Roles:
  * - DEFAULT_ADMIN_ROLE: Governance (Timelock) - can manage all roles
- * - VAULT_ADMIN_ROLE: VaultManager, VaultManagerHelper - can configure vaults
+ * - VAULT_ADMIN_ROLE: VaultManager, VaultAdminProxy - can configure vaults
  * - POSITION_MANAGER_ROLE: PositionManager contract - can interact with positions
  * - VAULT_KEEPER_ROLE: Vault keeper bots - can update funding, finalize rewards
  * - POSITION_KEEPER_ROLE: Position keeper bots - can process settlements, liquidations
@@ -27,7 +27,7 @@ contract VaultAccessController is Initializable, AccessControlUpgradeable, UUPSU
     // ROLE DEFINITIONS
     // ========================================================================
 
-    /// @notice Role for vault administration (VaultManager, VaultManagerHelper)
+    /// @notice Role for vault administration (VaultManager, VaultAdminProxy)
     bytes32 public constant VAULT_ADMIN_ROLE = keccak256("VAULT_ADMIN_ROLE");
 
     /// @notice Role for position management (PositionManager)
@@ -330,13 +330,13 @@ contract VaultAccessController is Initializable, AccessControlUpgradeable, UUPSU
     // ========================================================================
 
     /**
-     * @notice Add VaultManagerHelper as vault admin
-     * @param helper VaultManagerHelper address
+     * @notice Add VaultAdminProxy as vault admin
+     * @param adminProxy VaultAdminProxy address
      * @dev Convenience function for setup
      */
-    function addVaultManagerHelper(address helper) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        if (helper == address(0)) revert InvalidAddress();
-        _grantRole(VAULT_ADMIN_ROLE, helper);
+    function addVaultAdminProxy(address adminProxy) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (adminProxy == address(0)) revert InvalidAddress();
+        _grantRole(VAULT_ADMIN_ROLE, adminProxy);
     }
 
     /**

@@ -2,13 +2,15 @@
 pragma solidity ^0.8.22;
 
 import "../interfaces/IVaultRouter.sol";
+import "../interfaces/IVaultManager.sol";
+import "../interfaces/IPriceFeedManager.sol";
 import "../libraries/VaultRiskLib.sol";
 import "../libraries/FundingRateLib.sol";
 
 /**
  * @title VaultViewerModular
  * @notice External view-only contract for querying vault-modular (VaultRouter) data
- * @dev Stateless contract - all functions are view/pure
+ * @dev Contains both single-vault queries and aggregated multi-vault queries
  *      Frontend/backend can call this contract directly
  *      Compatible with VaultRouter (vault-modular system)
  */
@@ -18,6 +20,31 @@ contract VaultViewerModular {
     // ========================================================================
 
     uint256 constant BASIS_POINTS = 10_000;
+    uint256 public constant MAX_PRICE_AGE = 3600; // 1 hour
+
+    // ========================================================================
+    // STATE VARIABLES
+    // ========================================================================
+
+    /// @notice VaultManager contract address for aggregated queries
+    address public vaultManager;
+
+    /// @notice PriceFeedManager contract address for USD calculations
+    address public priceFeedManager;
+
+    // ========================================================================
+    // CONSTRUCTOR
+    // ========================================================================
+
+    /**
+     * @notice Constructor
+     * @param _vaultManager VaultManager contract address
+     * @param _priceFeedManager PriceFeedManager contract address (can be address(0))
+     */
+    constructor(address _vaultManager, address _priceFeedManager) {
+        vaultManager = _vaultManager;
+        priceFeedManager = _priceFeedManager;
+    }
 
     // ========================================================================
     // TOTAL OI FUNCTIONS
@@ -720,6 +747,473 @@ contract VaultViewerModular {
             return totalLength - startIdx;
         }
         return 0;
+    }
+
+    // ========================================================================
+    // AGGREGATED VIEW FUNCTIONS
+    // ========================================================================
+
+    /**
+     * @notice Get total liquidity across all vaults
+     * @return total Total liquidity in native token equivalent
+     */
+    function getTotalLiquidity() external view returns (uint256 total) {
+        if (vaultManager == address(0)) return 0;
+
+        address[] memory vaults = IVaultManager(vaultManager).getAllVaults();
+
+        for (uint256 i = 0; i < vaults.length; i++) {
+            IVaultManager.VaultInfo memory info =
+                IVaultManager(vaultManager).getVaultInfo(vaults[i]);
+            if (!info.isActive) continue;
+
+            try IVaultRouter(vaults[i]).getVaultInfo() returns (
+                IVaultRouter.VaultInfo memory vInfo
+            ) {
+                total += vInfo.totalLiquidity;
+            } catch {
+                continue;
+            }
+        }
+        return total;
+    }
+
+    /**
+     * @notice Get total USD value across all vaults
+     * @return totalUSD Total value in USD (18 decimals)
+     */
+    function getTotalValueUSD() external view returns (uint256 totalUSD) {
+        if (vaultManager == address(0) || priceFeedManager == address(0)) {
+            return 0;
+        }
+
+        address[] memory vaults = IVaultManager(vaultManager).getAllVaults();
+
+        for (uint256 i = 0; i < vaults.length; i++) {
+            IVaultManager.VaultInfo memory info =
+                IVaultManager(vaultManager).getVaultInfo(vaults[i]);
+            if (!info.isActive) continue;
+
+            try IVaultRouter(vaults[i]).getVaultInfo() returns (
+                IVaultRouter.VaultInfo memory vInfo
+            ) {
+                // Get price from PriceFeedManager
+                try IPriceFeedManager(priceFeedManager)
+                    .getPrice(info.projectToken, MAX_PRICE_AGE) returns (
+                    uint256 price, uint256
+                ) {
+                    if (price > 0) {
+                        totalUSD += (vInfo.totalLiquidity * price) / 1e18;
+                    }
+                } catch {
+                    continue;
+                }
+            } catch {
+                continue;
+            }
+        }
+        return totalUSD;
+    }
+
+    /**
+     * @notice Get funding statistics for all vaults
+     * @return vaultAddresses Array of vault addresses
+     * @return longRates Array of cumulative long rates
+     * @return shortRates Array of cumulative short rates
+     * @return imbalances Array of current imbalances in bps
+     * @return hourlyRates Array of current hourly rates in bps
+     */
+    function getAllVaultsFundingStats()
+        external
+        view
+        returns (
+            address[] memory vaultAddresses,
+            int256[] memory longRates,
+            int256[] memory shortRates,
+            uint256[] memory imbalances,
+            uint256[] memory hourlyRates
+        )
+    {
+        if (vaultManager == address(0)) {
+            return (
+                new address[](0),
+                new int256[](0),
+                new int256[](0),
+                new uint256[](0),
+                new uint256[](0)
+            );
+        }
+
+        vaultAddresses = IVaultManager(vaultManager).getAllVaults();
+        uint256 length = vaultAddresses.length;
+
+        longRates = new int256[](length);
+        shortRates = new int256[](length);
+        imbalances = new uint256[](length);
+        hourlyRates = new uint256[](length);
+
+        for (uint256 i = 0; i < length; i++) {
+            try IVaultRouter(vaultAddresses[i]).getCumulativeFundingRates() returns (
+                int256 cumulativeLong, int256 cumulativeShort
+            ) {
+                longRates[i] = cumulativeLong;
+                shortRates[i] = cumulativeShort;
+
+                // Calculate current imbalance and rate
+                uint256 longExp = IVaultRouter(vaultAddresses[i]).totalLongExposure();
+                uint256 shortExp = IVaultRouter(vaultAddresses[i]).totalShortExposure();
+
+                (uint256 imbalanceBps,,) = FundingRateLib.calculateImbalance(longExp, shortExp);
+                imbalances[i] = imbalanceBps;
+
+                // Get funding config and calculate hourly rate
+                try IVaultRouter(vaultAddresses[i]).getFundingConfig() returns (
+                    uint16 t1Rate, uint16 t2Rate, uint16 t3Rate, uint16 t4Rate, uint16 t5Rate
+                ) {
+                    FundingRateLib.FundingConfig memory config = FundingRateLib.FundingConfig({
+                        tier1RateBps: t1Rate,
+                        tier2RateBps: t2Rate,
+                        tier3RateBps: t3Rate,
+                        tier4RateBps: t4Rate,
+                        tier5RateBps: t5Rate,
+                        isEnabled: true
+                    });
+                    hourlyRates[i] = FundingRateLib.getHourlyRate(imbalanceBps, config);
+                } catch {
+                    hourlyRates[i] = 0;
+                }
+            } catch {
+                // Default values on failure
+                longRates[i] = 0;
+                shortRates[i] = 0;
+                imbalances[i] = 0;
+                hourlyRates[i] = 0;
+            }
+        }
+
+        return (vaultAddresses, longRates, shortRates, imbalances, hourlyRates);
+    }
+
+    /**
+     * @notice Get funding info for a specific vault by project token
+     * @param projectToken Project token address
+     * @return cumulativeLongRate Cumulative long rate
+     * @return cumulativeShortRate Cumulative short rate
+     * @return lastUpdateTime Last funding update time
+     * @return currentHourlyRateBps Current hourly rate in bps
+     * @return longsPayShorts True if longs pay shorts
+     * @return imbalanceBps Current imbalance in bps
+     */
+    function getVaultFundingInfo(address projectToken)
+        external
+        view
+        returns (
+            int256 cumulativeLongRate,
+            int256 cumulativeShortRate,
+            uint256 lastUpdateTime,
+            uint256 currentHourlyRateBps,
+            bool longsPayShorts,
+            uint256 imbalanceBps
+        )
+    {
+        if (vaultManager == address(0)) return (0, 0, 0, 0, false, 0);
+
+        address vault = IVaultManager(vaultManager).getVault(projectToken);
+        if (vault == address(0)) return (0, 0, 0, 0, false, 0);
+
+        IVaultRouter v = IVaultRouter(vault);
+
+        (cumulativeLongRate, cumulativeShortRate) = v.getCumulativeFundingRates();
+        lastUpdateTime = v.lastFundingUpdateTime();
+
+        // Calculate current imbalance
+        uint256 longExp = v.totalLongExposure();
+        uint256 shortExp = v.totalShortExposure();
+        (imbalanceBps, longsPayShorts,) = FundingRateLib.calculateImbalance(longExp, shortExp);
+
+        // Get funding config and calculate hourly rate
+        (uint16 t1Rate, uint16 t2Rate, uint16 t3Rate, uint16 t4Rate, uint16 t5Rate) =
+            v.getFundingConfig();
+
+        FundingRateLib.FundingConfig memory config = FundingRateLib.FundingConfig({
+            tier1RateBps: t1Rate,
+            tier2RateBps: t2Rate,
+            tier3RateBps: t3Rate,
+            tier4RateBps: t4Rate,
+            tier5RateBps: t5Rate,
+            isEnabled: true
+        });
+        currentHourlyRateBps = FundingRateLib.getHourlyRate(imbalanceBps, config);
+    }
+
+    // ========================================================================
+    // HEALTH METRICS
+    // ========================================================================
+
+    /**
+     * @notice Vault health metrics struct
+     */
+    struct VaultHealthMetrics {
+        address vault;
+        address projectToken;
+        uint256 totalLiquidity;
+        uint256 totalShares;
+        uint256 totalLongExposure;
+        uint256 totalShortExposure;
+        uint256 netExposure;
+        uint256 utilizationBps;
+        uint256 pendingPayoutsCount;
+        uint256 pendingPayoutsValue;
+        bool isPaused;
+        bool isActive;
+        bool isFundingEnabled;
+        uint256 healthScore; // 0-10000 (higher is healthier)
+    }
+
+    /**
+     * @notice Get health metrics for a specific vault
+     * @param projectToken Project token address
+     * @return metrics VaultHealthMetrics struct
+     */
+    function getVaultHealthMetrics(address projectToken)
+        external
+        view
+        returns (VaultHealthMetrics memory metrics)
+    {
+        if (vaultManager == address(0)) return metrics;
+
+        address vault = IVaultManager(vaultManager).getVault(projectToken);
+        if (vault == address(0)) return metrics;
+
+        return _getVaultHealthMetrics(vault);
+    }
+
+    /**
+     * @notice Get health metrics for all vaults
+     * @return allMetrics Array of VaultHealthMetrics
+     */
+    function getAllVaultsHealthMetrics()
+        external
+        view
+        returns (VaultHealthMetrics[] memory allMetrics)
+    {
+        if (vaultManager == address(0)) return new VaultHealthMetrics[](0);
+
+        address[] memory vaults = IVaultManager(vaultManager).getAllVaults();
+        allMetrics = new VaultHealthMetrics[](vaults.length);
+
+        for (uint256 i = 0; i < vaults.length; i++) {
+            allMetrics[i] = _getVaultHealthMetrics(vaults[i]);
+        }
+
+        return allMetrics;
+    }
+
+    /**
+     * @notice Get aggregated health metrics across all vaults
+     * @return totalLiquidity Total liquidity across all vaults
+     * @return totalLongExposure Total long exposure across all vaults
+     * @return totalShortExposure Total short exposure across all vaults
+     * @return totalNetExposure Total net exposure across all vaults
+     * @return avgUtilizationBps Average utilization in bps
+     * @return avgHealthScore Average health score (0-10000)
+     * @return pausedVaultsCount Number of paused vaults
+     * @return unhealthyVaultsCount Number of vaults with health score < 5000
+     */
+    function getAggregatedHealthMetrics()
+        external
+        view
+        returns (
+            uint256 totalLiquidity,
+            uint256 totalLongExposure,
+            uint256 totalShortExposure,
+            uint256 totalNetExposure,
+            uint256 avgUtilizationBps,
+            uint256 avgHealthScore,
+            uint256 pausedVaultsCount,
+            uint256 unhealthyVaultsCount
+        )
+    {
+        if (vaultManager == address(0)) {
+            return (0, 0, 0, 0, 0, 0, 0, 0);
+        }
+
+        address[] memory vaults = IVaultManager(vaultManager).getAllVaults();
+        uint256 totalUtilization = 0;
+        uint256 totalHealthScore = 0;
+        uint256 activeVaultsCount = 0;
+
+        for (uint256 i = 0; i < vaults.length; i++) {
+            VaultHealthMetrics memory metrics = _getVaultHealthMetrics(vaults[i]);
+
+            totalLiquidity += metrics.totalLiquidity;
+            totalLongExposure += metrics.totalLongExposure;
+            totalShortExposure += metrics.totalShortExposure;
+            totalNetExposure += metrics.netExposure;
+            totalUtilization += metrics.utilizationBps;
+            totalHealthScore += metrics.healthScore;
+
+            if (metrics.isPaused) {
+                pausedVaultsCount++;
+            }
+
+            if (metrics.healthScore < 5000) {
+                unhealthyVaultsCount++;
+            }
+
+            if (metrics.isActive) {
+                activeVaultsCount++;
+            }
+        }
+
+        // Calculate averages
+        if (activeVaultsCount > 0) {
+            avgUtilizationBps = totalUtilization / activeVaultsCount;
+            avgHealthScore = totalHealthScore / activeVaultsCount;
+        }
+
+        return (
+            totalLiquidity,
+            totalLongExposure,
+            totalShortExposure,
+            totalNetExposure,
+            avgUtilizationBps,
+            avgHealthScore,
+            pausedVaultsCount,
+            unhealthyVaultsCount
+        );
+    }
+
+    /**
+     * @notice Internal function to get health metrics for a vault
+     * @param vault Vault address
+     * @return metrics VaultHealthMetrics struct
+     */
+    function _getVaultHealthMetrics(address vault)
+        internal
+        view
+        returns (VaultHealthMetrics memory metrics)
+    {
+        IVaultManager.VaultInfo memory managerInfo = IVaultManager(vaultManager).getVaultInfo(vault);
+
+        metrics.vault = vault;
+        metrics.projectToken = managerInfo.projectToken;
+        metrics.isActive = managerInfo.isActive;
+
+        IVaultRouter v = IVaultRouter(vault);
+
+        // Get vault info
+        try v.getVaultInfo() returns (IVaultRouter.VaultInfo memory info) {
+            metrics.totalLiquidity = info.totalLiquidity;
+            metrics.totalShares = info.totalShares;
+            metrics.pendingPayoutsCount = info.pendingPositions;
+        } catch {
+            // Default values
+        }
+
+        // Get exposure data
+        try v.totalLongExposure() returns (uint256 longExp) {
+            metrics.totalLongExposure = longExp;
+        } catch { }
+
+        try v.totalShortExposure() returns (uint256 shortExp) {
+            metrics.totalShortExposure = shortExp;
+        } catch { }
+
+        // Calculate net exposure
+        if (metrics.totalLongExposure > metrics.totalShortExposure) {
+            metrics.netExposure = metrics.totalLongExposure - metrics.totalShortExposure;
+        } else {
+            metrics.netExposure = metrics.totalShortExposure - metrics.totalLongExposure;
+        }
+
+        // Calculate utilization
+        if (metrics.totalLiquidity > 0) {
+            metrics.utilizationBps = (metrics.netExposure * BASIS_POINTS) / metrics.totalLiquidity;
+        }
+
+        // Check if paused
+        try v.paused() returns (bool isPaused) {
+            metrics.isPaused = isPaused;
+        } catch {
+            // Default false
+        }
+
+        // Check funding enabled
+        try v.fundingEnabled() returns (bool enabled) {
+            metrics.isFundingEnabled = enabled;
+        } catch {
+            // Default false
+        }
+
+        // Calculate health score (0-10000)
+        metrics.healthScore = _calculateHealthScore(metrics);
+
+        return metrics;
+    }
+
+    /**
+     * @notice Calculate health score for a vault (0-10000)
+     * @param metrics Vault health metrics
+     * @return score Health score
+     */
+    function _calculateHealthScore(VaultHealthMetrics memory metrics)
+        internal
+        pure
+        returns (uint256 score)
+    {
+        uint256 utilizationScore = 0;
+        uint256 liquidityScore = 0;
+        uint256 balanceScore = 0;
+        uint256 statusScore = 0;
+
+        // 1. Utilization score (40% weight) - lower utilization = higher score
+        // 0% utilization = 4000 points, 100% utilization = 0 points
+        if (metrics.utilizationBps <= BASIS_POINTS) {
+            utilizationScore = 4000 - ((metrics.utilizationBps * 4000) / BASIS_POINTS);
+        }
+
+        // 2. Liquidity vs Pending Payouts score (30% weight)
+        if (metrics.totalLiquidity > 0) {
+            if (metrics.pendingPayoutsValue == 0) {
+                liquidityScore = 3000;
+            } else {
+                uint256 ratio =
+                    (metrics.totalLiquidity * BASIS_POINTS) / metrics.pendingPayoutsValue;
+                if (ratio >= 20_000) {
+                    liquidityScore = 3000; // 2x or more = full score
+                } else if (ratio >= BASIS_POINTS) {
+                    liquidityScore = 2000; // 1x-2x = partial score
+                } else {
+                    liquidityScore = (ratio * 2000) / BASIS_POINTS; // < 1x = proportional
+                }
+            }
+        }
+
+        // 3. Exposure balance score (20% weight)
+        uint256 totalExposure = metrics.totalLongExposure + metrics.totalShortExposure;
+        if (totalExposure > 0) {
+            uint256 imbalanceBps = (metrics.netExposure * BASIS_POINTS) / totalExposure;
+            balanceScore = 2000 - ((imbalanceBps * 2000) / BASIS_POINTS);
+        } else {
+            balanceScore = 2000; // No exposure = balanced
+        }
+
+        // 4. Status score (10% weight)
+        if (metrics.isActive && !metrics.isPaused) {
+            statusScore = 1000;
+        } else if (metrics.isActive) {
+            statusScore = 500; // Active but paused
+        }
+
+        score = utilizationScore + liquidityScore + balanceScore + statusScore;
+
+        // Cap at 10000
+        if (score > BASIS_POINTS) {
+            score = BASIS_POINTS;
+        }
+
+        return score;
     }
 
     // ========================================================================

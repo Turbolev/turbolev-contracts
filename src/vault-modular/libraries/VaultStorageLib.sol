@@ -115,7 +115,6 @@ library VaultStorageLib {
     struct CoreStorage {
         // External addresses
         address vaultManager;
-        address vaultManagerHelper;
         address positionManager;
         address treasury;
         address projectToken;

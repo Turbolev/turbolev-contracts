@@ -28,8 +28,7 @@ contract VaultManagerModularTest is BaseTestModular {
 
     function test_VaultManagerInitialized() public view {
         assertEq(vaultManager.positionManager(), address(positionManager));
-        assertEq(vaultManager.vaultManagerHelper(), address(vaultManagerHelper));
-        assertEq(vaultManager.accessController(), address(accessController));
+        assertEq(vaultManager.accessController(), address(vaultAccessController));
         assertEq(vaultManager.multisigWallet(), mockMultisigWallet);
         assertEq(vaultManager.timelockController(), mockTimelockController);
     }
@@ -269,15 +268,6 @@ contract VaultManagerModularTest is BaseTestModular {
         vaultManager.setPositionManager(newPM);
 
         assertEq(vaultManager.positionManager(), newPM);
-    }
-
-    function test_SetVaultManagerHelper() public {
-        address newHelper = makeAddr("newHelper");
-
-        vm.prank(owner);
-        vaultManager.setVaultManagerHelper(newHelper);
-
-        assertEq(vaultManager.vaultManagerHelper(), newHelper);
     }
 
     function test_SetAccessController() public {

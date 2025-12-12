@@ -40,9 +40,6 @@ contract VaultManager is
     /// @notice PositionManager contract address
     address public positionManager;
 
-    /// @notice VaultManagerHelper contract address
-    address public vaultManagerHelper;
-
     /// @notice VaultAccessController address
     address public accessController;
 
@@ -240,7 +237,7 @@ contract VaultManager is
         uint256 _maxBetAmount,
         uint256 _graduationThreshold
     ) public onlyOwner whenNotPaused returns (address vaultAddress) {
-        if (_projectToken == address(0) || vaultManagerHelper == address(0)) {
+        if (_projectToken == address(0)) {
             revert InvalidAddress();
         }
         if (vaultsByProjectToken[_projectToken] != address(0)) {
@@ -252,7 +249,6 @@ contract VaultManager is
             VaultRouter.initialize.selector,
             _projectToken,
             address(this),
-            vaultManagerHelper,
             positionManager,
             accessController,
             coreModule,
@@ -572,11 +568,6 @@ contract VaultManager is
     function setPositionManager(address _positionManager) external onlyOwner whenNotPaused {
         if (_positionManager == address(0)) revert InvalidAddress();
         positionManager = _positionManager;
-    }
-
-    function setVaultManagerHelper(address _vaultManagerHelper) external onlyOwner whenNotPaused {
-        if (_vaultManagerHelper == address(0)) revert InvalidAddress();
-        vaultManagerHelper = _vaultManagerHelper;
     }
 
     function setAccessController(address _accessController) external onlyOwner whenNotPaused {

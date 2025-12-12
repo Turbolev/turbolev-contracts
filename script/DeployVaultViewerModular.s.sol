@@ -8,7 +8,7 @@ import "../src/vault-helpers/VaultViewerModular.sol";
 /**
  * @title DeployVaultViewerModular
  * @notice Script to deploy VaultViewerModular contract
- * @dev VaultViewerModular is stateless - deploy once and use for all vault-modular (VaultRouter) vaults
+ * @dev VaultViewerModular provides view functions for vault-modular (VaultRouter) vaults
  *
  * Usage:
  *   forge script script/DeployVaultViewerModular.s.sol:DeployVaultViewerModular \
@@ -18,6 +18,9 @@ contract DeployVaultViewerModular is DeployHelper {
     address public deployedVaultViewerModular;
 
     function run() public {
+        // Load required contract addresses
+        _loadDeployedAddressesFromEnv();
+
         vm.startBroadcast(deployer);
 
         console.log("\n===========================================");
@@ -26,8 +29,11 @@ contract DeployVaultViewerModular is DeployHelper {
         console.log("Deployer:", deployer);
         console.log("===========================================\n");
 
-        // Deploy VaultViewerModular (stateless contract)
-        deployedVaultViewerModular = address(new VaultViewerModular());
+        console.log("Using VaultManager:", vaultManager);
+        console.log("Using PriceFeedManager:", priceFeedManager);
+
+        // Deploy VaultViewerModular with constructor params
+        deployedVaultViewerModular = address(new VaultViewerModular(vaultManager, priceFeedManager));
 
         console.log("\n[SUCCESS] VaultViewerModular Deployed!");
         console.log("-------------------------------------------");
@@ -42,5 +48,16 @@ contract DeployVaultViewerModular is DeployHelper {
         console.log("===========================================\n");
 
         vm.stopBroadcast();
+    }
+
+    /**
+     * @notice Deploy with explicit addresses (for testing)
+     */
+    function runLocal(address _vaultManager, address _priceFeedManager) external returns (address) {
+        vm.startBroadcast();
+        deployedVaultViewerModular =
+            address(new VaultViewerModular(_vaultManager, _priceFeedManager));
+        vm.stopBroadcast();
+        return deployedVaultViewerModular;
     }
 }

@@ -157,8 +157,10 @@ contract LeverageTierSystemTest is BaseTestModular {
 
     function testFuzz_CheckPositionRisk(uint256 positionSize, uint8 leverage) public {
         // Bound inputs
-        positionSize = bound(positionSize, 0.01 ether, 100 ether);
         leverage = uint8(bound(leverage, 1, 50));
+        // positionSize must be >= minBetAmount * leverage for collateral check
+        uint256 minPositionSize = DEFAULT_MIN_BET * leverage;
+        positionSize = bound(positionSize, minPositionSize, DEFAULT_MAX_BET);
 
         // Add sufficient liquidity
         _addLiquidity(liquidityProvider, 10_000 ether);

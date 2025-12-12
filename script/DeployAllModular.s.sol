@@ -23,7 +23,7 @@ import "../src/vault-modular/modules/VaultRewards.sol";
 // Governance
 import "../src/governance/MultisigWallet.sol";
 import "../src/governance/VersionedBeacon.sol";
-import "../src/legacy/VaultManagerHelper.sol";
+import "../src/vault-modular/VaultAdminProxy.sol";
 import "@openzeppelin/contracts/governance/TimelockController.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
@@ -228,10 +228,6 @@ contract DeployAllModular is DeployHelper {
 
         vaultManager = payable(address(new ERC1967Proxy(vaultManagerImpl, vaultManagerInitData)));
         console.log("VaultManager deployed:", vaultManager);
-
-        // Deploy VaultManagerHelper
-        vaultManagerHelper = payable(address(new VaultManagerHelper(vaultManager)));
-        console.log("VaultManagerHelper deployed:", vaultManagerHelper);
     }
 
     // ========================================================================
@@ -272,7 +268,6 @@ contract DeployAllModular is DeployHelper {
 
         // VaultManager connections
         VaultManager(vaultManager).setPositionManager(positionManager);
-        VaultManager(vaultManager).setVaultManagerHelper(vaultManagerHelper);
         console.log("[OK] VaultManager configured");
 
         // SettlementEngine connections
@@ -280,10 +275,6 @@ contract DeployAllModular is DeployHelper {
         SettlementEngine(settlementEngine).setVaultManager(vaultManager);
         SettlementEngine(settlementEngine).setPriceFeedManager(priceFeedManager);
         console.log("[OK] SettlementEngine configured");
-
-        // VaultManagerHelper connections
-        VaultManagerHelper(vaultManagerHelper).setPriceFeedManager(priceFeedManager);
-        console.log("[OK] VaultManagerHelper configured");
 
         // VaultAccessController - update with correct addresses
         VaultAccessController(vaultAccessController).setVaultManager(vaultManager);
@@ -342,7 +333,6 @@ contract DeployAllModular is DeployHelper {
         require(settlementEngine != address(0), "SettlementEngine not deployed");
         require(positionManager != address(0), "PositionManager not deployed");
         require(vaultManager != address(0), "VaultManager not deployed");
-        require(vaultManagerHelper != address(0), "VaultManagerHelper not deployed");
         require(priceFeedManager != address(0), "PriceFeedManager not deployed");
         require(vaultAccessController != address(0), "VaultAccessController not deployed");
 
@@ -369,7 +359,6 @@ contract DeployAllModular is DeployHelper {
         console.log("SettlementEngine:", settlementEngine);
         console.log("PositionManager:", positionManager);
         console.log("VaultManager:", vaultManager);
-        console.log("VaultManagerHelper:", vaultManagerHelper);
         console.log("\n--- Vault Modules ---");
         console.log("VaultRouter Impl:", vaultRouterImpl);
         console.log("VaultCore Module:", vaultCoreModule);

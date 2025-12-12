@@ -10,7 +10,6 @@ import "../src/vault-modular/VaultRouter.sol";
 import "../src/vault-modular/modules/VaultCore.sol";
 import "../src/vault-modular/modules/VaultFunding.sol";
 import "../src/vault-modular/modules/VaultRewards.sol";
-import "../src/legacy/VaultManagerHelper.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 /**
@@ -20,7 +19,6 @@ import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
  */
 contract DeployVaultManagerModular is DeployHelper {
     address public newImplementation;
-    address public helperAddress;
     address public accessControllerAddress;
 
     // Module addresses (inherited from DeployHelper, use local shadows for this script)
@@ -84,18 +82,10 @@ contract DeployVaultManagerModular is DeployHelper {
         _logDeployment("VaultManager Proxy", vaultManager);
         _logDeployment("VaultManager Implementation", newImplementation);
 
-        // Deploy or check VaultManagerHelper
-        _deployOrCheckHelper();
-
-        // Connect VaultManagerHelper to VaultManager
-        VaultManager(vaultManager).setVaultManagerHelper(helperAddress);
-        console.log("Connected VaultManagerHelper to VaultManager");
-
         console.log("\n===========================================");
         console.log("Operation Completed Successfully!");
         console.log("VaultManager Proxy:", vaultManager);
         console.log("VaultManager Implementation:", newImplementation);
-        console.log("VaultManagerHelper:", helperAddress);
         console.log("VaultAccessController:", accessControllerAddress);
         console.log("===========================================\n");
 
@@ -162,22 +152,6 @@ contract DeployVaultManagerModular is DeployHelper {
             console.log("VaultAccessController deployed:", accessControllerAddress);
         } else {
             console.log("Using existing VaultAccessController:", accessControllerAddress);
-        }
-    }
-
-    function _deployOrCheckHelper() internal {
-        console.log("\n--- VaultManagerHelper ---");
-
-        if (_isContractDeployed(vaultManagerHelper)) {
-            console.log("VaultManagerHelper already exists at:", vaultManagerHelper);
-            console.log("Note: VaultManagerHelper is not upgradeable");
-            console.log("Deploy manually if changes are needed");
-            helperAddress = vaultManagerHelper;
-        } else {
-            console.log("Deploying new VaultManagerHelper...");
-            helperAddress = address(new VaultManagerHelper(payable(vaultManager)));
-            _logDeployment("VaultManagerHelper", helperAddress);
-            console.log("[SUCCESS] Deployed VaultManagerHelper");
         }
     }
 

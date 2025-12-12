@@ -43,7 +43,7 @@ abstract contract VaultModuleBase {
     // ========================================================================
 
     /**
-     * @notice Only vault admin (VaultManager or VaultManagerHelper)
+     * @notice Only vault admin (VaultManager or VAULT_ADMIN_ROLE)
      */
     modifier onlyVaultAdmin() {
         VaultStorageLib.CoreStorage storage core = VaultStorageLib.getCoreStorage();
@@ -57,13 +57,16 @@ abstract contract VaultModuleBase {
     }
 
     /**
-     * @notice Only VaultManager or VaultManagerHelper
-     * @dev More specific check using stored addresses
+     * @notice Only VaultManager or VAULT_ADMIN_ROLE
+     * @dev Used for admin functions that need direct access control
      */
     modifier onlyVaultManagerOrHelper() {
         VaultStorageLib.CoreStorage storage core = VaultStorageLib.getCoreStorage();
-        if (msg.sender != core.vaultManager && msg.sender != core.vaultManagerHelper) {
-            revert NotVaultManagerOrHelper();
+        if (msg.sender != core.vaultManager) {
+            VaultAccessController ac = VaultAccessController(core.accessController);
+            if (!ac.hasRole(ac.VAULT_ADMIN_ROLE(), msg.sender)) {
+                revert NotVaultManagerOrHelper();
+            }
         }
         _;
     }
@@ -88,6 +91,24 @@ abstract contract VaultModuleBase {
 
         VaultAccessController ac = VaultAccessController(core.accessController);
         if (!ac.isVaultKeeper(msg.sender)) {
+            revert NotKeeper();
+        }
+        _;
+    }
+
+    /**
+     * @notice Only vault admin OR vault keeper
+     * @dev For automation functions that can be called by either admin or keeper bots
+     */
+    modifier onlyVaultAdminOrKeeper() {
+        VaultStorageLib.CoreStorage storage core = VaultStorageLib.getCoreStorage();
+        if (core.accessController == address(0)) revert InvalidAddress();
+
+        VaultAccessController ac = VaultAccessController(core.accessController);
+        bool isAdmin = ac.isVaultAdmin(address(this), msg.sender);
+        bool isKeeper = ac.isVaultKeeper(msg.sender);
+
+        if (!isAdmin && !isKeeper) {
             revert NotKeeper();
         }
         _;
@@ -334,18 +355,6 @@ abstract contract VaultModuleBase {
         address token = _projectToken();
         if (token == address(0)) revert InvalidAddress();
         IERC20(token).safeTransferFrom(from, to, amount);
-    }
-
-    // ========================================================================
-    // EVENT HELPER
-    // ========================================================================
-
-    /**
-     * @notice Get VaultManagerHelper for event emission
-     * @return helper VaultManagerHelper address
-     */
-    function _vaultManagerHelper() internal view returns (address helper) {
-        return VaultStorageLib.getCoreStorage().vaultManagerHelper;
     }
 }
 

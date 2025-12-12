@@ -13,19 +13,16 @@ import "../vault-modular/BaseTestModular.sol";
  *      - Role-based access
  */
 contract PositionAccessControlTest is BaseTestModular {
-    address public keeper;
-
     // ========================================================================
     // SETUP
     // ========================================================================
 
     function setUp() public override {
         super.setUp();
-        keeper = makeAddr("keeper");
 
         // Grant POSITION_KEEPER_ROLE to keeper via VaultAccessController
         vm.startPrank(mockTimelockController);
-        accessController.grantRole(accessController.POSITION_KEEPER_ROLE(), keeper);
+        vaultAccessController.grantRole(vaultAccessController.POSITION_KEEPER_ROLE(), keeper);
         vm.stopPrank();
 
         _enableTrading();
@@ -41,9 +38,9 @@ contract PositionAccessControlTest is BaseTestModular {
 
         // Grant via VAULT_ADMIN_ROLE (vaultManager has this role)
         vm.prank(address(vaultManager));
-        accessController.addPositionKeeper(newKeeper);
+        vaultAccessController.addPositionKeeper(newKeeper);
 
-        assertTrue(accessController.isPositionKeeper(newKeeper), "New keeper should be added");
+        assertTrue(vaultAccessController.isPositionKeeper(newKeeper), "New keeper should be added");
     }
 
     function test_AddPositionKeeper_RevertOnNonAdmin() public {
@@ -51,24 +48,24 @@ contract PositionAccessControlTest is BaseTestModular {
 
         vm.prank(user1);
         vm.expectRevert();
-        accessController.addPositionKeeper(newKeeper);
+        vaultAccessController.addPositionKeeper(newKeeper);
     }
 
     function test_RemovePositionKeeper() public {
         address newKeeper = makeAddr("newKeeper");
 
         vm.startPrank(address(vaultManager));
-        accessController.addPositionKeeper(newKeeper);
-        accessController.removePositionKeeper(newKeeper);
+        vaultAccessController.addPositionKeeper(newKeeper);
+        vaultAccessController.removePositionKeeper(newKeeper);
         vm.stopPrank();
 
-        assertFalse(accessController.isPositionKeeper(newKeeper), "Keeper should be removed");
+        assertFalse(vaultAccessController.isPositionKeeper(newKeeper), "Keeper should be removed");
     }
 
     function test_RemovePositionKeeper_RevertOnNonAdmin() public {
         vm.prank(user1);
         vm.expectRevert();
-        accessController.removePositionKeeper(keeper);
+        vaultAccessController.removePositionKeeper(keeper);
     }
 
     // ========================================================================
@@ -228,10 +225,10 @@ contract PositionAccessControlTest is BaseTestModular {
         assertEq(positionManager.owner(), owner, "Owner should be set");
         assertEq(
             address(positionManager.accessController()),
-            address(accessController),
+            address(vaultAccessController),
             "AccessController should be set"
         );
-        assertTrue(accessController.isPositionKeeper(admin), "Admin should be position keeper");
+        assertTrue(vaultAccessController.isPositionKeeper(admin), "Admin should be position keeper");
         assertEq(
             positionManager.vaultManager(), address(vaultManager), "VaultManager should be set"
         );
@@ -254,7 +251,7 @@ contract PositionAccessControlTest is BaseTestModular {
     function test_CannotAddZeroPositionKeeper() public {
         vm.prank(address(vaultManager));
         vm.expectRevert();
-        accessController.addPositionKeeper(address(0));
+        vaultAccessController.addPositionKeeper(address(0));
     }
 
     function test_CannotSetZeroVaultManager() public {

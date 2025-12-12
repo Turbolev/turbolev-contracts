@@ -17,8 +17,8 @@ contract VaultViewerModularTest is BaseTestModular {
     function setUp() public override {
         super.setUp();
 
-        // Deploy VaultViewerModular
-        vaultViewer = new VaultViewerModular();
+        // Deploy VaultViewerModular with required constructor args
+        vaultViewer = new VaultViewerModular(address(vaultManager), address(priceFeedManager));
 
         // Add initial liquidity
         _addLiquidity(liquidityProvider, 1000 ether);

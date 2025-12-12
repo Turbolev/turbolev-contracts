@@ -91,13 +91,13 @@ contract InteractVaultAccessController is DeployHelper {
     }
 
     /**
-     * @notice Add VaultManagerHelper as vault admin
-     * @param helper VaultManagerHelper address
+     * @notice Add VaultAdminProxy as vault admin
+     * @param adminProxy VaultAdminProxy address
      */
-    function addVaultManagerHelper(address helper) public {
+    function addVaultAdminProxy(address adminProxy) public {
         vm.startBroadcast(deployer);
-        accessController.addVaultManagerHelper(helper);
-        console.log("VaultManagerHelper added:", helper);
+        accessController.addVaultAdminProxy(adminProxy);
+        console.log("VaultAdminProxy added:", adminProxy);
         vm.stopBroadcast();
     }
 

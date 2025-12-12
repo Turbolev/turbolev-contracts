@@ -174,4 +174,23 @@ interface IVaultRouter {
     function setPositionManager(address positionManager) external;
     function pause() external;
     function unpause() external;
+
+    // ========================================================================
+    // ADMIN FUNCTIONS (used by VaultAdminProxy)
+    // ========================================================================
+
+    function setFee(uint8 feeType, uint16 feeBps) external;
+    function setTreasury(address treasury) external;
+    function setGraduationThreshold(uint256 threshold) external;
+    function withdrawFees(uint256 amount) external;
+    function updateVaultParams(uint256 minBetAmount, uint256 maxBetAmount) external;
+    function updateHourlyFunding() external returns (int256, int256, uint256, bool);
+    function setFundingConfig(
+        uint16 tier1RateBps,
+        uint16 tier2RateBps,
+        uint16 tier3RateBps,
+        uint16 tier4RateBps,
+        uint16 tier5RateBps
+    ) external;
+    function setFundingEnabled(bool enabled) external;
 }

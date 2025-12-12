@@ -8,7 +8,6 @@ import "../../libraries/VaultPayoutLib.sol";
 import "../../libraries/VaultRiskLib.sol";
 import "../../libraries/VaultConfigLib.sol";
 import "../../libraries/FundingRateLib.sol";
-import "../../interfaces/IVaultManagerHelper.sol";
 
 /**
  * @title VaultCore
@@ -36,6 +35,7 @@ contract VaultCore is VaultModuleBase {
         uint256 timestamp
     );
     event LiquidityAdded(
+        address indexed vault,
         address indexed user,
         uint256 amount,
         uint256 shares,
@@ -44,11 +44,19 @@ contract VaultCore is VaultModuleBase {
         uint256 timestamp
     );
     event LiquidityRemoved(
+        address indexed vault,
         address indexed user,
         uint256 amount,
         uint256 shares,
         uint256 totalLiquidity,
         VaultStorageLib.LiquidityOperationType operationType,
+        uint256 timestamp
+    );
+    event StakingFeeCollected(
+        address indexed vault,
+        address indexed user,
+        uint256 fee,
+        uint256 netAmount,
         uint256 timestamp
     );
     event CollateralDeposited(uint256 amount, uint256 positionSize, uint256 timestamp);
@@ -118,7 +126,6 @@ contract VaultCore is VaultModuleBase {
     error TransferFailed();
     error ZeroPayoutAmount();
     error NativeTokenNotAllowed();
-    error VaultManagerHelperNotSet();
     error InvalidParameters();
     error DirectTransferNotAllowed();
 
@@ -141,7 +148,6 @@ contract VaultCore is VaultModuleBase {
      * @notice Initialize vault core storage
      * @param _projectToken Project token address
      * @param _vaultManager VaultManager address
-     * @param _vaultManagerHelper VaultManagerHelper address
      * @param _positionManager PositionManager address
      * @param _accessController VaultAccessController address
      * @param _minBetAmount Minimum bet amount
@@ -151,7 +157,6 @@ contract VaultCore is VaultModuleBase {
     function initialize(
         address _projectToken,
         address _vaultManager,
-        address _vaultManagerHelper,
         address _positionManager,
         address _accessController,
         uint256 _minBetAmount,
@@ -165,14 +170,12 @@ contract VaultCore is VaultModuleBase {
         // Validate addresses
         if (_projectToken == address(0)) revert InvalidAddress();
         if (_vaultManager == address(0)) revert InvalidAddress();
-        if (_vaultManagerHelper == address(0)) revert InvalidAddress();
         if (_positionManager == address(0)) revert InvalidAddress();
         if (_accessController == address(0)) revert InvalidAddress();
 
         // Set addresses
         core.projectToken = _projectToken;
         core.vaultManager = _vaultManager;
-        core.vaultManagerHelper = _vaultManagerHelper;
         core.positionManager = _positionManager;
         core.accessController = _accessController;
 
@@ -286,19 +289,20 @@ contract VaultCore is VaultModuleBase {
         core.withdrawableFees += stakingFee;
 
         // Emit events
-        if (core.vaultManagerHelper != address(0)) {
-            IVaultManagerHelper(core.vaultManagerHelper)
-                .emitLiquidityAdded(
-                    msg.sender,
-                    netAmount,
-                    shares,
-                    core.vaultInfo.totalLiquidity,
-                    uint8(VaultStorageLib.LiquidityOperationType.USER_DEPOSIT),
-                    block.timestamp
-                );
+        emit LiquidityAdded(
+            address(this),
+            msg.sender,
+            netAmount,
+            shares,
+            core.vaultInfo.totalLiquidity,
+            VaultStorageLib.LiquidityOperationType.USER_DEPOSIT,
+            block.timestamp
+        );
 
-            IVaultManagerHelper(core.vaultManagerHelper)
-                .emitStakingFeeCollected(msg.sender, stakingFee, netAmount, block.timestamp);
+        if (stakingFee > 0) {
+            emit StakingFeeCollected(
+                address(this), msg.sender, stakingFee, netAmount, block.timestamp
+            );
         }
 
         // Check graduation
@@ -356,17 +360,15 @@ contract VaultCore is VaultModuleBase {
             );
         }
 
-        if (core.vaultManagerHelper != address(0)) {
-            IVaultManagerHelper(core.vaultManagerHelper)
-                .emitLiquidityRemoved(
-                    msg.sender,
-                    netPayout,
-                    shares,
-                    core.vaultInfo.totalLiquidity,
-                    uint8(VaultStorageLib.LiquidityOperationType.USER_WITHDRAW),
-                    block.timestamp
-                );
-        }
+        emit LiquidityRemoved(
+            address(this),
+            msg.sender,
+            netPayout,
+            shares,
+            core.vaultInfo.totalLiquidity,
+            VaultStorageLib.LiquidityOperationType.USER_WITHDRAW,
+            block.timestamp
+        );
 
         // Transfer tokens
         IERC20(core.projectToken).safeTransfer(msg.sender, netPayout);
@@ -485,17 +487,15 @@ contract VaultCore is VaultModuleBase {
         if (result.rewardsFromVault > 0) {
             core.vaultInfo.totalLiquidity -= result.rewardsFromVault;
 
-            if (core.vaultManagerHelper != address(0)) {
-                IVaultManagerHelper(core.vaultManagerHelper)
-                    .emitLiquidityRemoved(
-                        user,
-                        result.rewardsFromVault,
-                        0,
-                        core.vaultInfo.totalLiquidity,
-                        uint8(VaultStorageLib.LiquidityOperationType.PAYOUT_EXECUTION),
-                        block.timestamp
-                    );
-            }
+            emit LiquidityRemoved(
+                address(this),
+                user,
+                result.rewardsFromVault,
+                0,
+                core.vaultInfo.totalLiquidity,
+                VaultStorageLib.LiquidityOperationType.PAYOUT_EXECUTION,
+                block.timestamp
+            );
         }
 
         // Clear collateral
@@ -553,17 +553,15 @@ contract VaultCore is VaultModuleBase {
         if (pnlResult.isLiquidityIncrease && pnlResult.liquidityChange > 0) {
             core.vaultInfo.totalLiquidity += pnlResult.liquidityChange;
 
-            if (core.vaultManagerHelper != address(0)) {
-                IVaultManagerHelper(core.vaultManagerHelper)
-                    .emitLiquidityAdded(
-                        address(this),
-                        pnlResult.liquidityChange,
-                        0,
-                        core.vaultInfo.totalLiquidity,
-                        uint8(VaultStorageLib.LiquidityOperationType.CLOSE_POSITION),
-                        block.timestamp
-                    );
-            }
+            emit LiquidityAdded(
+                address(this),
+                address(this),
+                pnlResult.liquidityChange,
+                0,
+                core.vaultInfo.totalLiquidity,
+                VaultStorageLib.LiquidityOperationType.CLOSE_POSITION,
+                block.timestamp
+            );
         }
 
         // Update lifetime P&L
@@ -680,13 +678,16 @@ contract VaultCore is VaultModuleBase {
 
     /**
      * @notice Pause vault
+     * @dev Allowed: VaultManager, VAULT_ADMIN_ROLE, or EMERGENCY_ROLE
      */
     function pause() external {
         VaultStorageLib.CoreStorage storage core = _core();
-        // Allow VaultManager, VaultManagerHelper, or Emergency role
-        if (msg.sender != core.vaultManager && msg.sender != core.vaultManagerHelper) {
-            VaultAccessController ac = VaultAccessController(core.accessController);
-            if (!ac.hasEmergencyRole(msg.sender)) {
+        VaultAccessController ac = VaultAccessController(core.accessController);
+
+        // Allow VaultManager, VAULT_ADMIN_ROLE, or EMERGENCY_ROLE
+        if (msg.sender != core.vaultManager) {
+            if (!ac.hasRole(ac.VAULT_ADMIN_ROLE(), msg.sender) && !ac.hasEmergencyRole(msg.sender))
+            {
                 revert NotVaultManagerOrHelper();
             }
         }
@@ -696,12 +697,16 @@ contract VaultCore is VaultModuleBase {
 
     /**
      * @notice Unpause vault
+     * @dev Allowed: VaultManager, VAULT_ADMIN_ROLE, or EMERGENCY_ROLE
      */
     function unpause() external {
         VaultStorageLib.CoreStorage storage core = _core();
-        if (msg.sender != core.vaultManager && msg.sender != core.vaultManagerHelper) {
-            VaultAccessController ac = VaultAccessController(core.accessController);
-            if (!ac.hasEmergencyRole(msg.sender)) {
+        VaultAccessController ac = VaultAccessController(core.accessController);
+
+        // Allow VaultManager, VAULT_ADMIN_ROLE, or EMERGENCY_ROLE
+        if (msg.sender != core.vaultManager) {
+            if (!ac.hasRole(ac.VAULT_ADMIN_ROLE(), msg.sender) && !ac.hasEmergencyRole(msg.sender))
+            {
                 revert NotVaultManagerOrHelper();
             }
         }

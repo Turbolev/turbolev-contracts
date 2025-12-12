@@ -48,7 +48,8 @@ contract PositionManagerTest is BaseTestModular {
 
         // Verify position was opened
         uint64 positionId = 1;
-        (,,,,,, address _user, address _projectToken,,,,,,,,,,,,,,,) = positionManager.positions(positionId);
+        (,,,,,, address _user, address _projectToken,,,,,,,,,,,,,,,) =
+            positionManager.positions(positionId);
 
         assertEq(_projectToken, address(projectToken), "Project token should match");
         assertEq(_user, user1, "User should match");

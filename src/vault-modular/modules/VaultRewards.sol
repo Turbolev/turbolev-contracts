@@ -4,7 +4,6 @@ pragma solidity ^0.8.22;
 import "../VaultModuleBase.sol";
 import "../libraries/VaultStorageLib.sol";
 import "../../libraries/VaultRewardsLib.sol";
-import "../../interfaces/IVaultManagerHelper.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
@@ -32,13 +31,16 @@ contract VaultRewards is VaultModuleBase {
     // ========================================================================
 
     event DailyRewardFinalized(
+        address indexed vault,
         uint256 indexed day,
         uint256 totalLiquidity,
         uint256 totalShares,
         int256 netPnL,
         uint256 timestamp
     );
-    event RewardsClaimed(address indexed user, uint256 amount, uint256 timestamp);
+    event RewardsClaimed(
+        address indexed vault, address indexed user, uint256 amount, uint256 timestamp
+    );
     event RewardsCapped(
         address indexed user, uint256 expectedRewards, uint256 actualRewards, uint256 timestamp
     );
@@ -64,7 +66,7 @@ contract VaultRewards is VaultModuleBase {
      *      Pre-calculates and stores rewards for all LPs to avoid recalculation on claim
      * @return isComplete True if all LPs processed in this call
      */
-    function finalizeDailyReward() external onlyVaultAdmin returns (bool isComplete) {
+    function finalizeDailyReward() external onlyVaultAdminOrKeeper returns (bool isComplete) {
         VaultStorageLib.CoreStorage storage core = _core();
         VaultStorageLib.RewardsStorage storage rewards = _rewards();
 
@@ -127,19 +129,8 @@ contract VaultRewards is VaultModuleBase {
         rewards.dailyNetPnL = 0;
         delete rewards.dailyPositionIds;
 
-        // Emit via VaultManagerHelper
-        if (core.vaultManagerHelper != address(0)) {
-            IVaultManagerHelper(core.vaultManagerHelper)
-                .emitDailyRewardFinalized(
-                    today,
-                    core.vaultInfo.totalLiquidity,
-                    core.vaultInfo.totalShares,
-                    finalizedPnL,
-                    block.timestamp
-                );
-        }
-
         emit DailyRewardFinalized(
+            address(this),
             today,
             core.vaultInfo.totalLiquidity,
             core.vaultInfo.totalShares,
@@ -156,7 +147,11 @@ contract VaultRewards is VaultModuleBase {
      *      Automatically continues from last processed index
      * @return isComplete True if all LPs have been processed
      */
-    function finalizeDailyRewardRemaining() external onlyVaultAdmin returns (bool isComplete) {
+    function finalizeDailyRewardRemaining()
+        external
+        onlyVaultAdminOrKeeper
+        returns (bool isComplete)
+    {
         VaultStorageLib.CoreStorage storage core = _core();
         VaultStorageLib.RewardsStorage storage rewards = _rewards();
 
@@ -264,13 +259,7 @@ contract VaultRewards is VaultModuleBase {
         // Transfer
         IERC20(core.projectToken).safeTransfer(msg.sender, actualRewards);
 
-        // Emit via VaultManagerHelper
-        if (core.vaultManagerHelper != address(0)) {
-            IVaultManagerHelper(core.vaultManagerHelper)
-                .emitRewardsClaimed(msg.sender, actualRewards, block.timestamp);
-        }
-
-        emit RewardsClaimed(msg.sender, actualRewards, block.timestamp);
+        emit RewardsClaimed(address(this), msg.sender, actualRewards, block.timestamp);
     }
 
     // ========================================================================
