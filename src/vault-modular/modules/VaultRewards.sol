@@ -39,7 +39,9 @@ contract VaultRewards is VaultModuleBase {
         uint256 timestamp
     );
     event RewardsClaimed(address indexed user, uint256 amount, uint256 timestamp);
-    event RewardsCapped(address indexed user, uint256 expectedRewards, uint256 actualRewards, uint256 timestamp);
+    event RewardsCapped(
+        address indexed user, uint256 expectedRewards, uint256 actualRewards, uint256 timestamp
+    );
 
     // ========================================================================
     // ERRORS
@@ -102,16 +104,16 @@ contract VaultRewards is VaultModuleBase {
                 if (lpPos.shares == 0) continue;
 
                 // Use library to calculate LP reward
-                VaultRewardsLib.LPRewardResult memory rewardResult = VaultRewardsLib
-                    .calculateLPReward(
-                    VaultRewardsLib.RewardCalculationParams({
-                        userShares: lpPos.shares,
-                        totalShares: snapshot.totalShares,
-                        netPnL: finalizedPnL,
-                        stakedAt: lpPos.stakedAt,
-                        dayStartTimestamp: dayStartTimestamp
-                    })
-                );
+                VaultRewardsLib.LPRewardResult memory rewardResult =
+                    VaultRewardsLib.calculateLPReward(
+                        VaultRewardsLib.RewardCalculationParams({
+                            userShares: lpPos.shares,
+                            totalShares: snapshot.totalShares,
+                            netPnL: finalizedPnL,
+                            stakedAt: lpPos.stakedAt,
+                            dayStartTimestamp: dayStartTimestamp
+                        })
+                    );
 
                 if (rewardResult.isEligible && rewardResult.reward > 0) {
                     rewards.claimableRewards[lp] += rewardResult.reward;
@@ -127,9 +129,14 @@ contract VaultRewards is VaultModuleBase {
 
         // Emit via VaultManagerHelper
         if (core.vaultManagerHelper != address(0)) {
-            IVaultManagerHelper(core.vaultManagerHelper).emitDailyRewardFinalized(
-                today, core.vaultInfo.totalLiquidity, core.vaultInfo.totalShares, finalizedPnL, block.timestamp
-            );
+            IVaultManagerHelper(core.vaultManagerHelper)
+                .emitDailyRewardFinalized(
+                    today,
+                    core.vaultInfo.totalLiquidity,
+                    core.vaultInfo.totalShares,
+                    finalizedPnL,
+                    block.timestamp
+                );
         }
 
         emit DailyRewardFinalized(
@@ -214,11 +221,7 @@ contract VaultRewards is VaultModuleBase {
      * @param minExpectedRewards Minimum rewards expected (reverts if actual < min)
      * @dev H-05 FIX: Added slippage protection to prevent front-running attacks
      */
-    function claimRewardsProtected(uint256 minExpectedRewards)
-        external
-        nonReentrant
-        whenNotPaused
-    {
+    function claimRewardsProtected(uint256 minExpectedRewards) external nonReentrant whenNotPaused {
         _claimRewardsInternal(minExpectedRewards);
     }
 
@@ -263,9 +266,8 @@ contract VaultRewards is VaultModuleBase {
 
         // Emit via VaultManagerHelper
         if (core.vaultManagerHelper != address(0)) {
-            IVaultManagerHelper(core.vaultManagerHelper).emitRewardsClaimed(
-                msg.sender, actualRewards, block.timestamp
-            );
+            IVaultManagerHelper(core.vaultManagerHelper)
+                .emitRewardsClaimed(msg.sender, actualRewards, block.timestamp);
         }
 
         emit RewardsClaimed(msg.sender, actualRewards, block.timestamp);

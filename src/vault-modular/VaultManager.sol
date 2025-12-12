@@ -58,14 +58,11 @@ contract VaultManager is
     /// @notice VaultRewards module address
     address public rewardsModule;
 
-    /// @notice TimelockController address
+    /// @notice TimelockController address (for governance operations via schedule/execute)
     address public timelockController;
 
     /// @notice MultisigWallet address
     address public multisigWallet;
-
-    /// @notice VaultGovernor address
-    address public vaultGovernor;
 
     /// @notice Mapping: projectToken => vault address
     mapping(address => address) public vaultsByProjectToken;
@@ -119,6 +116,12 @@ contract VaultManager is
     event VaultRouterImplUpdated(address indexed oldImpl, address indexed newImpl);
     event ModulesUpdated(address coreModule, address fundingModule, address rewardsModule);
 
+    // Emergency events
+    event EmergencyPauseVault(address indexed vault, address indexed caller, uint256 timestamp);
+    event EmergencyUnpauseVault(address indexed vault, address indexed caller, uint256 timestamp);
+    event EmergencyBatchPauseVaults(address[] vaults, address indexed caller, uint256 timestamp);
+    event EmergencyBatchUnpauseVaults(address[] vaults, address indexed caller, uint256 timestamp);
+
     // ========================================================================
     // ERRORS
     // ========================================================================
@@ -142,15 +145,15 @@ contract VaultManager is
         _;
     }
 
-    modifier onlyTimelockOrGovernor() {
-        if (msg.sender != timelockController && msg.sender != vaultGovernor) {
+    modifier onlyMultisig() {
+        if (msg.sender != multisigWallet) {
             revert NotAuthorized();
         }
         _;
     }
 
-    modifier onlyMultisig() {
-        if (msg.sender != multisigWallet) {
+    modifier onlyEmergencyRole() {
+        if (!VaultAccessController(accessController).hasEmergencyRole(msg.sender)) {
             revert NotAuthorized();
         }
         _;
@@ -343,9 +346,8 @@ contract VaultManager is
     ) external payable onlyPositionManager {
         address vaultAddress = _getVault(_projectToken);
         IERC20(_projectToken).transferFrom(positionManager, vaultAddress, amount);
-        IVaultRouter(vaultAddress).depositFromBet(
-            positionId, amount, positionSize, isMarginAdd, direction
-        );
+        IVaultRouter(vaultAddress)
+            .depositFromBet(positionId, amount, positionSize, isMarginAdd, direction);
         emit CollateralDepositedFromBet(
             vaultAddress, _projectToken, amount, positionSize, block.timestamp
         );
@@ -374,9 +376,8 @@ contract VaultManager is
         uint8 direction,
         address user
     ) external onlyPositionManager {
-        IVaultRouter(_getVault(_projectToken)).updateVaultPnL(
-            positionId, collateral, vaultPnL, fee, positionSize, direction, user
-        );
+        IVaultRouter(_getVault(_projectToken))
+            .updateVaultPnL(positionId, collateral, vaultPnL, fee, positionSize, direction, user);
     }
 
     // ========================================================================
@@ -440,9 +441,9 @@ contract VaultManager is
             if (vaultInfos[vault].isActive) {
                 try IVaultRouter(vault).paused() returns (bool isPaused) {
                     if (!isPaused) {
-                        try IVaultRouter(vault).pause() {} catch {}
+                        try IVaultRouter(vault).pause() { } catch { }
                     }
-                } catch {}
+                } catch { }
             }
         }
 
@@ -460,13 +461,90 @@ contract VaultManager is
             if (vaultInfos[vault].isActive) {
                 try IVaultRouter(vault).paused() returns (bool isPaused) {
                     if (isPaused) {
-                        try IVaultRouter(vault).unpause() {} catch {}
+                        try IVaultRouter(vault).unpause() { } catch { }
                     }
-                } catch {}
+                } catch { }
             }
         }
 
         emit EmergencyUnpauseAllTriggered(msg.sender, block.timestamp);
+    }
+
+    // ========================================================================
+    // EMERGENCY FUNCTIONS (NO TIMELOCK DELAY)
+    // Uses EMERGENCY_ROLE from VaultAccessController
+    // ========================================================================
+
+    /**
+     * @notice Emergency pause vault by project token (NO TIMELOCK DELAY)
+     * @param _projectToken Project token address
+     * @dev Only addresses with EMERGENCY_ROLE can call this
+     */
+    function emergencyPauseVault(address _projectToken) external onlyEmergencyRole {
+        address vault = _getVault(_projectToken);
+        IVaultRouter(vault).pause();
+        emit EmergencyPauseVault(vault, msg.sender, block.timestamp);
+    }
+
+    /**
+     * @notice Emergency pause vault by address (NO TIMELOCK DELAY)
+     * @param vault Vault address
+     * @dev Only addresses with EMERGENCY_ROLE can call this
+     */
+    function emergencyPauseVaultByAddress(address vault) public onlyEmergencyRole {
+        if (vaultInfos[vault].vaultAddress == address(0)) revert VaultNotFound();
+        IVaultRouter(vault).pause();
+        emit EmergencyPauseVault(vault, msg.sender, block.timestamp);
+    }
+
+    /**
+     * @notice Emergency batch pause vaults (NO TIMELOCK DELAY)
+     * @param vaults Array of vault addresses
+     * @dev Only addresses with EMERGENCY_ROLE can call this
+     */
+    function emergencyBatchPauseVaults(address[] calldata vaults) external onlyEmergencyRole {
+        for (uint256 i = 0; i < vaults.length; i++) {
+            if (vaultInfos[vaults[i]].vaultAddress != address(0)) {
+                try IVaultRouter(vaults[i]).pause() { } catch { }
+            }
+        }
+        emit EmergencyBatchPauseVaults(vaults, msg.sender, block.timestamp);
+    }
+
+    /**
+     * @notice Emergency unpause vault by project token (NO TIMELOCK DELAY)
+     * @param _projectToken Project token address
+     * @dev Only owner can unpause to prevent guardian abuse
+     */
+    function emergencyUnpauseVault(address _projectToken) external onlyOwner {
+        address vault = _getVault(_projectToken);
+        IVaultRouter(vault).unpause();
+        emit EmergencyUnpauseVault(vault, msg.sender, block.timestamp);
+    }
+
+    /**
+     * @notice Emergency unpause vault by address (NO TIMELOCK DELAY)
+     * @param vault Vault address
+     * @dev Only owner can unpause to prevent guardian abuse
+     */
+    function emergencyUnpauseVaultByAddress(address vault) public onlyOwner {
+        if (vaultInfos[vault].vaultAddress == address(0)) revert VaultNotFound();
+        IVaultRouter(vault).unpause();
+        emit EmergencyUnpauseVault(vault, msg.sender, block.timestamp);
+    }
+
+    /**
+     * @notice Emergency batch unpause vaults (NO TIMELOCK DELAY)
+     * @param vaults Array of vault addresses
+     * @dev Only owner can unpause to prevent guardian abuse
+     */
+    function emergencyBatchUnpauseVaults(address[] calldata vaults) external onlyOwner {
+        for (uint256 i = 0; i < vaults.length; i++) {
+            if (vaultInfos[vaults[i]].vaultAddress != address(0)) {
+                try IVaultRouter(vaults[i]).unpause() { } catch { }
+            }
+        }
+        emit EmergencyBatchUnpauseVaults(vaults, msg.sender, block.timestamp);
     }
 
     // ========================================================================
@@ -515,12 +593,15 @@ contract VaultManager is
         emit VaultRouterImplUpdated(oldImpl, _vaultRouterImpl);
     }
 
-    function setModules(
-        address _coreModule,
-        address _fundingModule,
-        address _rewardsModule
-    ) external onlyOwner whenNotPaused {
-        if (_coreModule == address(0) || _fundingModule == address(0) || _rewardsModule == address(0)) {
+    function setModules(address _coreModule, address _fundingModule, address _rewardsModule)
+        external
+        onlyOwner
+        whenNotPaused
+    {
+        if (
+            _coreModule == address(0) || _fundingModule == address(0)
+                || _rewardsModule == address(0)
+        ) {
             revert InvalidAddress();
         }
         coreModule = _coreModule;
@@ -537,10 +618,6 @@ contract VaultManager is
         multisigWallet = _multisigWallet;
     }
 
-    function setVaultGovernor(address _vaultGovernor) external onlyOwner whenNotPaused {
-        vaultGovernor = _vaultGovernor;
-    }
-
     function pause() external onlyOwner {
         _pause();
     }
@@ -549,7 +626,7 @@ contract VaultManager is
         _unpause();
     }
 
-    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner { }
 
     // ========================================================================
     // VIEW FUNCTIONS
@@ -590,7 +667,11 @@ contract VaultManager is
         return active;
     }
 
-    function getVaultInfo(address vault) external view returns (IVaultManager.VaultInfo memory info) {
+    function getVaultInfo(address vault)
+        external
+        view
+        returns (IVaultManager.VaultInfo memory info)
+    {
         return vaultInfos[vault];
     }
 

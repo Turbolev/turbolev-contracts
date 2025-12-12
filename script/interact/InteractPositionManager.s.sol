@@ -64,18 +64,24 @@ contract InteractPositionManager is DeployHelper {
         vm.stopBroadcast();
     }
 
-    function addAdmin(address newAdmin) public {
+    /**
+     * @notice Set access controller address
+     * @param _accessController AccessController address
+     * @dev Position keepers are managed via VaultAccessController, not PositionManager directly
+     */
+    function setAccessController(address _accessController) public {
         vm.startBroadcast(deployer);
-        pm.addAdmin(newAdmin);
-        console.log("Admin added:", newAdmin);
+        pm.setAccessController(_accessController);
+        console.log("AccessController set:", _accessController);
         vm.stopBroadcast();
     }
 
-    function removeAdmin(address admin) public {
-        vm.startBroadcast(deployer);
-        pm.removeAdmin(admin);
-        console.log("Admin removed:", admin);
-        vm.stopBroadcast();
+    /**
+     * @notice View access controller address
+     */
+    function viewAccessController() public view {
+        console.log("\n=== Access Controller ===");
+        console.log("AccessController:", address(pm.accessController()));
     }
 
     function setMaintenanceMarginRatio(uint256 newRatio) public {

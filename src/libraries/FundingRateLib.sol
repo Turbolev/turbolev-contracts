@@ -246,7 +246,8 @@ library FundingRateLib {
         // before the division by FUNDING_PRECISION
         // Old code (vulnerable to overflow):
         //   fundingOwed = (rateDiff * int256(positionSize)) / int256(FUNDING_PRECISION);
-        fundingOwed = MathLib.mulDivSigned(rateDiff, int256(positionSize), int256(FUNDING_PRECISION));
+        fundingOwed =
+            MathLib.mulDivSigned(rateDiff, int256(positionSize), int256(FUNDING_PRECISION));
 
         return fundingOwed;
     }

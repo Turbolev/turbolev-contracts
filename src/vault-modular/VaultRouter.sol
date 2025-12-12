@@ -5,6 +5,8 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "./libraries/VaultStorageLib.sol";
 import "./VaultAccessController.sol";
+import "../libraries/VaultRiskLib.sol";
+import "../libraries/VaultConfigLib.sol";
 
 /**
  * @title VaultRouter
@@ -22,13 +24,16 @@ import "./VaultAccessController.sol";
  * The storage is organized using EIP-7201 namespaced storage slots.
  */
 contract VaultRouter is Initializable, UUPSUpgradeable {
-
     // ========================================================================
     // EVENTS
     // ========================================================================
 
-    event ModuleUpdated(bytes4 indexed moduleId, address oldModule, address newModule, uint256 timestamp);
-    event Initialized(address indexed projectToken, address indexed accessController, uint256 timestamp);
+    event ModuleUpdated(
+        bytes4 indexed moduleId, address oldModule, address newModule, uint256 timestamp
+    );
+    event Initialized(
+        address indexed projectToken, address indexed accessController, uint256 timestamp
+    );
 
     // ========================================================================
     // ERRORS
@@ -167,7 +172,11 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
         _delegateToCore(
             abi.encodeWithSignature(
                 "depositFromBet(uint64,uint256,uint256,bool,uint8)",
-                positionId, amount, positionSize, isMarginAdd, direction
+                positionId,
+                amount,
+                positionSize,
+                isMarginAdd,
+                direction
             )
         );
     }
@@ -178,8 +187,7 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
     function executePayout(address user, uint256 amount, uint64 positionId) external {
         _delegateToCore(
             abi.encodeWithSignature(
-                "executePayout(address,uint256,uint64)",
-                user, amount, positionId
+                "executePayout(address,uint256,uint64)", user, amount, positionId
             )
         );
     }
@@ -199,21 +207,96 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
         _delegateToCore(
             abi.encodeWithSignature(
                 "updateVaultPnL(uint64,uint256,int256,uint256,uint256,uint8,address)",
-                positionId, collateral, vaultPnL, fee, positionSize, direction, user
+                positionId,
+                collateral,
+                vaultPnL,
+                fee,
+                positionSize,
+                direction,
+                user
             )
         );
     }
 
     /**
      * @notice Check position risk
+     * @dev Reads storage directly to avoid staticcall storage context issues
      */
-    function checkPositionRisk(uint256 positionSize, uint8 leverage, uint8 direction) external view {
-        _staticDelegateToCore(
-            abi.encodeWithSignature(
-                "checkPositionRisk(uint256,uint8,uint8)",
-                positionSize, leverage, direction
-            )
-        );
+    function checkPositionRisk(uint256 positionSize, uint8 leverage, uint8 direction)
+        external
+        view
+    {
+        VaultStorageLib.CoreStorage storage core = VaultStorageLib.getCoreStorage();
+        VaultStorageLib.FundingStorage storage funding = VaultStorageLib.getFundingStorage();
+        VaultStorageLib.RiskStorage storage risk = VaultStorageLib.getRiskStorage();
+
+        uint16 vaultMaxLeverage = _calculateMaxLeverage(core.vaultInfo.totalLiquidity, risk);
+        uint16 currentMultiplier = _calculateRiskMultiplier(core.vaultInfo.totalLiquidity, risk);
+
+        VaultRiskLib.RiskCheckParams memory params = VaultRiskLib.RiskCheckParams({
+            isPaused: core.paused,
+            tradingEnabled: core.vaultInfo.tradingEnabled,
+            totalLiquidity: core.vaultInfo.totalLiquidity,
+            positionSize: positionSize,
+            leverage: leverage,
+            direction: direction,
+            minBetAmount: core.vaultParams.minBetAmount,
+            maxBetAmount: core.vaultParams.maxBetAmount,
+            totalLongExposure: funding.totalLongExposure,
+            totalShortExposure: funding.totalShortExposure,
+            maxDirectionalExposureBps: risk.maxDirectionalExposureBps,
+            vaultMaxLeverage: vaultMaxLeverage,
+            totalOIRiskMultiplierBps: currentMultiplier,
+            utilizationTier1Bps: risk.utilizationConfig.tier1Bps,
+            utilizationTier2Bps: risk.utilizationConfig.tier2Bps,
+            utilizationTier3Bps: risk.utilizationConfig.tier3Bps,
+            leverageFactorTier1Bps: risk.utilizationConfig.factorTier1Bps,
+            leverageFactorTier2Bps: risk.utilizationConfig.factorTier2Bps,
+            leverageFactorTier3Bps: risk.utilizationConfig.factorTier3Bps,
+            leverageFactorEmergencyBps: risk.utilizationConfig.factorEmergencyBps
+        });
+
+        VaultRiskLib.checkPositionRisk(params);
+    }
+
+    /**
+     * @notice Calculate max leverage based on TVL tier
+     */
+    function _calculateMaxLeverage(uint256 tvl, VaultStorageLib.RiskStorage storage risk)
+        internal
+        view
+        returns (uint16)
+    {
+        if (tvl < risk.leverageTier1Threshold) {
+            return risk.tier1MaxLeverage;
+        } else if (tvl < risk.leverageTier2Threshold) {
+            return risk.tier2MaxLeverage;
+        } else {
+            return risk.tier3MaxLeverage;
+        }
+    }
+
+    /**
+     * @notice Calculate risk multiplier based on TVL tier
+     */
+    function _calculateRiskMultiplier(uint256 tvl, VaultStorageLib.RiskStorage storage risk)
+        internal
+        view
+        returns (uint16)
+    {
+        if (risk.tier1Threshold == 0 && risk.tier2Threshold == 0 && risk.tier3Threshold == 0) {
+            return risk.totalOIRiskMultiplierBps;
+        }
+
+        if (tvl < risk.tier1Threshold) {
+            return risk.tier1MultiplierBps;
+        } else if (tvl < risk.tier2Threshold) {
+            return risk.tier2MultiplierBps;
+        } else if (tvl < risk.tier3Threshold) {
+            return risk.tier3MultiplierBps;
+        } else {
+            return risk.tier4MultiplierBps;
+        }
     }
 
     /**
@@ -277,7 +360,9 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
      */
     function updateVaultParams(uint256 minBetAmount, uint256 maxBetAmount) external {
         _delegateToCore(
-            abi.encodeWithSignature("updateVaultParams(uint256,uint256)", minBetAmount, maxBetAmount)
+            abi.encodeWithSignature(
+                "updateVaultParams(uint256,uint256)", minBetAmount, maxBetAmount
+            )
         );
     }
 
@@ -290,7 +375,12 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
      */
     function updateHourlyFunding()
         external
-        returns (int256 newLongRate, int256 newShortRate, uint256 imbalanceBps, bool hasCounterparty)
+        returns (
+            int256 newLongRate,
+            int256 newShortRate,
+            uint256 imbalanceBps,
+            bool hasCounterparty
+        )
     {
         bytes memory result = _delegateToFunding(abi.encodeWithSignature("updateHourlyFunding()"));
         return abi.decode(result, (int256, int256, uint256, bool));
@@ -320,7 +410,10 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
         bytes memory result = _staticDelegateToFunding(
             abi.encodeWithSignature(
                 "calculatePositionFunding(int256,int256,uint256,uint8)",
-                entryRateLong, entryRateShort, positionSize, direction
+                entryRateLong,
+                entryRateShort,
+                positionSize,
+                direction
             )
         );
         return abi.decode(result, (int256));
@@ -350,15 +443,16 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
         uint256 positionSize,
         uint8 direction,
         uint256 maintenanceMarginRatio
-    )
-        external
-        view
-        returns (bool isLiquidatable, int256 fundingOwed, uint256 effectiveCollateral)
-    {
+    ) external view returns (bool isLiquidatable, int256 fundingOwed, uint256 effectiveCollateral) {
         bytes memory result = _staticDelegateToFunding(
             abi.encodeWithSignature(
                 "checkFundingLiquidation(uint256,int256,int256,uint256,uint8,uint256)",
-                collateral, entryRateLong, entryRateShort, positionSize, direction, maintenanceMarginRatio
+                collateral,
+                entryRateLong,
+                entryRateShort,
+                positionSize,
+                direction,
+                maintenanceMarginRatio
             )
         );
         return abi.decode(result, (bool, int256, uint256));
@@ -377,7 +471,11 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
         _delegateToFunding(
             abi.encodeWithSignature(
                 "setFundingConfig(uint16,uint16,uint16,uint16,uint16)",
-                tier1RateBps, tier2RateBps, tier3RateBps, tier4RateBps, tier5RateBps
+                tier1RateBps,
+                tier2RateBps,
+                tier3RateBps,
+                tier4RateBps,
+                tier5RateBps
             )
         );
     }
@@ -392,12 +490,9 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
     /**
      * @notice Get funding config
      */
-    function getFundingConfig()
-        external
-        view
-        returns (uint16, uint16, uint16, uint16, uint16)
-    {
-        bytes memory result = _staticDelegateToFunding(abi.encodeWithSignature("getFundingConfig()"));
+    function getFundingConfig() external view returns (uint16, uint16, uint16, uint16, uint16) {
+        bytes memory result =
+            _staticDelegateToFunding(abi.encodeWithSignature("getFundingConfig()"));
         return abi.decode(result, (uint16, uint16, uint16, uint16, uint16));
     }
 
@@ -417,7 +512,8 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
      * @notice Finalize daily reward remaining
      */
     function finalizeDailyRewardRemaining() external returns (bool isComplete) {
-        bytes memory result = _delegateToRewards(abi.encodeWithSignature("finalizeDailyRewardRemaining()"));
+        bytes memory result =
+            _delegateToRewards(abi.encodeWithSignature("finalizeDailyRewardRemaining()"));
         return abi.decode(result, (bool));
     }
 
@@ -680,6 +776,113 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
     }
 
     // ========================================================================
+    // RISK CONFIG GETTERS (for VaultViewerModular)
+    // ========================================================================
+
+    /**
+     * @notice Get total OI tier configuration
+     * @return fixedMultiplier Fixed multiplier in bps (if thresholds are 0)
+     * @return tier1Threshold TVL threshold for tier 1
+     * @return tier2Threshold TVL threshold for tier 2
+     * @return tier3Threshold TVL threshold for tier 3
+     * @return tier1Multiplier Multiplier for tier 1 in bps
+     * @return tier2Multiplier Multiplier for tier 2 in bps
+     * @return tier3Multiplier Multiplier for tier 3 in bps
+     * @return tier4Multiplier Multiplier for tier 4 in bps
+     */
+    function getTotalOITierConfig()
+        external
+        view
+        returns (
+            uint16 fixedMultiplier,
+            uint256 tier1Threshold,
+            uint256 tier2Threshold,
+            uint256 tier3Threshold,
+            uint16 tier1Multiplier,
+            uint16 tier2Multiplier,
+            uint16 tier3Multiplier,
+            uint16 tier4Multiplier
+        )
+    {
+        VaultStorageLib.RiskStorage storage risk = VaultStorageLib.getRiskStorage();
+        return (
+            risk.totalOIRiskMultiplierBps,
+            risk.tier1Threshold,
+            risk.tier2Threshold,
+            risk.tier3Threshold,
+            risk.tier1MultiplierBps,
+            risk.tier2MultiplierBps,
+            risk.tier3MultiplierBps,
+            risk.tier4MultiplierBps
+        );
+    }
+
+    /**
+     * @notice Get leverage tier configuration
+     * @return tier1Threshold TVL threshold for tier 1
+     * @return tier2Threshold TVL threshold for tier 2
+     * @return tier1MaxLeverage Max leverage for tier 1
+     * @return tier2MaxLeverage Max leverage for tier 2
+     * @return tier3MaxLeverage Max leverage for tier 3
+     */
+    function getLeverageTierConfig()
+        external
+        view
+        returns (
+            uint256 tier1Threshold,
+            uint256 tier2Threshold,
+            uint16 tier1MaxLeverage,
+            uint16 tier2MaxLeverage,
+            uint16 tier3MaxLeverage
+        )
+    {
+        VaultStorageLib.RiskStorage storage risk = VaultStorageLib.getRiskStorage();
+        return (
+            risk.leverageTier1Threshold,
+            risk.leverageTier2Threshold,
+            risk.tier1MaxLeverage,
+            risk.tier2MaxLeverage,
+            risk.tier3MaxLeverage
+        );
+    }
+
+    /**
+     * @notice Get fee configuration
+     * @return stakingFeeBps Staking fee in bps
+     * @return earlyWithdrawalFeeBps Early withdrawal fee in bps
+     * @return minLockPeriod Minimum lock period in seconds
+     */
+    function getFeeConfig()
+        external
+        view
+        returns (uint16 stakingFeeBps, uint16 earlyWithdrawalFeeBps, uint256 minLockPeriod)
+    {
+        VaultStorageLib.CoreStorage storage core = VaultStorageLib.getCoreStorage();
+        return (
+            core.feeConfig.stakingFeeBps,
+            core.feeConfig.earlyWithdrawalFeeBps,
+            VaultStorageLib.MIN_LOCK_PERIOD
+        );
+    }
+
+    /**
+     * @notice Get LP index for an address (1-based, 0 means not an LP)
+     * @param account Address to check
+     * @return index 1-based index in the LP array, 0 if not an LP
+     */
+    function lpIndex(address account) external view returns (uint256) {
+        return VaultStorageLib.getCoreStorage().lpIndex[account];
+    }
+
+    /**
+     * @notice Get queue start index for pending payouts
+     * @return startIndex Current start index in the payout queue
+     */
+    function queueStartIndex() external view returns (uint256) {
+        return VaultStorageLib.getCoreStorage().queueStartIndex;
+    }
+
+    // ========================================================================
     // MODULE MANAGEMENT
     // ========================================================================
 
@@ -781,7 +984,11 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
         return result;
     }
 
-    function _staticDelegate(address module, bytes memory data) internal view returns (bytes memory) {
+    function _staticDelegate(address module, bytes memory data)
+        internal
+        view
+        returns (bytes memory)
+    {
         (bool success, bytes memory result) = module.staticcall(data);
         if (!success) {
             // Bubble up the revert reason

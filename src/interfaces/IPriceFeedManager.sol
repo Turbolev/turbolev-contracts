@@ -47,8 +47,7 @@ interface IPriceFeedManager {
      * @param providerId Unique identifier for the provider
      * @param provider Oracle provider configuration
      */
-    function registerOracleProvider(bytes32 providerId, OracleProvider calldata provider)
-        external;
+    function registerOracleProvider(bytes32 providerId, OracleProvider calldata provider) external;
 
     /**
      * @notice Register multiple oracle providers at once
@@ -183,10 +182,7 @@ interface IPriceFeedManager {
      * @param maxAge Maximum acceptable age in seconds
      * @return isStale True if price is stale for primary provider
      */
-    function isPriceStale(address projectToken, uint256 maxAge)
-        external
-        view
-        returns (bool isStale);
+    function isPriceStale(address projectToken, uint256 maxAge) external view returns (bool isStale);
 
     // ========================================================================
     // HELPER FUNCTIONS

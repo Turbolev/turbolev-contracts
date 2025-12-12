@@ -331,7 +331,11 @@ contract PythOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgradeable,
      * @param updateData Pyth update data
      * @return fee Fee in wei
      */
-    function getUpdateFee(address, /* feed */ bytes calldata updateData)
+    function getUpdateFee(
+        address,
+        /* feed */
+        bytes calldata updateData
+    )
         external
         view
         override

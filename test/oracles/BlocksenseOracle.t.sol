@@ -45,11 +45,7 @@ contract MockCLAggregatorAdapter is ICLAggregatorAdapter {
         return 1;
     }
 
-    function getRoundData(uint80)
-        external
-        view
-        returns (uint80, int256, uint256, uint256, uint80)
-    {
+    function getRoundData(uint80) external view returns (uint80, int256, uint256, uint256, uint80) {
         return (1, _answer, _timestamp, _timestamp, 1);
     }
 

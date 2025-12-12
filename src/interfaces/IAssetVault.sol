@@ -12,7 +12,6 @@ interface IAssetVault {
         CLOSE_POSITION, // Liquidity change from position closure
         BET_DEPOSIT, // Liquidity from bet collateral deposit
         PAYOUT_EXECUTION // Liquidity change from payout execution
-
     }
 
     struct VaultInfo {
@@ -127,9 +126,7 @@ interface IAssetVault {
      * @param leverage Leverage multiplier
      * @param direction Position direction (1 = LONG, 2 = SHORT)
      */
-    function checkPositionRisk(uint256 positionSize, uint8 leverage, uint8 direction)
-        external
-        view;
+    function checkPositionRisk(uint256 positionSize, uint8 leverage, uint8 direction) external view;
 
     /**
      * @notice Get vault info
@@ -565,10 +562,7 @@ interface IAssetVault {
         uint256 positionSize,
         uint8 direction,
         uint256 maintenanceMarginRatio
-    )
-        external
-        view
-        returns (bool isLiquidatable, int256 fundingOwed, uint256 effectiveCollateral);
+    ) external view returns (bool isLiquidatable, int256 fundingOwed, uint256 effectiveCollateral);
 
     /**
      * @notice Set funding rate configuration

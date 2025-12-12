@@ -23,12 +23,12 @@ contract InteractPriceFeedManagerV2 is Script {
         PriceFeedManager manager = PriceFeedManager(priceFeedManager);
 
         if (chainlinkOracle != address(0)) {
-            IPriceFeedManager.OracleProvider memory chainlinkProvider = IPriceFeedManager
-                .OracleProvider({
-                oracleContract: chainlinkOracle,
-                oracleType: IBaseOracle.OracleType.PUSH,
-                enabled: true
-            });
+            IPriceFeedManager.OracleProvider memory chainlinkProvider =
+                IPriceFeedManager.OracleProvider({
+                    oracleContract: chainlinkOracle,
+                    oracleType: IBaseOracle.OracleType.PUSH,
+                    enabled: true
+                });
             if (!manager.providerExists(manager.CHAINLINK_PROVIDER())) {
                 manager.registerOracleProvider(manager.CHAINLINK_PROVIDER(), chainlinkProvider);
                 console.log("Registered CHAINLINK_PROVIDER");
@@ -36,12 +36,12 @@ contract InteractPriceFeedManagerV2 is Script {
         }
 
         if (blocksenseOracle != address(0)) {
-            IPriceFeedManager.OracleProvider memory blocksenseProvider = IPriceFeedManager
-                .OracleProvider({
-                oracleContract: blocksenseOracle,
-                oracleType: IBaseOracle.OracleType.PUSH,
-                enabled: true
-            });
+            IPriceFeedManager.OracleProvider memory blocksenseProvider =
+                IPriceFeedManager.OracleProvider({
+                    oracleContract: blocksenseOracle,
+                    oracleType: IBaseOracle.OracleType.PUSH,
+                    enabled: true
+                });
             if (!manager.providerExists(manager.BLOCKSENSE_PROVIDER())) {
                 manager.registerOracleProvider(manager.BLOCKSENSE_PROVIDER(), blocksenseProvider);
                 console.log("Registered BLOCKSENSE_PROVIDER");
@@ -50,9 +50,7 @@ contract InteractPriceFeedManagerV2 is Script {
 
         if (pythOracle != address(0)) {
             IPriceFeedManager.OracleProvider memory pythProvider = IPriceFeedManager.OracleProvider({
-                oracleContract: pythOracle,
-                oracleType: IBaseOracle.OracleType.PULL,
-                enabled: true
+                oracleContract: pythOracle, oracleType: IBaseOracle.OracleType.PULL, enabled: true
             });
             if (!manager.providerExists(manager.PYTH_PROVIDER())) {
                 manager.registerOracleProvider(manager.PYTH_PROVIDER(), pythProvider);
@@ -156,7 +154,9 @@ contract InteractPriceFeedManagerV2 is Script {
         PriceFeedManager manager = PriceFeedManager(priceFeedManager);
         IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
             primaryProviderId: manager.BLOCKSENSE_PROVIDER(),
-            secondaryProviderId: chainlinkFeed != address(0) ? manager.CHAINLINK_PROVIDER() : bytes32(0),
+            secondaryProviderId: chainlinkFeed != address(0)
+                ? manager.CHAINLINK_PROVIDER()
+                : bytes32(0),
             primaryFeed: blocksenseAdapter,
             secondaryFeed: chainlinkFeed,
             usePullMode: false

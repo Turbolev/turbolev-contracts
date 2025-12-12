@@ -217,7 +217,7 @@ contract PriceFeedManager is
             maxDeviationBps: 5000, // 50% max deviation
             minDeviationWindow: 60, // Check if within 60 seconds
             enabled: true // Enabled by default
-         });
+        });
 
         emit CircuitBreakerConfigUpdated(5000, 60, true);
     }
@@ -462,7 +462,7 @@ contract PriceFeedManager is
 
         // ========== STEP 6: Refund excess ETH (for pull oracle fee) ==========
         if (address(this).balance > 0) {
-            (bool sent,) = payable(msg.sender).call{value: address(this).balance}("");
+            (bool sent,) = payable(msg.sender).call{ value: address(this).balance }("");
             if (!sent) revert RefundFailed();
         }
     }
@@ -638,8 +638,7 @@ contract PriceFeedManager is
         // Try primary provider
         if (config.primaryProviderId != bytes32(0)) {
             OracleProvider memory primary = oracleProviders[config.primaryProviderId];
-            (bool success, uint256 primaryPrice, uint256 primaryTime) =
-            _tryGetPriceFromProviderWithUpdate(
+            (bool success, uint256 primaryPrice, uint256 primaryTime) = _tryGetPriceFromProviderWithUpdate(
                 primary,
                 config.primaryFeed,
                 config.primaryProviderId,
@@ -658,8 +657,7 @@ contract PriceFeedManager is
         // Try secondary provider if primary failed
         if (!priceFound && config.secondaryProviderId != bytes32(0)) {
             OracleProvider memory secondary = oracleProviders[config.secondaryProviderId];
-            (bool success, uint256 secondaryPrice, uint256 secondaryTime) =
-            _tryGetPriceFromProviderWithUpdate(
+            (bool success, uint256 secondaryPrice, uint256 secondaryTime) = _tryGetPriceFromProviderWithUpdate(
                 secondary,
                 config.secondaryFeed,
                 config.secondaryProviderId,
@@ -721,8 +719,7 @@ contract PriceFeedManager is
         // Try primary provider with update if needed
         if (config.primaryProviderId != bytes32(0)) {
             OracleProvider memory primary = oracleProviders[config.primaryProviderId];
-            (bool success, uint256 primaryPrice, uint256 primaryTime) =
-            _tryGetPriceFromProviderWithUpdate(
+            (bool success, uint256 primaryPrice, uint256 primaryTime) = _tryGetPriceFromProviderWithUpdate(
                 primary,
                 config.primaryFeed,
                 config.primaryProviderId,
@@ -741,8 +738,7 @@ contract PriceFeedManager is
         // Try secondary provider if primary failed
         if (!priceFound && config.secondaryProviderId != bytes32(0)) {
             OracleProvider memory secondary = oracleProviders[config.secondaryProviderId];
-            (bool success, uint256 secondaryPrice, uint256 secondaryTime) =
-            _tryGetPriceFromProviderWithUpdate(
+            (bool success, uint256 secondaryPrice, uint256 secondaryTime) = _tryGetPriceFromProviderWithUpdate(
                 secondary,
                 config.secondaryFeed,
                 config.secondaryProviderId,
@@ -810,16 +806,20 @@ contract PriceFeedManager is
 
         // Check based on oracle type
         if (provider.oracleType == IBaseOracle.OracleType.PUSH) {
-            try IPushOracle(provider.oracleContract).isPriceStale(config.primaryFeed, maxAge)
-            returns (bool stale) {
+            try IPushOracle(provider.oracleContract)
+                .isPriceStale(config.primaryFeed, maxAge) returns (
+                bool stale
+            ) {
                 return stale;
             } catch {
                 return true;
             }
         } else {
             // PULL oracle
-            try IPullOracle(provider.oracleContract).isPriceStale(config.primaryFeed, maxAge)
-            returns (bool stale) {
+            try IPullOracle(provider.oracleContract)
+                .isPriceStale(config.primaryFeed, maxAge) returns (
+                bool stale
+            ) {
                 return stale;
             } catch {
                 return true;
@@ -906,8 +906,11 @@ contract PriceFeedManager is
         }
         // Update if stale
         if (isStale && updateData.length > 0) {
-            try pullOracle.getPriceWithUpdate{ value: msg.value }(feed, maxAge, updateData)
-            returns (int256 _price, uint256 _updatedAt) {
+            try pullOracle.getPriceWithUpdate{ value: msg.value }(
+                feed, maxAge, updateData
+            ) returns (
+                int256 _price, uint256 _updatedAt
+            ) {
                 if (_price <= 0) {
                     return (false, 0, 0);
                 }
@@ -1019,7 +1022,11 @@ contract PriceFeedManager is
      * @param bypassed Whether to bypass circuit breaker for this token
      * @dev Use with caution - bypassing removes price manipulation protection
      */
-    function setCircuitBreakerBypass(address projectToken, bool bypassed) external onlyOwner whenNotPaused {
+    function setCircuitBreakerBypass(address projectToken, bool bypassed)
+        external
+        onlyOwner
+        whenNotPaused
+    {
         if (projectToken == address(0)) revert InvalidAddress();
         circuitBreakerBypassed[projectToken] = bypassed;
         emit CircuitBreakerBypassUpdated(projectToken, bypassed);
@@ -1193,7 +1200,11 @@ contract PriceFeedManager is
      * @param price Price to set
      * @dev Use to bootstrap circuit breaker or reset after known manipulation
      */
-    function setLastPriceRecord(address projectToken, uint256 price) external onlyOwner whenNotPaused {
+    function setLastPriceRecord(address projectToken, uint256 price)
+        external
+        onlyOwner
+        whenNotPaused
+    {
         if (projectToken == address(0)) revert InvalidAddress();
         if (price == 0) revert InvalidOraclePrice();
 

@@ -64,10 +64,7 @@ interface IPyth {
      * @param age Maximum acceptable age in seconds
      * @return price Price struct
      */
-    function getPriceNoOlderThan(bytes32 id, uint256 age)
-        external
-        view
-        returns (Price memory price);
+    function getPriceNoOlderThan(bytes32 id, uint256 age) external view returns (Price memory price);
 
     /**
      * @notice Get latest price (may revert if price is stale)

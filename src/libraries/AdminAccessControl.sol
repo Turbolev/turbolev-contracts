@@ -5,6 +5,7 @@ pragma solidity ^0.8.22;
  * @title AdminAccessControl
  * @notice Access control contract for managing multiple admin addresses
  * @dev Similar to Ownable but for admin role management
+ * @custom:deprecated Use VaultAccessController for new contracts
  *
  * Features:
  * - Support multiple admin addresses

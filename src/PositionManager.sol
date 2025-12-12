@@ -10,8 +10,8 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./libraries/PositionLib.sol";
-import "./libraries/AdminAccessControlUpgradeable.sol";
 import "./interfaces/IVaultManager.sol";
+import "./interfaces/IVaultAccessController.sol";
 import "./interfaces/IAssetVault.sol";
 import "./interfaces/ISettlementEngine.sol";
 import "./interfaces/IPriceFeedManager.sol";
@@ -33,8 +33,7 @@ contract PositionManager is
     OwnableUpgradeable,
     ReentrancyGuardUpgradeable,
     PausableUpgradeable,
-    UUPSUpgradeable,
-    AdminAccessControlUpgradeable
+    UUPSUpgradeable
 {
     using PositionLib for PositionLib.Position;
     using SafeERC20 for IERC20;
@@ -51,6 +50,9 @@ contract PositionManager is
 
     /// @notice Price feed manager address
     address public priceFeedManager;
+
+    /// @notice Access controller for role-based access
+    IVaultAccessController public accessController;
 
     /// @notice Position counter
     uint64 private nextPositionId;
@@ -87,7 +89,6 @@ contract PositionManager is
         SETTLEMENT_ENGINE_NOT_SET, // 4 - Settlement engine address not set
         CANCELLED_BY_ADMIN, // 5 - Admin cancelled the pending close
         ORACLE_ERROR // 6 - Oracle call failed
-
     }
 
     enum PositionClosedBy {
@@ -97,7 +98,6 @@ contract PositionManager is
         STOP_LOSS, // 3 - Stop loss requested
         MAX_PROFIT_REACHED, // 4 - Max profit reached
         PENDING_CLOSE_REQUESTED // 5 - Pending close requested
-
     }
 
     /// @notice Pending close request data
@@ -186,6 +186,7 @@ contract PositionManager is
     event PriceFeedManagerUpdated(address indexed oldAddress, address indexed newAddress);
 
     event MinPositionHoldTimeUpdated(uint256 oldTime, uint256 newTime);
+    event AccessControllerUpdated(address indexed oldAddress, address indexed newAddress);
 
     event MarginAdded(
         uint64 indexed positionId,
@@ -247,6 +248,21 @@ contract PositionManager is
     error NoPendingCloseRequest();
     error TooManyPendingCloseRequests();
     error TokenDecimalsNotSupported(uint8 decimals);
+    error NotPositionKeeper();
+    error AccessControllerNotSet();
+
+    // ========================================================================
+    // MODIFIERS
+    // ========================================================================
+
+    /**
+     * @notice Modifier to check if caller is a position keeper
+     */
+    modifier onlyPositionKeeper() {
+        if (address(accessController) == address(0)) revert AccessControllerNotSet();
+        if (!accessController.isPositionKeeper(msg.sender)) revert NotPositionKeeper();
+        _;
+    }
 
     // ========================================================================
     // CONSTRUCTOR / INITIALIZER
@@ -260,10 +276,10 @@ contract PositionManager is
     /**
      * @notice Initialize contract (replaces constructor)
      * @param initialOwner Owner address
-     * @param _admin Admin address (initial admin to add)
+     * @param _accessController Access controller address for role-based access
      */
-    function initialize(address initialOwner, address _admin) public initializer {
-        if (initialOwner == address(0) || _admin == address(0)) {
+    function initialize(address initialOwner, address _accessController) public initializer {
+        if (initialOwner == address(0) || _accessController == address(0)) {
             revert InvalidAddress();
         }
 
@@ -271,9 +287,8 @@ contract PositionManager is
         __ReentrancyGuard_init();
         __Pausable_init();
         __UUPSUpgradeable_init();
-        __AdminAccessControl_init();
 
-        _addAdmin(_admin);
+        accessController = IVaultAccessController(_accessController);
         nextPositionId = 1;
 
         // Set default leverage limits and maintenance margin
@@ -360,9 +375,10 @@ contract PositionManager is
 
         // Use getPriceWithUpdate for pull oracles (Pyth) if updateData provided
         if (priceUpdateData.length > 0) {
-            (openPrice, pricePublishTime) = IPriceFeedManager(priceFeedManager).getPriceWithUpdate{
-                value: msg.value
-            }(projectToken, maxAge, priceUpdateData);
+            (openPrice, pricePublishTime) = IPriceFeedManager(priceFeedManager)
+            .getPriceWithUpdate{ value: msg.value }(
+                projectToken, maxAge, priceUpdateData
+            );
         } else {
             (openPrice, pricePublishTime) =
                 IPriceFeedManager(priceFeedManager).getPrice(projectToken, maxAge);
@@ -409,9 +425,8 @@ contract PositionManager is
         // ERC20 project token - approve and transfer (SafeERC20)
         IERC20(projectToken).forceApprove(vaultManager, amount);
 
-        IVaultManager(vaultManager).depositFromBet(
-            projectToken, positionId, amount, positionSize, false, direction
-        ); // false = opening new position
+        IVaultManager(vaultManager)
+            .depositFromBet(projectToken, positionId, amount, positionSize, false, direction); // false = opening new position
 
         PositionLib.Position storage pos = positions[positionId];
 
@@ -512,7 +527,9 @@ contract PositionManager is
             // Pull oracle with update data
             try IPriceFeedManager(priceFeedManager).getPriceWithUpdate{ value: msg.value }(
                 pos.projectToken, maxAge, priceUpdateData
-            ) returns (uint256 _price, uint256 _publishTime) {
+            ) returns (
+                uint256 _price, uint256 _publishTime
+            ) {
                 closePrice = _price;
                 pricePublishTime = _publishTime;
                 priceSuccess = true;
@@ -662,7 +679,8 @@ contract PositionManager is
                 IERC20(pos.tokenAddress).forceApprove(vaultManager, marginAmount);
             }
 
-            IVaultManager(vaultManager).depositFromBet{
+            IVaultManager(vaultManager)
+            .depositFromBet{
                 value: useProjectToken && pos.tokenAddress == address(0)
                     ? marginAmount
                     : (!useProjectToken ? marginAmount : 0)
@@ -697,8 +715,8 @@ contract PositionManager is
         uint256 deadline,
         bool isLiquidation,
         PositionClosedBy closedBy
-    ) external nonReentrant onlyAdmin {
-        // M-04 FIX: Add deadline check for admin operations
+    ) external nonReentrant onlyPositionKeeper {
+        // M-04 FIX: Add deadline check for keeper operations
         if (block.timestamp > deadline) revert DeadlineExpired();
 
         PositionLib.Position storage pos = positions[positionId];
@@ -807,7 +825,7 @@ contract PositionManager is
     function processPendingClosePositions(uint256 maxPositions, uint256 maxAge)
         external
         nonReentrant
-        onlyAdmin
+        onlyPositionKeeper
     {
         uint256 processed = 0;
         uint256 i = 0;
@@ -941,7 +959,7 @@ contract PositionManager is
      * @param positionId Position ID
      * @dev Reverts position back to OPEN state
      */
-    function cancelPendingClose(uint64 positionId) external nonReentrant onlyAdmin {
+    function cancelPendingClose(uint64 positionId) external nonReentrant onlyPositionKeeper {
         PositionLib.Position storage pos = positions[positionId];
 
         if (pos.user == address(0)) revert PositionNotFound();
@@ -1001,12 +1019,13 @@ contract PositionManager is
         if (vaultManager != address(0)) {
             address vaultAddress = IVaultManager(vaultManager).getVault(pos.projectToken);
             if (vaultAddress != address(0)) {
-                fundingOwed = IAssetVault(vaultAddress).calculatePositionFunding(
-                    pos.entryFundingRateLong,
-                    pos.entryFundingRateShort,
-                    pos.positionSize,
-                    pos.direction
-                );
+                fundingOwed = IAssetVault(vaultAddress)
+                    .calculatePositionFunding(
+                        pos.entryFundingRateLong,
+                        pos.entryFundingRateShort,
+                        pos.positionSize,
+                        pos.direction
+                    );
             }
         }
 
@@ -1039,26 +1058,28 @@ contract PositionManager is
 
         // Update vault P&L (includes funding adjustment)
         if (vaultManager != address(0)) {
-            IVaultManager(vaultManager).updateVaultPnLWithLeverage(
-                pos.projectToken, // Project token
-                positionId, // Position ID for tracking
-                pos.amount,
-                vaultPnL,
-                fee,
-                pos.positionSize,
-                pos.direction, // Pass position direction
-                pos.user // M-05 FIX: Pass user address instead of tx.origin
-            );
+            IVaultManager(vaultManager)
+                .updateVaultPnLWithLeverage(
+                    pos.projectToken, // Project token
+                    positionId, // Position ID for tracking
+                    pos.amount,
+                    vaultPnL,
+                    fee,
+                    pos.positionSize,
+                    pos.direction, // Pass position direction
+                    pos.user // M-05 FIX: Pass user address instead of tx.origin
+                );
         }
 
         // Execute payout if user has any payout (v1: always project token)
         if (adjustedPayout > 0 && vaultManager != address(0)) {
-            IVaultManager(vaultManager).executePayout(
-                pos.projectToken, // Project token
-                pos.user,
-                adjustedPayout,
-                positionId
-            );
+            IVaultManager(vaultManager)
+                .executePayout(
+                    pos.projectToken, // Project token
+                    pos.user,
+                    adjustedPayout,
+                    positionId
+                );
         }
 
         // Update position state
@@ -1131,19 +1152,18 @@ contract PositionManager is
     }
 
     /**
-     * @notice Add an admin address
-     * @param _admin Admin address to add
+     * @notice Set access controller address
+     * @param _accessController Access controller address
      */
-    function addAdmin(address _admin) external onlyOwner whenNotPaused validAddress(_admin) {
-        _addAdmin(_admin);
-    }
-
-    /**
-     * @notice Remove an admin address
-     * @param _admin Admin address to remove
-     */
-    function removeAdmin(address _admin) external onlyOwner whenNotPaused validAddress(_admin) {
-        _removeAdmin(_admin);
+    function setAccessController(address _accessController)
+        external
+        onlyOwner
+        whenNotPaused
+        validAddress(_accessController)
+    {
+        address oldAddress = address(accessController);
+        accessController = IVaultAccessController(_accessController);
+        emit AccessControllerUpdated(oldAddress, _accessController);
     }
 
     /**
@@ -1176,7 +1196,11 @@ contract PositionManager is
      * @param _minLeverage Min leverage (e.g., 1)
      * @param _maxLeverage Max leverage (e.g., 100)
      */
-    function setLeverageLimits(uint8 _minLeverage, uint8 _maxLeverage) external onlyOwner whenNotPaused {
+    function setLeverageLimits(uint8 _minLeverage, uint8 _maxLeverage)
+        external
+        onlyOwner
+        whenNotPaused
+    {
         if (_minLeverage < 1 || _maxLeverage > 100 || _minLeverage > _maxLeverage) {
             revert InvalidLeverage();
         }
@@ -1237,14 +1261,15 @@ contract PositionManager is
         if (vaultManager != address(0)) {
             address vaultAddress = IVaultManager(vaultManager).getVault(pos.projectToken);
             if (vaultAddress != address(0)) {
-                (bool fundingLiquidatable,,) = IAssetVault(vaultAddress).checkFundingLiquidation(
-                    pos.amount,
-                    pos.entryFundingRateLong,
-                    pos.entryFundingRateShort,
-                    pos.positionSize,
-                    pos.direction,
-                    maintenanceMarginRatio
-                );
+                (bool fundingLiquidatable,,) = IAssetVault(vaultAddress)
+                    .checkFundingLiquidation(
+                        pos.amount,
+                        pos.entryFundingRateLong,
+                        pos.entryFundingRateShort,
+                        pos.positionSize,
+                        pos.direction,
+                        maintenanceMarginRatio
+                    );
                 if (fundingLiquidatable) {
                     return true;
                 }
@@ -1279,15 +1304,17 @@ contract PositionManager is
         if (vaultManager != address(0)) {
             address vaultAddress = IVaultManager(vaultManager).getVault(pos.projectToken);
             if (vaultAddress != address(0)) {
-                (bool fundingLiquidatable, int256 _fundingOwed, uint256 _effectiveCollateral) =
-                IAssetVault(vaultAddress).checkFundingLiquidation(
-                    pos.amount,
-                    pos.entryFundingRateLong,
-                    pos.entryFundingRateShort,
-                    pos.positionSize,
-                    pos.direction,
-                    maintenanceMarginRatio
-                );
+                (bool fundingLiquidatable, int256 _fundingOwed, uint256 _effectiveCollateral) = IAssetVault(
+                        vaultAddress
+                    )
+                    .checkFundingLiquidation(
+                        pos.amount,
+                        pos.entryFundingRateLong,
+                        pos.entryFundingRateShort,
+                        pos.positionSize,
+                        pos.direction,
+                        maintenanceMarginRatio
+                    );
 
                 if (fundingLiquidatable) {
                     return (true, 2, _fundingOwed, _effectiveCollateral); // reason 2 = funding
@@ -1367,9 +1394,10 @@ contract PositionManager is
         }
 
         // Calculate funding owed
-        fundingOwed = IAssetVault(vaultAddress).calculatePositionFunding(
-            pos.entryFundingRateLong, pos.entryFundingRateShort, pos.positionSize, pos.direction
-        );
+        fundingOwed = IAssetVault(vaultAddress)
+            .calculatePositionFunding(
+                pos.entryFundingRateLong, pos.entryFundingRateShort, pos.positionSize, pos.direction
+            );
 
         // Calculate effective collateral
         if (fundingOwed > 0) {
@@ -1393,11 +1421,7 @@ contract PositionManager is
      * @param positionId Position ID
      * @return remainingTime Remaining time in seconds (0 if can close now)
      */
-    function getRemainingHoldTime(uint64 positionId)
-        external
-        view
-        returns (uint256 remainingTime)
-    {
+    function getRemainingHoldTime(uint64 positionId) external view returns (uint256 remainingTime) {
         PositionLib.Position storage pos = positions[positionId];
         if (pos.user == address(0)) revert PositionNotFound();
 

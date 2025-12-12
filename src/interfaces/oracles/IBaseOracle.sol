@@ -13,7 +13,6 @@ interface IBaseOracle {
     enum OracleType {
         PUSH, // Push oracle: prices are pushed on-chain regularly
         PULL // Pull oracle: prices need to be updated before reading
-
     }
 
     /**

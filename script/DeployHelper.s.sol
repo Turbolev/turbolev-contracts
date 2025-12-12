@@ -37,8 +37,14 @@ contract DeployHelper is Script {
     address public multisigWallet;
     address public timelockController;
     address public vaultBeacon;
-    address public vaultGovernor;
-    address public vaultViewer;
+    address public vaultAccessController;
+    address public vaultViewerModular;
+
+    // Modular Vault components
+    address public vaultRouterImpl;
+    address public vaultCoreModule;
+    address public vaultFundingModule;
+    address public vaultRewardsModule;
 
     // ========================================================================
     // CONFIGURATION CONSTANTS
@@ -187,8 +193,14 @@ contract DeployHelper is Script {
         multisigWallet = vm.envOr("MULTISIG_WALLET_ADDRESS", address(0));
         timelockController = vm.envOr("TIMELOCK_ADDRESS", address(0));
         vaultBeacon = vm.envOr("VAULT_BEACON_ADDRESS", address(0));
-        vaultGovernor = vm.envOr("VAULT_GOVERNOR_ADDRESS", address(0));
-        vaultViewer = vm.envOr("VAULT_VIEWER_ADDRESS", address(0));
+        vaultAccessController = vm.envOr("VAULT_ACCESS_CONTROLLER_ADDRESS", address(0));
+        vaultViewerModular = vm.envOr("VAULT_VIEWER_MODULAR_ADDRESS", address(0));
+
+        // Modular Vault components
+        vaultRouterImpl = vm.envOr("VAULT_ROUTER_IMPL_ADDRESS", address(0));
+        vaultCoreModule = vm.envOr("VAULT_CORE_MODULE_ADDRESS", address(0));
+        vaultFundingModule = vm.envOr("VAULT_FUNDING_MODULE_ADDRESS", address(0));
+        vaultRewardsModule = vm.envOr("VAULT_REWARDS_MODULE_ADDRESS", address(0));
     }
 
     /**
@@ -266,7 +278,25 @@ contract DeployHelper is Script {
             json, '  "vaultManagerHelper": "', vm.toString(vaultManagerHelper), '",\n'
         );
         json = string.concat(json, '  "priceFeedManager": "', vm.toString(priceFeedManager), '",\n');
-        json = string.concat(json, '  "tokenFaucet": "', vm.toString(tokenFaucet), '"\n');
+        json = string.concat(json, '  "tokenFaucet": "', vm.toString(tokenFaucet), '",\n');
+        // Governance contracts
+        json = string.concat(json, '  "multisigWallet": "', vm.toString(multisigWallet), '",\n');
+        json = string.concat(
+            json, '  "timelockController": "', vm.toString(timelockController), '",\n'
+        );
+        json = string.concat(json, '  "vaultBeacon": "', vm.toString(vaultBeacon), '",\n');
+        json = string.concat(
+            json, '  "vaultAccessController": "', vm.toString(vaultAccessController), '",\n'
+        );
+        // Modular Vault components
+        json = string.concat(json, '  "vaultRouterImpl": "', vm.toString(vaultRouterImpl), '",\n');
+        json = string.concat(json, '  "vaultCoreModule": "', vm.toString(vaultCoreModule), '",\n');
+        json = string.concat(
+            json, '  "vaultFundingModule": "', vm.toString(vaultFundingModule), '",\n'
+        );
+        json = string.concat(
+            json, '  "vaultRewardsModule": "', vm.toString(vaultRewardsModule), '"\n'
+        );
         json = string.concat(json, "}");
 
         vm.writeFile(file, json);
@@ -295,6 +325,18 @@ contract DeployHelper is Script {
         vaultManagerHelper = payable(vm.parseJsonAddress(json, ".vaultManagerHelper"));
         priceFeedManager = payable(vm.parseJsonAddress(json, ".priceFeedManager"));
         tokenFaucet = payable(vm.parseJsonAddress(json, ".tokenFaucet"));
+
+        // Governance contracts
+        multisigWallet = vm.parseJsonAddress(json, ".multisigWallet");
+        timelockController = vm.parseJsonAddress(json, ".timelockController");
+        vaultBeacon = vm.parseJsonAddress(json, ".vaultBeacon");
+        vaultAccessController = vm.parseJsonAddress(json, ".vaultAccessController");
+
+        // Modular Vault components
+        vaultRouterImpl = vm.parseJsonAddress(json, ".vaultRouterImpl");
+        vaultCoreModule = vm.parseJsonAddress(json, ".vaultCoreModule");
+        vaultFundingModule = vm.parseJsonAddress(json, ".vaultFundingModule");
+        vaultRewardsModule = vm.parseJsonAddress(json, ".vaultRewardsModule");
 
         console.log("Deployment addresses loaded from:", file);
     }

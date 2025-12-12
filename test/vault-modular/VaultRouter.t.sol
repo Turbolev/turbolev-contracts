@@ -8,7 +8,6 @@ import "./BaseTestModular.sol";
  * @notice Tests for VaultRouter - main entry point of modular vault
  */
 contract VaultRouterTest is BaseTestModular {
-
     // ========================================================================
     // INITIALIZATION TESTS
     // ========================================================================

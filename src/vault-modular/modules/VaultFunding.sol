@@ -17,7 +17,6 @@ import "../../libraries/FundingRateLib.sol";
  * - Funding Config: setFundingConfig, setFundingEnabled
  */
 contract VaultFunding is VaultModuleBase {
-
     // ========================================================================
     // CONSTANTS
     // ========================================================================
@@ -98,8 +97,9 @@ contract VaultFunding is VaultModuleBase {
 
         // Calculate current imbalance
         bool isLongDominant;
-        (imbalanceBps, isLongDominant, hasCounterparty) =
-            FundingRateLib.calculateImbalance(funding.totalLongExposure, funding.totalShortExposure);
+        (imbalanceBps, isLongDominant, hasCounterparty) = FundingRateLib.calculateImbalance(
+            funding.totalLongExposure, funding.totalShortExposure
+        );
 
         // Get hourly rate based on imbalance tier
         uint16 hourlyRateBps = FundingRateLib.getHourlyRate(imbalanceBps, funding.fundingConfig);
@@ -202,8 +202,9 @@ contract VaultFunding is VaultModuleBase {
     {
         VaultStorageLib.FundingStorage storage funding = _funding();
 
-        (imbalanceBps, longsPayShorts, hasCounterparty) =
-            FundingRateLib.calculateImbalance(funding.totalLongExposure, funding.totalShortExposure);
+        (imbalanceBps, longsPayShorts, hasCounterparty) = FundingRateLib.calculateImbalance(
+            funding.totalLongExposure, funding.totalShortExposure
+        );
         rateBps = FundingRateLib.getHourlyRate(imbalanceBps, funding.fundingConfig);
     }
 
@@ -226,11 +227,7 @@ contract VaultFunding is VaultModuleBase {
         uint256 positionSize,
         uint8 direction,
         uint256 maintenanceMarginRatio
-    )
-        external
-        view
-        returns (bool isLiquidatable, int256 fundingOwed, uint256 effectiveCollateral)
-    {
+    ) external view returns (bool isLiquidatable, int256 fundingOwed, uint256 effectiveCollateral) {
         VaultStorageLib.FundingStorage storage funding = _funding();
 
         if (!funding.fundingEnabled) return (false, 0, collateral);
@@ -281,8 +278,9 @@ contract VaultFunding is VaultModuleBase {
         lastUpdateTime = funding.lastFundingUpdateTime;
 
         bool hasCounterparty;
-        (imbalanceBps, longsPayShorts, hasCounterparty) =
-            FundingRateLib.calculateImbalance(funding.totalLongExposure, funding.totalShortExposure);
+        (imbalanceBps, longsPayShorts, hasCounterparty) = FundingRateLib.calculateImbalance(
+            funding.totalLongExposure, funding.totalShortExposure
+        );
         currentHourlyRate = FundingRateLib.getHourlyRate(imbalanceBps, funding.fundingConfig);
     }
 
@@ -419,7 +417,13 @@ contract VaultFunding is VaultModuleBase {
     function getFundingConfig()
         external
         view
-        returns (uint16 tier1RateBps, uint16 tier2RateBps, uint16 tier3RateBps, uint16 tier4RateBps, uint16 tier5RateBps)
+        returns (
+            uint16 tier1RateBps,
+            uint16 tier2RateBps,
+            uint16 tier3RateBps,
+            uint16 tier4RateBps,
+            uint16 tier5RateBps
+        )
     {
         VaultStorageLib.FundingStorage storage funding = _funding();
         return (

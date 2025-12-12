@@ -239,67 +239,67 @@ forge script script/interact/InteractSettlementEngine.s.sol:InteractSettlementEn
   --rpc-url $RPC_URL --broadcast
 ```
 
-### 6. InteractVaultViewer
+### 6. InteractVaultViewerModular
 
-Truy vấn thông tin vault chi tiết thông qua VaultViewer contract (view-only, không cần broadcast):
+Truy vấn thông tin vault-modular (VaultRouter) chi tiết thông qua VaultViewerModular contract (view-only, không cần broadcast):
 
 ```bash
-# Set vault viewer and vault addresses
-export VAULT_VIEWER_ADDRESS=0x...
+# Set vault viewer modular and vault addresses
+export VAULT_VIEWER_MODULAR_ADDRESS=0x...
 export VAULT_ADDRESS=0x...
 
 # View comprehensive metrics
-forge script script/interact/InteractVaultViewer.s.sol:InteractVaultViewer \
+forge script script/interact/InteractVaultViewerModular.s.sol:InteractVaultViewerModular \
   --sig "viewAllMetrics()" \
   --rpc-url $RPC_URL
 
 # View risk summary
-forge script script/interact/InteractVaultViewer.s.sol:InteractVaultViewer \
+forge script script/interact/InteractVaultViewerModular.s.sol:InteractVaultViewerModular \
   --sig "viewRiskSummary()" \
   --rpc-url $RPC_URL
 
 # View total OI breakdown
-forge script script/interact/InteractVaultViewer.s.sol:InteractVaultViewer \
+forge script script/interact/InteractVaultViewerModular.s.sol:InteractVaultViewerModular \
   --sig "viewTotalOIBreakdown()" \
   --rpc-url $RPC_URL
 
 # View effective max leverage
-forge script script/interact/InteractVaultViewer.s.sol:InteractVaultViewer \
+forge script script/interact/InteractVaultViewerModular.s.sol:InteractVaultViewerModular \
   --sig "viewEffectiveMaxLeverage()" \
   --rpc-url $RPC_URL
 
 # Check if leverage is allowed
-forge script script/interact/InteractVaultViewer.s.sol:InteractVaultViewer \
+forge script script/interact/InteractVaultViewerModular.s.sol:InteractVaultViewerModular \
   --sig "checkLeverageAllowed(uint16)" 100 \
   --rpc-url $RPC_URL
 
 # View directional exposure
-forge script script/interact/InteractVaultViewer.s.sol:InteractVaultViewer \
+forge script script/interact/InteractVaultViewerModular.s.sol:InteractVaultViewerModular \
   --sig "viewDirectionalExposure()" \
   --rpc-url $RPC_URL
 
 # View funding stats
-forge script script/interact/InteractVaultViewer.s.sol:InteractVaultViewer \
+forge script script/interact/InteractVaultViewerModular.s.sol:InteractVaultViewerModular \
   --sig "viewFundingStats()" \
   --rpc-url $RPC_URL
 
 # Check total OI cap for a position
-forge script script/interact/InteractVaultViewer.s.sol:InteractVaultViewer \
+forge script script/interact/InteractVaultViewerModular.s.sol:InteractVaultViewerModular \
   --sig "checkTotalOICap(uint256)" 1000000000000000000 \
   --rpc-url $RPC_URL
 
 # Simulate leverage at different TVL
-forge script script/interact/InteractVaultViewer.s.sol:InteractVaultViewer \
+forge script script/interact/InteractVaultViewerModular.s.sol:InteractVaultViewerModular \
   --sig "simulateLeverageAtTVL(uint256)" 500000000000000000000 \
   --rpc-url $RPC_URL
 
 # Calculate withdrawal amount for LP
-forge script script/interact/InteractVaultViewer.s.sol:InteractVaultViewer \
+forge script script/interact/InteractVaultViewerModular.s.sol:InteractVaultViewerModular \
   --sig "calculateWithdrawalAmount(address,uint256)" 0xUserAddress 1000000000000000000 \
   --rpc-url $RPC_URL
 
 # Calculate pending rewards for LP
-forge script script/interact/InteractVaultViewer.s.sol:InteractVaultViewer \
+forge script script/interact/InteractVaultViewerModular.s.sol:InteractVaultViewerModular \
   --sig "calculatePendingRewards(address)" 0xUserAddress \
   --rpc-url $RPC_URL
 ```
@@ -464,7 +464,7 @@ PRICE_FEED_MANAGER_ADDRESS=0x...
 VAULT_ADDRESS=0x...
 
 # Helper contracts
-VAULT_VIEWER_ADDRESS=0x...
+VAULT_VIEWER_MODULAR_ADDRESS=0x...
 
 # Governance contracts
 MULTISIG_WALLET_ADDRESS=0x...

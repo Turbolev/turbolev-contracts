@@ -21,12 +21,7 @@ import "../interfaces/oracles/IPushOracle.sol";
  * - Manage multiple feed adapters for different asset pairs
  * - Implements IPushOracle interface (push-based oracle)
  */
-contract BlocksenseOracle is
-    OwnableUpgradeable,
-    PausableUpgradeable,
-    UUPSUpgradeable,
-    IPushOracle
-{
+contract BlocksenseOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgradeable, IPushOracle {
     // ========================================================================
     // STATE VARIABLES
     // ========================================================================

@@ -46,8 +46,7 @@ interface IPositionManager {
      * @param closePrice Close price
      * @param isLiquidation Whether this is liquidation
      */
-    function adminClosePosition(uint64 positionId, uint256 closePrice, bool isLiquidation)
-        external;
+    function adminClosePosition(uint64 positionId, uint256 closePrice, bool isLiquidation) external;
 
     /**
      * @notice Add an admin address
@@ -85,10 +84,7 @@ interface IPositionManager {
      * @param positionId Position ID
      * @return remainingTime Remaining time in seconds
      */
-    function getRemainingHoldTime(uint64 positionId)
-        external
-        view
-        returns (uint256 remainingTime);
+    function getRemainingHoldTime(uint64 positionId) external view returns (uint256 remainingTime);
 
     /**
      * @notice Check if position can be closed

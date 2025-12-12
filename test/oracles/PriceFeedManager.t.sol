@@ -25,9 +25,7 @@ contract MockAdapter is ICLAggregatorAdapter, IChainlinkAggregatorV3 {
         mockTimestamp = block.timestamp;
     }
 
-    function setLatestRoundData(uint80, int256 price, uint256, uint256 timestamp, uint80)
-        external
-    {
+    function setLatestRoundData(uint80, int256 price, uint256, uint256 timestamp, uint80) external {
         _price = price;
         mockTimestamp = timestamp;
     }
@@ -59,11 +57,7 @@ contract MockAdapter is ICLAggregatorAdapter, IChainlinkAggregatorV3 {
         return "Mock Adapter";
     }
 
-    function getRoundData(uint80)
-        external
-        view
-        returns (uint80, int256, uint256, uint256, uint80)
-    {
+    function getRoundData(uint80) external view returns (uint80, int256, uint256, uint256, uint80) {
         return (1, _price, mockTimestamp, mockTimestamp, 1);
     }
 
@@ -105,10 +99,7 @@ contract PriceFeedManagerTest is Test {
         bytes32 indexed secondaryProviderId
     );
     event InitialPriceSet(
-        address indexed projectToken,
-        uint256 price,
-        uint256 publishTime,
-        bytes32 indexed providerId
+        address indexed projectToken, uint256 price, uint256 publishTime, bytes32 indexed providerId
     );
     event LastPriceRecordUpdated(address indexed projectToken, uint256 price, uint256 timestamp);
 
@@ -213,7 +204,7 @@ contract PriceFeedManagerTest is Test {
             oracleContract: address(blocksenseOracle), // Changed
             oracleType: IBaseOracle.OracleType.PULL, // Changed type
             enabled: false // Changed enabled
-         });
+        });
 
         vm.expectEmit(true, true, false, true);
         emit OracleProviderUpdated(providerId, address(blocksenseOracle));
@@ -674,9 +665,7 @@ contract PriceFeedManagerTest is Test {
         // NOTE: getPrice() is a view function and does NOT check circuit breaker
         // Only getPriceWithFallback() and getPriceWithUpdate() check circuit breaker
         // So we test getPriceWithFallback instead
-        vm.expectRevert(
-            abi.encodeWithSelector(PriceFeedManager.InitialPriceNotSet.selector, token)
-        );
+        vm.expectRevert(abi.encodeWithSelector(PriceFeedManager.InitialPriceNotSet.selector, token));
         priceFeedManager.getPriceWithFallback(token, 3600);
     }
 
@@ -712,9 +701,7 @@ contract PriceFeedManagerTest is Test {
         priceFeedManager.setPriceFeedConfig(token, config);
 
         // getPriceWithFallback should also revert with InitialPriceNotSet
-        vm.expectRevert(
-            abi.encodeWithSelector(PriceFeedManager.InitialPriceNotSet.selector, token)
-        );
+        vm.expectRevert(abi.encodeWithSelector(PriceFeedManager.InitialPriceNotSet.selector, token));
         priceFeedManager.getPriceWithFallback(token, 3600);
     }
 

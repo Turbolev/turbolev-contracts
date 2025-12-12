@@ -6,39 +6,41 @@ import "forge-std/console.sol";
 import "./DeployHelper.s.sol";
 import "../src/governance/MultisigWallet.sol";
 import "../src/governance/VersionedBeacon.sol";
-import "../src/governance/VaultGovernor.sol";
-import "../src/legacy/AssetVaultUpgradeable.sol";
+import "../src/vault-modular/VaultAccessController.sol";
+import "../src/vault-modular/VaultRouter.sol";
 import "@openzeppelin/contracts/governance/TimelockController.sol";
+import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 /**
- * @title DeployGovernance
- * @notice Script to deploy governance contracts
- * @dev Deploys MultisigWallet, VersionedBeacon, TimelockController, and VaultGovernor
+ * @title DeployGovernanceModular
+ * @notice Deploy governance contracts for modular vault system
+ * @dev Deploys:
+ *      1. MultisigWallet - M-of-N multisig for proposals
+ *      2. TimelockController (OpenZeppelin) - Time delay for governance
+ *      3. VaultRouter implementation - Initial vault implementation
+ *      4. VersionedBeacon - Beacon with version tracking
+ *      5. VaultAccessController - Centralized access control (single source of truth)
  *
- * Deployment Order:
- * 1. MultisigWallet - M-of-N multisig for proposals
- * 2. TimelockController - Time delay for governance actions
- * 3. AssetVaultUpgradeable implementation - Initial vault implementation
- * 4. VersionedBeacon - Beacon with version tracking (owned by Timelock)
- * 5. VaultGovernor - Vault-specific governance
+ * Architecture:
+ * - TimelockController: DEFAULT_ADMIN_ROLE holder, controls critical operations
+ * - MultisigWallet: EMERGENCY_ROLE holder, can pause without delay
+ * - VaultAccessController: Central access control for all vault operations
  *
  * Usage:
- *   # Set environment variables first
  *   export MULTISIG_OWNERS="0x1111...,0x2222...,0x3333..."
  *   export MULTISIG_THRESHOLD=2
  *   export TIMELOCK_DELAY=86400  # 1 day
- *   export GUARDIANS="0x4444...,0x5555..."
  *
- *   forge script script/DeployGovernance.s.sol:DeployGovernance \
+ *   forge script script/DeployGovernanceModular.s.sol:DeployGovernanceModular \
  *     --rpc-url $RPC_URL --broadcast
  */
-contract DeployGovernance is DeployHelper {
-    // Deployed contracts (use different names to avoid override conflicts with DeployHelper)
+contract DeployGovernanceModular is DeployHelper {
+    // Deployed contracts
     address public deployedMultisig;
     address public deployedTimelock;
     address public deployedBeacon;
-    address public deployedGovernor;
-    address public deployedVaultImpl;
+    address public deployedAccessController;
+    address public deployedVaultRouterImpl;
 
     // Config
     uint256 public constant DEFAULT_TIMELOCK_DELAY = 1 days;
@@ -48,7 +50,7 @@ contract DeployGovernance is DeployHelper {
         vm.startBroadcast(deployer);
 
         console.log("\n===========================================");
-        console.log("Deploying Governance Contracts");
+        console.log("Deploying Governance Contracts (Modular)");
         console.log("Chain ID:", block.chainid);
         console.log("Deployer:", deployer);
         console.log("===========================================\n");
@@ -56,17 +58,17 @@ contract DeployGovernance is DeployHelper {
         // 1. Deploy MultisigWallet
         _deployMultisigWallet();
 
-        // 2. Deploy TimelockController
+        // 2. Deploy TimelockController (OpenZeppelin)
         _deployTimelockController();
 
-        // 3. Deploy initial vault implementation
-        _deployVaultImplementation();
+        // 3. Deploy VaultRouter implementation
+        _deployVaultRouterImpl();
 
         // 4. Deploy VersionedBeacon
         _deployVersionedBeacon();
 
-        // 5. Deploy VaultGovernor
-        _deployVaultGovernor();
+        // 5. Deploy VaultAccessController
+        _deployVaultAccessController();
 
         // Print summary
         _printSummary();
@@ -82,7 +84,6 @@ contract DeployGovernance is DeployHelper {
         address[] memory owners;
 
         if (bytes(ownersEnv).length > 0) {
-            // Parse comma-separated addresses
             owners = _parseAddresses(ownersEnv);
         } else {
             // Default: deployer and admin
@@ -103,7 +104,7 @@ contract DeployGovernance is DeployHelper {
     }
 
     function _deployTimelockController() internal {
-        console.log("\n--- Deploying TimelockController ---");
+        console.log("\n--- Deploying TimelockController (OpenZeppelin) ---");
 
         uint256 minDelay = vm.envOr("TIMELOCK_DELAY", DEFAULT_TIMELOCK_DELAY);
 
@@ -116,18 +117,20 @@ contract DeployGovernance is DeployHelper {
         executors[0] = deployedMultisig;
         executors[1] = admin;
 
+        // Deploy TimelockController
+        // admin = deployer initially, will renounce later if needed
         deployedTimelock = address(new TimelockController(minDelay, proposers, executors, deployer));
 
         console.log("TimelockController deployed:", deployedTimelock);
         console.log("Min Delay:", minDelay, "seconds");
     }
 
-    function _deployVaultImplementation() internal {
-        console.log("\n--- Deploying AssetVaultUpgradeable Implementation ---");
+    function _deployVaultRouterImpl() internal {
+        console.log("\n--- Deploying VaultRouter Implementation ---");
 
-        deployedVaultImpl = address(new AssetVaultUpgradeable());
+        deployedVaultRouterImpl = address(new VaultRouter());
 
-        console.log("Vault Implementation deployed:", deployedVaultImpl);
+        console.log("VaultRouter Implementation deployed:", deployedVaultRouterImpl);
     }
 
     function _deployVersionedBeacon() internal {
@@ -135,71 +138,84 @@ contract DeployGovernance is DeployHelper {
 
         // Owner is Timelock for governance control
         // Initial admin is deployer for emergency operations
-        deployedBeacon = address(new VersionedBeacon(deployedVaultImpl, deployedTimelock, deployer));
+        deployedBeacon =
+            address(new VersionedBeacon(deployedVaultRouterImpl, deployedTimelock, deployer));
 
         console.log("VersionedBeacon deployed:", deployedBeacon);
-        console.log("Initial implementation:", deployedVaultImpl);
+        console.log("Initial implementation:", deployedVaultRouterImpl);
         console.log("Owner (Timelock):", deployedTimelock);
         console.log("Initial Admin:", deployer);
     }
 
-    function _deployVaultGovernor() internal {
-        console.log("\n--- Deploying VaultGovernor ---");
+    function _deployVaultAccessController() internal {
+        console.log("\n--- Deploying VaultAccessController ---");
 
-        // Get guardians from env or use defaults
-        string memory guardiansEnv = vm.envOr("GUARDIANS", string(""));
-        address[] memory guardians;
-
-        if (bytes(guardiansEnv).length > 0) {
-            guardians = _parseAddresses(guardiansEnv);
-        } else {
-            // Default: admin as guardian
-            guardians = new address[](1);
-            guardians[0] = admin;
-            console.log("Using default guardian: admin");
-        }
-
-        // VaultManager must be set before deployment
+        // VaultManager must be set before deployment (or set later via setVaultManager)
         address _vaultManager = vaultManager;
         if (_vaultManager == address(0)) {
             _vaultManager = vm.envOr("VAULT_MANAGER_ADDRESS", address(0));
         }
 
-        if (_vaultManager == address(0)) {
-            console.log(
-                "WARNING: VaultManager not set. VaultGovernor will be deployed with address(0)"
-            );
-            console.log("You must call setVaultManager() after VaultManager is deployed");
-            _vaultManager = address(1); // Placeholder - will revert in VaultGovernor constructor
+        // PositionManager
+        address _positionManager = positionManager;
+        if (_positionManager == address(0)) {
+            _positionManager = vm.envOr("POSITION_MANAGER_ADDRESS", address(0));
         }
 
-        deployedGovernor = address(
-            new VaultGovernor(
-                deployedTimelock, deployedMultisig, _vaultManager, deployedBeacon, guardians, admin
-            )
+        // Deploy implementation
+        VaultAccessController accessControllerImpl = new VaultAccessController();
+
+        // If dependencies not set, use placeholder and configure later
+        address initVaultManager = _vaultManager != address(0) ? _vaultManager : deployer;
+        address initPositionManager = _positionManager != address(0) ? _positionManager : deployer;
+
+        // Prepare init data
+        bytes memory initData = abi.encodeWithSelector(
+            VaultAccessController.initialize.selector,
+            deployedTimelock, // admin = Timelock
+            initVaultManager,
+            initPositionManager,
+            deployedMultisig // multisig for EMERGENCY_ROLE
         );
 
-        console.log("VaultGovernor deployed:", deployedGovernor);
-        console.log("Guardians:", guardians.length);
+        // Deploy proxy
+        ERC1967Proxy accessControllerProxy =
+            new ERC1967Proxy(address(accessControllerImpl), initData);
+        deployedAccessController = address(accessControllerProxy);
+
+        console.log("VaultAccessController deployed:", deployedAccessController);
+        console.log("Admin (Timelock):", deployedTimelock);
+        console.log("Emergency Role (Multisig):", deployedMultisig);
+
+        if (_vaultManager == address(0)) {
+            console.log(
+                "WARNING: VaultManager not set. Call setVaultManager() after VaultManager is deployed"
+            );
+        }
+        if (_positionManager == address(0)) {
+            console.log(
+                "WARNING: PositionManager not set. Grant POSITION_MANAGER_ROLE after deployment"
+            );
+        }
     }
 
     function _printSummary() internal view {
         console.log("\n===========================================");
-        console.log("GOVERNANCE DEPLOYMENT SUMMARY");
+        console.log("GOVERNANCE DEPLOYMENT SUMMARY (MODULAR)");
         console.log("===========================================");
         console.log("MultisigWallet:", deployedMultisig);
         console.log("TimelockController:", deployedTimelock);
         console.log("VersionedBeacon:", deployedBeacon);
-        console.log("VaultGovernor:", deployedGovernor);
-        console.log("Vault Implementation V1:", deployedVaultImpl);
+        console.log("VaultAccessController:", deployedAccessController);
+        console.log("VaultRouter Implementation:", deployedVaultRouterImpl);
         console.log("===========================================");
         console.log("\n=== Environment Variables ===");
         console.log("Add these to your .env file:");
         console.log("MULTISIG_WALLET_ADDRESS=", deployedMultisig);
         console.log("TIMELOCK_ADDRESS=", deployedTimelock);
         console.log("VAULT_BEACON_ADDRESS=", deployedBeacon);
-        console.log("VAULT_GOVERNOR_ADDRESS=", deployedGovernor);
-        console.log("VAULT_IMPLEMENTATION_ADDRESS=", deployedVaultImpl);
+        console.log("VAULT_ACCESS_CONTROLLER_ADDRESS=", deployedAccessController);
+        console.log("VAULT_ROUTER_IMPL_ADDRESS=", deployedVaultRouterImpl);
     }
 
     /**

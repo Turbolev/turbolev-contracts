@@ -1,19 +1,18 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.22;
 
-import "../interfaces/IAssetVault.sol";
+import "../interfaces/IVaultRouter.sol";
 import "../libraries/VaultRiskLib.sol";
 import "../libraries/FundingRateLib.sol";
-import "../libraries/VaultLiquidityLib.sol";
 
 /**
- * @title VaultViewer
- * @notice External view-only contract for querying vault data
+ * @title VaultViewerModular
+ * @notice External view-only contract for querying vault-modular (VaultRouter) data
  * @dev Stateless contract - all functions are view/pure
- *      Reduces AssetVaultUpgradeable contract size by moving view functions here
  *      Frontend/backend can call this contract directly
+ *      Compatible with VaultRouter (vault-modular system)
  */
-contract VaultViewer {
+contract VaultViewerModular {
     // ========================================================================
     // CONSTANTS
     // ========================================================================
@@ -42,8 +41,8 @@ contract VaultViewer {
             uint16 currentMultiplierBps
         )
     {
-        IAssetVault v = IAssetVault(vault);
-        IAssetVault.VaultInfo memory info = v.getVaultInfo();
+        IVaultRouter v = IVaultRouter(vault);
+        IVaultRouter.VaultInfo memory info = v.getVaultInfo();
 
         tvl = info.totalLiquidity;
         longOI = v.totalLongExposure();
@@ -115,8 +114,8 @@ contract VaultViewer {
             bool canOpenMore
         )
     {
-        IAssetVault v = IAssetVault(vault);
-        IAssetVault.VaultInfo memory info = v.getVaultInfo();
+        IVaultRouter v = IVaultRouter(vault);
+        IVaultRouter.VaultInfo memory info = v.getVaultInfo();
         uint256 tvl = info.totalLiquidity;
 
         // Get tier config and calculate multiplier
@@ -164,8 +163,8 @@ contract VaultViewer {
             string memory tierDescription
         )
     {
-        IAssetVault v = IAssetVault(vault);
-        IAssetVault.VaultInfo memory info = v.getVaultInfo();
+        IVaultRouter v = IVaultRouter(vault);
+        IVaultRouter.VaultInfo memory info = v.getVaultInfo();
         uint256 tvl = info.totalLiquidity;
 
         // Get leverage config
@@ -175,10 +174,10 @@ contract VaultViewer {
         baseMaxLeverage = _calculateMaxLeverage(tvl, t1Threshold, t2Threshold, t1Max, t2Max, t3Max);
 
         // Get effective leverage from VaultRiskLib
-        (effectiveMaxLeverage, utilizationBps, utilizationTier) = VaultRiskLib
-            .getEffectiveMaxLeverage(
-            tvl, v.totalLongExposure(), v.totalShortExposure(), baseMaxLeverage
-        );
+        (effectiveMaxLeverage, utilizationBps, utilizationTier) =
+            VaultRiskLib.getEffectiveMaxLeverage(
+                tvl, v.totalLongExposure(), v.totalShortExposure(), baseMaxLeverage
+            );
 
         // Set tier description
         if (utilizationTier == 1) {
@@ -200,8 +199,8 @@ contract VaultViewer {
         view
         returns (uint16 maxLeverage, uint256 currentTVL, string memory currentPhase)
     {
-        IAssetVault v = IAssetVault(vault);
-        IAssetVault.VaultInfo memory info = v.getVaultInfo();
+        IVaultRouter v = IVaultRouter(vault);
+        IVaultRouter.VaultInfo memory info = v.getVaultInfo();
         currentTVL = info.totalLiquidity;
 
         (uint256 t1Threshold, uint256 t2Threshold, uint16 t1Max, uint16 t2Max, uint16 t3Max) =
@@ -233,7 +232,7 @@ contract VaultViewer {
             uint16 tier3Max
         )
     {
-        return IAssetVault(vault).getLeverageTierConfig();
+        return IVaultRouter(vault).getLeverageTierConfig();
     }
 
     /**
@@ -244,8 +243,8 @@ contract VaultViewer {
         view
         returns (bool isAllowed, uint16 effectiveMaxLeverage, string memory reason)
     {
-        IAssetVault v = IAssetVault(vault);
-        IAssetVault.VaultInfo memory info = v.getVaultInfo();
+        IVaultRouter v = IVaultRouter(vault);
+        IVaultRouter.VaultInfo memory info = v.getVaultInfo();
         uint256 tvl = info.totalLiquidity;
 
         (uint256 t1Threshold, uint256 t2Threshold, uint16 t1Max, uint16 t2Max, uint16 t3Max) =
@@ -274,7 +273,7 @@ contract VaultViewer {
         returns (uint16 maxLeverageAtTarget, string memory phase)
     {
         (uint256 t1Threshold, uint256 t2Threshold, uint16 t1Max, uint16 t2Max, uint16 t3Max) =
-            IAssetVault(vault).getLeverageTierConfig();
+            IVaultRouter(vault).getLeverageTierConfig();
 
         maxLeverageAtTarget =
             _calculateMaxLeverage(targetTVL, t1Threshold, t2Threshold, t1Max, t2Max, t3Max);
@@ -307,8 +306,8 @@ contract VaultViewer {
             bool isLongBias
         )
     {
-        IAssetVault v = IAssetVault(vault);
-        IAssetVault.VaultInfo memory info = v.getVaultInfo();
+        IVaultRouter v = IVaultRouter(vault);
+        IVaultRouter.VaultInfo memory info = v.getVaultInfo();
 
         longExposure = v.totalLongExposure();
         shortExposure = v.totalShortExposure();
@@ -349,7 +348,7 @@ contract VaultViewer {
             uint256 imbalanceBps
         )
     {
-        IAssetVault v = IAssetVault(vault);
+        IVaultRouter v = IVaultRouter(vault);
 
         (cumulativeLongRate, cumulativeShortRate) = v.getCumulativeFundingRates();
         lastUpdateTime = v.lastFundingUpdateTime();
@@ -369,13 +368,12 @@ contract VaultViewer {
             tier4RateBps: t4Rate,
             tier5RateBps: t5Rate,
             isEnabled: true // Assume enabled if we're querying
-         });
+        });
         currentHourlyRateBps = FundingRateLib.getHourlyRate(imbalanceBps, config);
     }
 
     /**
      * @notice Check if position is liquidatable due to funding
-     * @dev Moved from AssetVaultUpgradeable to reduce contract size
      * @param vault Vault address
      * @param collateral Position collateral
      * @param entryRateLong Entry funding rate for long
@@ -395,12 +393,8 @@ contract VaultViewer {
         uint256 positionSize,
         uint8 direction,
         uint256 maintenanceMarginRatio
-    )
-        external
-        view
-        returns (bool isLiquidatable, int256 fundingOwed, uint256 effectiveCollateral)
-    {
-        IAssetVault v = IAssetVault(vault);
+    ) external view returns (bool isLiquidatable, int256 fundingOwed, uint256 effectiveCollateral) {
+        IVaultRouter v = IVaultRouter(vault);
 
         if (!v.fundingEnabled()) {
             return (false, 0, collateral);
@@ -446,7 +440,7 @@ contract VaultViewer {
         uint256 positionSize,
         uint8 direction
     ) external view returns (int256 fundingOwed) {
-        IAssetVault v = IAssetVault(vault);
+        IVaultRouter v = IVaultRouter(vault);
 
         if (!v.fundingEnabled()) {
             return 0;
@@ -466,14 +460,13 @@ contract VaultViewer {
 
     /**
      * @notice Get current hourly funding rate based on imbalance
-     * @dev Alternative to calling vault directly
      */
     function getCurrentHourlyFundingRate(address vault)
         external
         view
         returns (uint256 rateBps, bool longsPayShorts, uint256 imbalanceBps, bool hasCounterparty)
     {
-        IAssetVault v = IAssetVault(vault);
+        IVaultRouter v = IVaultRouter(vault);
 
         (imbalanceBps, longsPayShorts, hasCounterparty) =
             FundingRateLib.calculateImbalance(v.totalLongExposure(), v.totalShortExposure());
@@ -511,8 +504,8 @@ contract VaultViewer {
             string memory reason
         )
     {
-        IAssetVault v = IAssetVault(vault);
-        IAssetVault.VaultInfo memory info = v.getVaultInfo();
+        IVaultRouter v = IVaultRouter(vault);
+        IVaultRouter.VaultInfo memory info = v.getVaultInfo();
         uint256 tvl = info.totalLiquidity;
 
         if (tvl == 0) {
@@ -558,7 +551,7 @@ contract VaultViewer {
             bool wouldExceedCap
         )
     {
-        IAssetVault v = IAssetVault(vault);
+        IVaultRouter v = IVaultRouter(vault);
 
         (
             uint16 fixedMultiplier,
@@ -590,8 +583,8 @@ contract VaultViewer {
         view
         returns (uint256 utilizationBps, uint256 totalOI, uint256 tvl, uint256 remainingCapacity)
     {
-        IAssetVault v = IAssetVault(vault);
-        IAssetVault.VaultInfo memory info = v.getVaultInfo();
+        IVaultRouter v = IVaultRouter(vault);
+        IVaultRouter.VaultInfo memory info = v.getVaultInfo();
 
         tvl = info.totalLiquidity;
         totalOI = v.totalLongExposure() + v.totalShortExposure();
@@ -614,9 +607,9 @@ contract VaultViewer {
         view
         returns (uint256 grossAmount, uint256 fee, uint256 netAmount, bool isEarlyWithdrawal)
     {
-        IAssetVault v = IAssetVault(vault);
-        IAssetVault.VaultInfo memory info = v.getVaultInfo();
-        IAssetVault.LPPosition memory lpPos = v.getLPPosition(user);
+        IVaultRouter v = IVaultRouter(vault);
+        IVaultRouter.VaultInfo memory info = v.getVaultInfo();
+        IVaultRouter.LPPosition memory lpPos = v.getLPPosition(user);
 
         if (shares > lpPos.shares) {
             shares = lpPos.shares;
@@ -650,8 +643,8 @@ contract VaultViewer {
         view
         returns (uint256 pendingRewards, uint256 lastProcessedDay)
     {
-        IAssetVault v = IAssetVault(vault);
-        IAssetVault.LPPosition memory lpPos = v.getLPPosition(user);
+        IVaultRouter v = IVaultRouter(vault);
+        IVaultRouter.LPPosition memory lpPos = v.getLPPosition(user);
 
         if (lpPos.shares == 0) {
             return (0, 0);
@@ -659,6 +652,74 @@ contract VaultViewer {
 
         pendingRewards = v.claimableRewards(user);
         lastProcessedDay = lpPos.lastProcessedDay;
+    }
+
+    // ========================================================================
+    // LP ARRAY VIEW FUNCTIONS
+    // ========================================================================
+
+    /**
+     * @notice Get total number of active LPs
+     * @param vault Address of the vault
+     * @return count Number of LPs currently in the vault
+     */
+    function getVaultLPsCount(address vault) external view returns (uint256 count) {
+        return IVaultRouter(vault).getVaultLPsLength();
+    }
+
+    /**
+     * @notice Get LP address at specific index
+     * @param vault Address of the vault
+     * @param index Index in the LP array (0-based)
+     * @return lp LP address at the given index
+     */
+    function getVaultLPAt(address vault, uint256 index) external view returns (address lp) {
+        return IVaultRouter(vault).vaultLPs(index);
+    }
+
+    /**
+     * @notice Check if address is an active LP
+     * @param vault Address of the vault
+     * @param account Address to check
+     * @return isLP True if address is in the LP array
+     */
+    function isVaultLP(address vault, address account) external view returns (bool isLP) {
+        return IVaultRouter(vault).lpIndex(account) != 0;
+    }
+
+    /**
+     * @notice Get all active LPs (use with caution for large arrays)
+     * @param vault Address of the vault
+     * @return lps Array of all LP addresses
+     * @dev May be gas-expensive for large LP counts
+     */
+    function getAllVaultLPs(address vault) external view returns (address[] memory lps) {
+        IVaultRouter v = IVaultRouter(vault);
+        uint256 count = v.getVaultLPsLength();
+        lps = new address[](count);
+        for (uint256 i = 0; i < count; i++) {
+            lps[i] = v.vaultLPs(i);
+        }
+    }
+
+    /**
+     * @notice Get effective queue length (items not yet processed)
+     * @param vault Address of the vault
+     * @return effectiveLength Number of pending payout items
+     */
+    function getEffectiveQueueLength(address vault)
+        external
+        view
+        returns (uint256 effectiveLength)
+    {
+        IVaultRouter v = IVaultRouter(vault);
+        uint256 startIdx = v.queueStartIndex();
+        uint256 totalLength = v.getPendingPayoutQueueLength();
+
+        if (totalLength > startIdx) {
+            return totalLength - startIdx;
+        }
+        return 0;
     }
 
     // ========================================================================
@@ -706,77 +767,5 @@ contract VaultViewer {
         } else {
             return t3Max;
         }
-    }
-
-    // ========================================================================
-    // LP ARRAY VIEW FUNCTIONS (moved from AssetVaultUpgradeable)
-    // M-08 FIX: Use explicit array length getters instead of try-catch iteration
-    // ========================================================================
-
-    /**
-     * @notice Get total number of active LPs
-     * @param vault Address of the vault
-     * @return count Number of LPs currently in the vault
-     * @dev M-08 FIX: Now uses explicit getter instead of try-catch iteration
-     */
-    function getVaultLPsCount(address vault) external view returns (uint256 count) {
-        return IAssetVault(vault).getVaultLPsLength();
-    }
-
-    /**
-     * @notice Get LP address at specific index
-     * @param vault Address of the vault
-     * @param index Index in the LP array (0-based)
-     * @return lp LP address at the given index
-     */
-    function getVaultLPAt(address vault, uint256 index) external view returns (address lp) {
-        return IAssetVault(vault).vaultLPs(index);
-    }
-
-    /**
-     * @notice Check if address is an active LP
-     * @param vault Address of the vault
-     * @param account Address to check
-     * @return isLP True if address is in the LP array
-     */
-    function isVaultLP(address vault, address account) external view returns (bool isLP) {
-        return IAssetVault(vault).lpIndex(account) != 0;
-    }
-
-    /**
-     * @notice Get all active LPs (use with caution for large arrays)
-     * @param vault Address of the vault
-     * @return lps Array of all LP addresses
-     * @dev M-08 FIX: Now uses explicit getter instead of try-catch iteration
-     *      May be gas-expensive for large LP counts
-     */
-    function getAllVaultLPs(address vault) external view returns (address[] memory lps) {
-        IAssetVault v = IAssetVault(vault);
-        uint256 count = v.getVaultLPsLength();
-        lps = new address[](count);
-        for (uint256 i = 0; i < count; i++) {
-            lps[i] = v.vaultLPs(i);
-        }
-    }
-
-    /**
-     * @notice Get effective queue length (items not yet processed)
-     * @param vault Address of the vault
-     * @return effectiveLength Number of pending payout items
-     * @dev M-08 FIX: Now uses explicit getter instead of try-catch iteration
-     */
-    function getEffectiveQueueLength(address vault)
-        external
-        view
-        returns (uint256 effectiveLength)
-    {
-        IAssetVault v = IAssetVault(vault);
-        uint256 startIdx = v.queueStartIndex();
-        uint256 totalLength = v.getPendingPayoutQueueLength();
-        
-        if (totalLength > startIdx) {
-            return totalLength - startIdx;
-        }
-        return 0;
     }
 }

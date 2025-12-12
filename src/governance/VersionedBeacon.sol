@@ -246,7 +246,10 @@ contract VersionedBeacon is UpgradeableBeacon {
      * Instead of rolling back to an old version (which can break positions),
      * we upgrade to a new hotfix version that is forward-compatible.
      */
-    function emergencyUpgrade(address newImplementation, bytes32 infoHash) external onlyAdminOrGuardian {
+    function emergencyUpgrade(address newImplementation, bytes32 infoHash)
+        external
+        onlyAdminOrGuardian
+    {
         if (!emergencyMode) revert NotInEmergencyMode();
 
         _registerAndUpgrade(newImplementation, infoHash, true);
@@ -262,7 +265,9 @@ contract VersionedBeacon is UpgradeableBeacon {
      * @param infoHash IPFS hash or keccak256 of changelog
      * @param _isEmergency Whether this is an emergency upgrade
      */
-    function _registerAndUpgrade(address newImplementation, bytes32 infoHash, bool _isEmergency) internal {
+    function _registerAndUpgrade(address newImplementation, bytes32 infoHash, bool _isEmergency)
+        internal
+    {
         // Increment version
         uint256 newVersion = currentVersion + 1;
 
@@ -278,7 +283,9 @@ contract VersionedBeacon is UpgradeableBeacon {
         // Call parent upgradeTo (updates the actual beacon implementation)
         super.upgradeTo(newImplementation);
 
-        emit VersionRegistered(newVersion, newImplementation, infoHash, _isEmergency, block.timestamp);
+        emit VersionRegistered(
+            newVersion, newImplementation, infoHash, _isEmergency, block.timestamp
+        );
     }
 
     // ========================================================================

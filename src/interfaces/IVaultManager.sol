@@ -101,10 +101,7 @@ interface IVaultManager {
      * @param projectToken Project token address
      * @return vaultAddress Vault address
      */
-    function vaultsByProjectToken(address projectToken)
-        external
-        view
-        returns (address vaultAddress);
+    function vaultsByProjectToken(address projectToken) external view returns (address vaultAddress);
 
     /**
      * @notice Get all vaults
@@ -195,4 +192,44 @@ interface IVaultManager {
      * @param vault Vault address
      */
     function reactivateVault(address vault) external;
+
+    // ========================================================================
+    // EMERGENCY FUNCTIONS (NO TIMELOCK DELAY)
+    // ========================================================================
+
+    /**
+     * @notice Emergency pause vault by project token (NO TIMELOCK DELAY)
+     * @param _projectToken Project token address
+     */
+    function emergencyPauseVault(address _projectToken) external;
+
+    /**
+     * @notice Emergency pause vault by address (NO TIMELOCK DELAY)
+     * @param vault Vault address
+     */
+    function emergencyPauseVaultByAddress(address vault) external;
+
+    /**
+     * @notice Emergency batch pause vaults (NO TIMELOCK DELAY)
+     * @param vaults Array of vault addresses
+     */
+    function emergencyBatchPauseVaults(address[] calldata vaults) external;
+
+    /**
+     * @notice Emergency unpause vault by project token (NO TIMELOCK DELAY)
+     * @param _projectToken Project token address
+     */
+    function emergencyUnpauseVault(address _projectToken) external;
+
+    /**
+     * @notice Emergency unpause vault by address (NO TIMELOCK DELAY)
+     * @param vault Vault address
+     */
+    function emergencyUnpauseVaultByAddress(address vault) external;
+
+    /**
+     * @notice Emergency batch unpause vaults (NO TIMELOCK DELAY)
+     * @param vaults Array of vault addresses
+     */
+    function emergencyBatchUnpauseVaults(address[] calldata vaults) external;
 }

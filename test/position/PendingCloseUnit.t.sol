@@ -4,6 +4,58 @@ pragma solidity ^0.8.22;
 import "forge-std/Test.sol";
 import "../../src/PositionManager.sol";
 import "../../src/libraries/PositionLib.sol";
+import "../../src/interfaces/IVaultAccessController.sol";
+
+/**
+ * @title MockVaultAccessController
+ * @notice Mock access controller for testing
+ */
+contract MockVaultAccessController is IVaultAccessController {
+    mapping(address => bool) public positionKeepers;
+
+    bytes32 public constant VAULT_ADMIN_ROLE = keccak256("VAULT_ADMIN_ROLE");
+    bytes32 public constant POSITION_MANAGER_ROLE = keccak256("POSITION_MANAGER_ROLE");
+    bytes32 public constant VAULT_KEEPER_ROLE = keccak256("VAULT_KEEPER_ROLE");
+    bytes32 public constant POSITION_KEEPER_ROLE = keccak256("POSITION_KEEPER_ROLE");
+    bytes32 public constant EMERGENCY_ROLE = keccak256("EMERGENCY_ROLE");
+    bytes32 public constant UPGRADER_ROLE = keccak256("UPGRADER_ROLE");
+
+    function setPositionKeeper(address keeper, bool status) external {
+        positionKeepers[keeper] = status;
+    }
+
+    function hasVaultRole(address, bytes32, address) external pure returns (bool) {
+        return false;
+    }
+
+    function isVaultAdmin(address, address) external pure returns (bool) {
+        return false;
+    }
+
+    function isPositionManager(address) external pure returns (bool) {
+        return false;
+    }
+
+    function isVaultKeeper(address) external pure returns (bool) {
+        return false;
+    }
+
+    function isPositionKeeper(address account) external view returns (bool) {
+        return positionKeepers[account];
+    }
+
+    function hasEmergencyRole(address) external pure returns (bool) {
+        return false;
+    }
+
+    function isVaultRegistered(address) external pure returns (bool) {
+        return false;
+    }
+
+    function hasRole(bytes32, address) external pure returns (bool) {
+        return false;
+    }
+}
 
 /**
  * @title PendingCloseUnitTest
@@ -12,22 +64,28 @@ import "../../src/libraries/PositionLib.sol";
  */
 contract PendingCloseUnitTest is Test {
     PositionManager public positionManager;
+    MockVaultAccessController public accessController;
 
     address public owner;
-    address public admin;
+    address public keeper;
     address public user1;
 
     function setUp() public {
         owner = address(this);
-        admin = makeAddr("admin");
+        keeper = makeAddr("keeper");
         user1 = makeAddr("user1");
+
+        // Deploy mock access controller
+        accessController = new MockVaultAccessController();
+        accessController.setPositionKeeper(keeper, true);
 
         // Deploy PositionManager implementation
         PositionManager impl = new PositionManager();
 
         // Deploy proxy and initialize
-        bytes memory initData =
-            abi.encodeWithSelector(PositionManager.initialize.selector, owner, admin);
+        bytes memory initData = abi.encodeWithSelector(
+            PositionManager.initialize.selector, owner, address(accessController)
+        );
 
         ERC1967Proxy proxy = new ERC1967Proxy(address(impl), initData);
         positionManager = PositionManager(payable(address(proxy)));
@@ -80,31 +138,31 @@ contract PendingCloseUnitTest is Test {
     }
 
     // ========================================================================
-    // TEST: ADMIN ACCESS CONTROL
+    // TEST: POSITION KEEPER ACCESS CONTROL
     // ========================================================================
 
-    function test_ProcessPendingClose_OnlyAdmin() public {
-        // Non-admin cannot call
+    function test_ProcessPendingClose_OnlyPositionKeeper() public {
+        // Non-keeper cannot call
         vm.prank(user1);
-        vm.expectRevert();
+        vm.expectRevert(PositionManager.NotPositionKeeper.selector);
         positionManager.processPendingClosePositions(10, 3600);
 
-        // Admin can call (but nothing to process)
-        vm.prank(admin);
+        // Keeper can call (but nothing to process)
+        vm.prank(keeper);
         positionManager.processPendingClosePositions(10, 3600);
     }
 
-    function test_CancelPendingClose_OnlyAdmin() public {
-        // Non-admin cannot call
+    function test_CancelPendingClose_OnlyPositionKeeper() public {
+        // Non-keeper cannot call
         vm.prank(user1);
-        vm.expectRevert();
+        vm.expectRevert(PositionManager.NotPositionKeeper.selector);
         positionManager.cancelPendingClose(1);
     }
 
     function test_CancelPendingClose_RevertsWhenNoPending() public {
         // Try to cancel non-existent position - should revert with PositionNotFound
         // because position doesn't exist (checked before pending request)
-        vm.prank(admin);
+        vm.prank(keeper);
         vm.expectRevert(PositionManager.PositionNotFound.selector);
         positionManager.cancelPendingClose(1);
     }
@@ -115,7 +173,7 @@ contract PendingCloseUnitTest is Test {
 
     function test_Initialize_Success() public {
         assertEq(positionManager.owner(), owner);
-        assertTrue(positionManager.isAdmin(admin));
+        assertEq(address(positionManager.accessController()), address(accessController));
         assertEq(positionManager.minLeverage(), 1);
         assertEq(positionManager.maxLeverage(), 100);
     }
@@ -130,7 +188,7 @@ contract PendingCloseUnitTest is Test {
     // ========================================================================
 
     function test_GasEstimate_ProcessEmptyQueue() public {
-        vm.prank(admin);
+        vm.prank(keeper);
         uint256 gasBefore = gasleft();
         positionManager.processPendingClosePositions(10, 3600);
         uint256 gasUsed = gasBefore - gasleft();

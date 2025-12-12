@@ -557,7 +557,7 @@ contract MathLibTest is Test {
         uint256 a = 1e30;
         uint256 b = 1e30;
         uint256 denom = 1e42; // Result should be 1e18
-        
+
         uint256 result = MathLib.mulDiv(a, b, denom);
         assertEq(result, 1e18, "Large values should not overflow with mulDiv");
     }
@@ -571,7 +571,7 @@ contract MathLibTest is Test {
         uint256 rateDiff = 1e18;
         uint256 positionSize = 1e30;
         uint256 precision = 1e18;
-        
+
         uint256 result = MathLib.mulDiv(rateDiff, positionSize, precision);
         assertEq(result, 1e30, "Funding rate calculation should work");
     }
@@ -581,7 +581,7 @@ contract MathLibTest is Test {
         uint256 a = type(uint128).max;
         uint256 b = type(uint128).max;
         uint256 denom = type(uint128).max;
-        
+
         uint256 result = MathLib.mulDiv(a, b, denom);
         assertEq(result, type(uint128).max, "Extreme values should work");
     }
@@ -639,7 +639,7 @@ contract MathLibTest is Test {
         int256 rateDiff = 1e16;
         int256 positionSize = 100e18;
         int256 precision = 1e18;
-        
+
         int256 result = MathLib.mulDivSigned(rateDiff, positionSize, precision);
         assertEq(result, 1e18, "Funding owed should be 1 token");
     }
@@ -653,7 +653,7 @@ contract MathLibTest is Test {
         int256 rateDiff = -1e16;
         int256 positionSize = 100e18;
         int256 precision = 1e18;
-        
+
         int256 result = MathLib.mulDivSigned(rateDiff, positionSize, precision);
         assertEq(result, -1e18, "Funding received should be -1 token");
     }
@@ -667,7 +667,7 @@ contract MathLibTest is Test {
         int256 rateDiff = 1e20;
         int256 positionSize = int256(1e30);
         int256 precision = 1e18;
-        
+
         int256 result = MathLib.mulDivSigned(rateDiff, positionSize, precision);
         assertEq(result, 1e32, "Large values should not overflow");
     }
@@ -690,7 +690,7 @@ contract MathLibTest is Test {
         vm.assume(denom > 0);
         vm.assume(a < type(uint128).max);
         vm.assume(b < type(uint128).max);
-        
+
         // For small values, result should match direct calculation
         uint256 expected = (a * b) / denom;
         uint256 result = MathLib.mulDiv(a, b, denom);
@@ -701,9 +701,9 @@ contract MathLibTest is Test {
         vm.assume(denom != 0);
         vm.assume(a != type(int128).min); // Avoid abs overflow
         vm.assume(b != type(int128).min);
-        
+
         int256 result = MathLib.mulDivSigned(int256(a), int256(b), int256(denom));
-        
+
         // Check sign is correct
         bool expectedNegative = (a < 0) != (b < 0);
         if (denom < 0) expectedNegative = !expectedNegative;

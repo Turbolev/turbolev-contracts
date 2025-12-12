@@ -19,12 +19,7 @@ import "../interfaces/oracles/IPushOracle.sol";
  * - Validate price freshness and validity
  * - Implements IPushOracle interface (push-based oracle)
  */
-contract ChainlinkOracle is
-    OwnableUpgradeable,
-    PausableUpgradeable,
-    UUPSUpgradeable,
-    IPushOracle
-{
+contract ChainlinkOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgradeable, IPushOracle {
     // ========================================================================
     // STATE VARIABLES
     // ========================================================================

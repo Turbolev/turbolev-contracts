@@ -4,16 +4,41 @@ pragma solidity ^0.8.22;
 import "forge-std/Script.sol";
 import "forge-std/console.sol";
 import "../DeployHelper.s.sol";
-import "../../src/legacy/VaultManager.sol";
-import "../../src/legacy/AssetVaultUpgradeable.sol";
+import "../../src/vault-modular/VaultManager.sol";
+import "../../src/vault-modular/VaultRouter.sol";
 
-contract InteractVaultManager is DeployHelper {
+/**
+ * @title InteractVaultManagerModular
+ * @notice Script to interact with modular VaultManager contract
+ * @dev Usage: Set VAULT_MANAGER_ADDRESS in .env
+ */
+contract InteractVaultManagerModular is DeployHelper {
     VaultManager public vmgr;
 
     function setUp() public override {
         super.setUp();
         vmgr = VaultManager(payable(vaultManager));
         console.log("VaultManager Address:", address(vmgr));
+    }
+
+    // ========================================================================
+    // VIEW FUNCTIONS
+    // ========================================================================
+
+    function viewInfo() public view {
+        console.log("\n=== VaultManager Info ===");
+        console.log("Address:", address(vmgr));
+        console.log("Owner:", vmgr.owner());
+        console.log("PositionManager:", vmgr.positionManager());
+        console.log("VaultManagerHelper:", vmgr.vaultManagerHelper());
+        console.log("AccessController:", vmgr.accessController());
+        console.log("TimelockController:", vmgr.timelockController());
+        console.log("MultisigWallet:", vmgr.multisigWallet());
+        console.log("VaultRouter Impl:", vmgr.vaultRouterImpl());
+        console.log("Core Module:", vmgr.coreModule());
+        console.log("Funding Module:", vmgr.fundingModule());
+        console.log("Rewards Module:", vmgr.rewardsModule());
+        console.log("Paused:", vmgr.paused());
     }
 
     function viewAllVaults() public view {
@@ -35,18 +60,9 @@ contract InteractVaultManager is DeployHelper {
         }
     }
 
-    function viewBeaconProxyVaults() public view {
-        console.log("\n=== Beacon Proxy Vaults ===");
-        address[] memory vaults = vmgr.getBeaconProxyVaults();
-        console.log("Beacon proxy vaults:", vaults.length);
-        for (uint256 i = 0; i < vaults.length; i++) {
-            console.log("Vault", i, ":", vaults[i]);
-        }
-    }
-
     function _printVaultSummary(address vaultAddr) internal view {
-        AssetVaultUpgradeable vault = AssetVaultUpgradeable(payable(vaultAddr));
-        AssetVaultUpgradeable.VaultInfo memory info = vault.getVaultInfo();
+        VaultRouter vault = VaultRouter(payable(vaultAddr));
+        VaultStorageLib.VaultInfo memory info = vault.vaultInfo();
         console.log("  - Liquidity:", info.totalLiquidity);
         console.log("  - Trading Enabled:", info.tradingEnabled);
         console.log("  - Is Graduated:", info.isGraduated);
@@ -65,6 +81,10 @@ contract InteractVaultManager is DeployHelper {
         console.log("Project Token:", projectToken);
         console.log("Is Supported:", supported);
     }
+
+    // ========================================================================
+    // PAUSE FUNCTIONS
+    // ========================================================================
 
     function pauseVault(address projectToken) public {
         vm.startBroadcast(deployer);
@@ -94,6 +114,35 @@ contract InteractVaultManager is DeployHelper {
         vm.stopBroadcast();
     }
 
+    // ========================================================================
+    // EMERGENCY FUNCTIONS
+    // ========================================================================
+
+    function emergencyPauseVault(address projectToken) public {
+        vm.startBroadcast(deployer);
+        vmgr.emergencyPauseVault(projectToken);
+        console.log("Emergency pause executed for token:", projectToken);
+        vm.stopBroadcast();
+    }
+
+    function emergencyPauseVaultByAddress(address vault) public {
+        vm.startBroadcast(deployer);
+        vmgr.emergencyPauseVaultByAddress(vault);
+        console.log("Emergency pause executed for vault:", vault);
+        vm.stopBroadcast();
+    }
+
+    function emergencyUnpauseVault(address projectToken) public {
+        vm.startBroadcast(deployer);
+        vmgr.emergencyUnpauseVault(projectToken);
+        console.log("Emergency unpause executed for token:", projectToken);
+        vm.stopBroadcast();
+    }
+
+    // ========================================================================
+    // VAULT LIFECYCLE FUNCTIONS
+    // ========================================================================
+
     function deactivateVault(address vault) public {
         vm.startBroadcast(deployer);
         vmgr.deactivateVault(vault);
@@ -107,6 +156,10 @@ contract InteractVaultManager is DeployHelper {
         console.log("Vault reactivated:", vault);
         vm.stopBroadcast();
     }
+
+    // ========================================================================
+    // CONFIGURATION FUNCTIONS
+    // ========================================================================
 
     function setPositionManager(address _positionManager) public {
         vm.startBroadcast(deployer);
@@ -122,12 +175,9 @@ contract InteractVaultManager is DeployHelper {
         vm.stopBroadcast();
     }
 
-    function setVaultBeacon(address _beacon) public {
-        vm.startBroadcast(deployer);
-        vmgr.setVaultBeacon(_beacon);
-        console.log("Vault Beacon set:", _beacon);
-        vm.stopBroadcast();
-    }
+    // ========================================================================
+    // MANAGER PAUSE FUNCTIONS
+    // ========================================================================
 
     function pauseManager() public {
         vm.startBroadcast(deployer);

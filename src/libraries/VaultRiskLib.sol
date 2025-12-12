@@ -294,7 +294,8 @@ library VaultRiskLib {
         }
 
         // Calculate maximum allowed total OI
-        uint256 maxTotalOI = (totalLiquidity * totalOIRiskMultiplierBps) / VaultConfigLib.BASIS_POINTS;
+        uint256 maxTotalOI =
+            (totalLiquidity * totalOIRiskMultiplierBps) / VaultConfigLib.BASIS_POINTS;
 
         // Calculate current total OI (sum of all open positions)
         uint256 currentTotalOI = totalLongExposure + totalShortExposure;

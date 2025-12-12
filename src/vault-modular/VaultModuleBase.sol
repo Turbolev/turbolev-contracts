@@ -80,14 +80,14 @@ abstract contract VaultModuleBase {
     }
 
     /**
-     * @notice Only keeper (for automated operations)
+     * @notice Only vault keeper (for automated vault operations)
      */
-    modifier onlyKeeper() {
+    modifier onlyVaultKeeper() {
         VaultStorageLib.CoreStorage storage core = VaultStorageLib.getCoreStorage();
         if (core.accessController == address(0)) revert InvalidAddress();
 
         VaultAccessController ac = VaultAccessController(core.accessController);
-        if (!ac.isKeeper(msg.sender)) {
+        if (!ac.isVaultKeeper(msg.sender)) {
             revert NotKeeper();
         }
         _;

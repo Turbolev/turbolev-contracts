@@ -8,7 +8,6 @@ import "./BaseTestModular.sol";
  * @notice Tests for VaultFunding module - funding rate calculations
  */
 contract VaultFundingTest is BaseTestModular {
-
     // ========================================================================
     // FUNDING RATE INITIALIZATION
     // ========================================================================
@@ -118,10 +117,14 @@ contract VaultFundingTest is BaseTestModular {
         uint8 direction = 1; // LONG
         uint256 maintenanceMarginRatio = 500; // 5%
 
-        (bool isLiquidatable, int256 fundingOwed, uint256 effectiveCollateral) =
-            vault.checkFundingLiquidation(
-                collateral, entryRateLong, entryRateShort, positionSize, direction, maintenanceMarginRatio
-            );
+        (bool isLiquidatable, int256 fundingOwed, uint256 effectiveCollateral) = vault.checkFundingLiquidation(
+            collateral,
+            entryRateLong,
+            entryRateShort,
+            positionSize,
+            direction,
+            maintenanceMarginRatio
+        );
 
         assertFalse(isLiquidatable);
         assertEq(fundingOwed, 0);

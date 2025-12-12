@@ -208,7 +208,11 @@ library VaultConfigLib {
      * @notice Returns default leverage tier configuration
      * @return config Default LeverageTierConfig struct
      */
-    function getDefaultLeverageTierConfig() internal pure returns (LeverageTierConfig memory config) {
+    function getDefaultLeverageTierConfig()
+        internal
+        pure
+        returns (LeverageTierConfig memory config)
+    {
         return LeverageTierConfig({
             tier1Threshold: DEFAULT_LEVERAGE_TIER1_THRESHOLD,
             tier2Threshold: DEFAULT_LEVERAGE_TIER2_THRESHOLD,
@@ -240,7 +244,7 @@ library VaultConfigLib {
      * @return config Default RiskConfig struct
      */
     function getDefaultRiskConfig() internal pure returns (RiskConfig memory config) {
-        return RiskConfig({maxDirectionalExposureBps: DEFAULT_MAX_DIRECTIONAL_EXPOSURE_BPS});
+        return RiskConfig({ maxDirectionalExposureBps: DEFAULT_MAX_DIRECTIONAL_EXPOSURE_BPS });
     }
 
     /**

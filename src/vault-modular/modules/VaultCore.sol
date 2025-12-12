@@ -54,7 +54,11 @@ contract VaultCore is VaultModuleBase {
     event CollateralDeposited(uint256 amount, uint256 positionSize, uint256 timestamp);
     event PayoutExecuted(address indexed user, uint256 amount, uint256 timestamp);
     event PayoutQueued(
-        uint64 indexed positionId, address indexed user, uint256 amount, bool isNew, uint256 timestamp
+        uint64 indexed positionId,
+        address indexed user,
+        uint256 amount,
+        bool isNew,
+        uint256 timestamp
     );
     event VaultPnLUpdated(
         uint256 collateral,
@@ -68,7 +72,11 @@ contract VaultCore is VaultModuleBase {
         address indexed user, uint256 fee, uint256 remainingLockTime, uint256 timestamp
     );
     event OpenPositionFeeCollected(
-        uint64 indexed positionId, address indexed sender, uint256 fee, uint256 netAmount, uint256 timestamp
+        uint64 indexed positionId,
+        address indexed sender,
+        uint256 fee,
+        uint256 netAmount,
+        uint256 timestamp
     );
     event ClosePositionFeeCollected(
         uint64 indexed positionId, address indexed user, uint256 fee, uint256 timestamp
@@ -90,7 +98,9 @@ contract VaultCore is VaultModuleBase {
         uint256 timestamp
     );
     event FeeUpdated(uint8 indexed feeType, uint16 oldBps, uint16 newBps, uint256 timestamp);
-    event TreasuryUpdated(address indexed oldTreasury, address indexed newTreasury, uint256 timestamp);
+    event TreasuryUpdated(
+        address indexed oldTreasury, address indexed newTreasury, uint256 timestamp
+    );
     event TradingEnabledUpdated(bool enabled, uint256 timestamp);
     event GraduationThresholdUpdated(uint256 oldThreshold, uint256 newThreshold, uint256 timestamp);
     event VaultGraduated(uint256 totalLiquidity, uint256 threshold, uint256 timestamp);
@@ -277,18 +287,18 @@ contract VaultCore is VaultModuleBase {
 
         // Emit events
         if (core.vaultManagerHelper != address(0)) {
-            IVaultManagerHelper(core.vaultManagerHelper).emitLiquidityAdded(
-                msg.sender,
-                netAmount,
-                shares,
-                core.vaultInfo.totalLiquidity,
-                uint8(VaultStorageLib.LiquidityOperationType.USER_DEPOSIT),
-                block.timestamp
-            );
+            IVaultManagerHelper(core.vaultManagerHelper)
+                .emitLiquidityAdded(
+                    msg.sender,
+                    netAmount,
+                    shares,
+                    core.vaultInfo.totalLiquidity,
+                    uint8(VaultStorageLib.LiquidityOperationType.USER_DEPOSIT),
+                    block.timestamp
+                );
 
-            IVaultManagerHelper(core.vaultManagerHelper).emitStakingFeeCollected(
-                msg.sender, stakingFee, netAmount, block.timestamp
-            );
+            IVaultManagerHelper(core.vaultManagerHelper)
+                .emitStakingFeeCollected(msg.sender, stakingFee, netAmount, block.timestamp);
         }
 
         // Check graduation
@@ -347,14 +357,15 @@ contract VaultCore is VaultModuleBase {
         }
 
         if (core.vaultManagerHelper != address(0)) {
-            IVaultManagerHelper(core.vaultManagerHelper).emitLiquidityRemoved(
-                msg.sender,
-                netPayout,
-                shares,
-                core.vaultInfo.totalLiquidity,
-                uint8(VaultStorageLib.LiquidityOperationType.USER_WITHDRAW),
-                block.timestamp
-            );
+            IVaultManagerHelper(core.vaultManagerHelper)
+                .emitLiquidityRemoved(
+                    msg.sender,
+                    netPayout,
+                    shares,
+                    core.vaultInfo.totalLiquidity,
+                    uint8(VaultStorageLib.LiquidityOperationType.USER_WITHDRAW),
+                    block.timestamp
+                );
         }
 
         // Transfer tokens
@@ -374,7 +385,7 @@ contract VaultCore is VaultModuleBase {
         uint256 positionSize,
         bool isMarginAdd,
         uint8 direction
-    ) external onlyPositionManager {
+    ) external onlyVaultManagerOrHelper {
         if (amount == 0) revert InvalidAmount();
 
         VaultStorageLib.CoreStorage storage core = _core();
@@ -385,13 +396,16 @@ contract VaultCore is VaultModuleBase {
         uint256 netCollateral;
 
         if (!isMarginAdd) {
-            (openFee, netCollateral) = VaultPayoutLib.calculateOpenFee(amount, core.feeConfig.openPositionFeeBps);
+            (openFee, netCollateral) =
+                VaultPayoutLib.calculateOpenFee(amount, core.feeConfig.openPositionFeeBps);
 
             if (openFee > 0) {
                 core.vaultInfo.totalLiquidity += openFee;
                 core.vaultInfo.totalFeesCollected += openFee;
                 core.withdrawableFees += openFee;
-                emit OpenPositionFeeCollected(positionId, msg.sender, openFee, netCollateral, block.timestamp);
+                emit OpenPositionFeeCollected(
+                    positionId, msg.sender, openFee, netCollateral, block.timestamp
+                );
             }
         } else {
             netCollateral = amount;
@@ -405,7 +419,9 @@ contract VaultCore is VaultModuleBase {
             core.betCollateral[positionId] = netCollateral;
         }
 
-        emit BetCollateralUpdated(positionId, oldCollateral, core.betCollateral[positionId], true, block.timestamp);
+        emit BetCollateralUpdated(
+            positionId, oldCollateral, core.betCollateral[positionId], true, block.timestamp
+        );
 
         core.vaultInfo.totalVolume += amount;
         core.vaultInfo.totalLeverageExposure += positionSize;
@@ -421,9 +437,13 @@ contract VaultCore is VaultModuleBase {
         }
 
         emit DirectionalExposureUpdated(
-            oldLongExposure, funding.totalLongExposure,
-            oldShortExposure, funding.totalShortExposure,
-            direction, true, block.timestamp
+            oldLongExposure,
+            funding.totalLongExposure,
+            oldShortExposure,
+            funding.totalShortExposure,
+            direction,
+            true,
+            block.timestamp
         );
 
         emit CollateralDeposited(netCollateral, positionSize, block.timestamp);
@@ -434,7 +454,7 @@ contract VaultCore is VaultModuleBase {
      */
     function executePayout(address user, uint256 amount, uint64 positionId)
         external
-        onlyPositionManager
+        onlyVaultManagerOrHelper
         nonReentrant
     {
         if (user == address(0)) revert InvalidAddress();
@@ -466,14 +486,15 @@ contract VaultCore is VaultModuleBase {
             core.vaultInfo.totalLiquidity -= result.rewardsFromVault;
 
             if (core.vaultManagerHelper != address(0)) {
-                IVaultManagerHelper(core.vaultManagerHelper).emitLiquidityRemoved(
-                    user,
-                    result.rewardsFromVault,
-                    0,
-                    core.vaultInfo.totalLiquidity,
-                    uint8(VaultStorageLib.LiquidityOperationType.PAYOUT_EXECUTION),
-                    block.timestamp
-                );
+                IVaultManagerHelper(core.vaultManagerHelper)
+                    .emitLiquidityRemoved(
+                        user,
+                        result.rewardsFromVault,
+                        0,
+                        core.vaultInfo.totalLiquidity,
+                        uint8(VaultStorageLib.LiquidityOperationType.PAYOUT_EXECUTION),
+                        block.timestamp
+                    );
             }
         }
 
@@ -500,13 +521,14 @@ contract VaultCore is VaultModuleBase {
         uint256 positionSize,
         uint8 direction,
         address user
-    ) external onlyPositionManager {
+    ) external onlyVaultManagerOrHelper {
         VaultStorageLib.CoreStorage storage core = _core();
         VaultStorageLib.FundingStorage storage funding = _funding();
         VaultStorageLib.RewardsStorage storage rewards = _rewards();
 
         // Calculate close fee
-        uint256 closeFee = VaultPayoutLib.calculateCloseFee(collateral, core.feeConfig.closePositionFeeBps);
+        uint256 closeFee =
+            VaultPayoutLib.calculateCloseFee(collateral, core.feeConfig.closePositionFeeBps);
 
         if (closeFee > 0) {
             core.vaultInfo.totalLiquidity += closeFee;
@@ -524,21 +546,23 @@ contract VaultCore is VaultModuleBase {
             isNegativePnL: core.vaultInfo.isNegativePnL
         });
 
-        VaultPayoutLib.PnLUpdateResult memory pnlResult = VaultPayoutLib.calculatePnLUpdate(pnlParams);
+        VaultPayoutLib.PnLUpdateResult memory pnlResult =
+            VaultPayoutLib.calculatePnLUpdate(pnlParams);
 
         // Apply liquidity change
         if (pnlResult.isLiquidityIncrease && pnlResult.liquidityChange > 0) {
             core.vaultInfo.totalLiquidity += pnlResult.liquidityChange;
 
             if (core.vaultManagerHelper != address(0)) {
-                IVaultManagerHelper(core.vaultManagerHelper).emitLiquidityAdded(
-                    address(this),
-                    pnlResult.liquidityChange,
-                    0,
-                    core.vaultInfo.totalLiquidity,
-                    uint8(VaultStorageLib.LiquidityOperationType.CLOSE_POSITION),
-                    block.timestamp
-                );
+                IVaultManagerHelper(core.vaultManagerHelper)
+                    .emitLiquidityAdded(
+                        address(this),
+                        pnlResult.liquidityChange,
+                        0,
+                        core.vaultInfo.totalLiquidity,
+                        uint8(VaultStorageLib.LiquidityOperationType.CLOSE_POSITION),
+                        block.timestamp
+                    );
             }
         }
 
@@ -576,9 +600,13 @@ contract VaultCore is VaultModuleBase {
         }
 
         emit DirectionalExposureUpdated(
-            oldLongExposure, funding.totalLongExposure,
-            oldShortExposure, funding.totalShortExposure,
-            direction, false, block.timestamp
+            oldLongExposure,
+            funding.totalLongExposure,
+            oldShortExposure,
+            funding.totalShortExposure,
+            direction,
+            false,
+            block.timestamp
         );
 
         // Update positions settled
@@ -609,7 +637,10 @@ contract VaultCore is VaultModuleBase {
     /**
      * @notice Check if position can be opened
      */
-    function checkPositionRisk(uint256 positionSize, uint8 leverage, uint8 direction) external view {
+    function checkPositionRisk(uint256 positionSize, uint8 leverage, uint8 direction)
+        external
+        view
+    {
         VaultStorageLib.CoreStorage storage core = _core();
         VaultStorageLib.FundingStorage storage funding = _funding();
         VaultStorageLib.RiskStorage storage risk = _risk();
@@ -770,8 +801,13 @@ contract VaultCore is VaultModuleBase {
     /**
      * @notice Update vault parameters
      */
-    function updateVaultParams(uint256 _minBetAmount, uint256 _maxBetAmount) external onlyVaultManagerOrHelper {
-        if (_minBetAmount == 0 || _maxBetAmount < _minBetAmount) revert InvalidParameters();
+    function updateVaultParams(uint256 _minBetAmount, uint256 _maxBetAmount)
+        external
+        onlyVaultManagerOrHelper
+    {
+        if (_minBetAmount == 0 || _maxBetAmount < _minBetAmount) {
+            revert InvalidParameters();
+        }
         VaultStorageLib.CoreStorage storage core = _core();
         core.vaultParams.minBetAmount = _minBetAmount;
         core.vaultParams.maxBetAmount = _maxBetAmount;
@@ -828,10 +864,15 @@ contract VaultCore is VaultModuleBase {
 
     function _checkGraduation() internal {
         VaultStorageLib.CoreStorage storage core = _core();
-        if (!core.vaultInfo.isGraduated && core.vaultInfo.totalLiquidity >= core.vaultInfo.graduationThreshold) {
+        if (
+            !core.vaultInfo.isGraduated
+                && core.vaultInfo.totalLiquidity >= core.vaultInfo.graduationThreshold
+        ) {
             core.vaultInfo.isGraduated = true;
             core.vaultInfo.graduatedAt = block.timestamp;
-            emit VaultGraduated(core.vaultInfo.totalLiquidity, core.vaultInfo.graduationThreshold, block.timestamp);
+            emit VaultGraduated(
+                core.vaultInfo.totalLiquidity, core.vaultInfo.graduationThreshold, block.timestamp
+            );
         }
     }
 

@@ -33,7 +33,7 @@ contract PositionFeeModelTest is Test {
         uint256 fee = (netCollateral * feeBps) / 10_000;
 
         // Close fee = 999.5 * 0.0005 = 0.49975 ether
-        assertApproxEqRel(fee, 0.49975 ether, 0.01e18, "Close fee should be ~0.49975 ether");
+        assertApproxEqRel(fee, 0.499_75 ether, 0.01e18, "Close fee should be ~0.49975 ether");
     }
 
     function test_TotalFeeMath_CompleteRoundTrip() public pure {

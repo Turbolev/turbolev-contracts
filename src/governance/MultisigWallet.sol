@@ -154,8 +154,9 @@ contract MultisigWallet {
     {
         txId = transactionCount;
 
-        transactions[txId] =
-            Transaction({ to: to, value: value, data: data, executed: false, confirmationCount: 0 });
+        transactions[txId] = Transaction({
+            to: to, value: value, data: data, executed: false, confirmationCount: 0
+        });
 
         transactionCount++;
 

@@ -57,7 +57,13 @@ contract MockRegistry is ICLFeedRegistryAdapter {
         external
         view
         override
-        returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)
+        returns (
+            uint80 roundId,
+            int256 answer,
+            uint256 startedAt,
+            uint256 updatedAt,
+            uint80 answeredInRound
+        )
     {
         int256 price = prices[base][quote];
         uint256 ts = timestamps[base][quote];
@@ -107,11 +113,7 @@ contract MockRegistry is ICLFeedRegistryAdapter {
         return true;
     }
 
-    function getPhaseRange(address, address, uint16)
-        external
-        pure
-        returns (uint80, uint80)
-    {
+    function getPhaseRange(address, address, uint16) external pure returns (uint80, uint80) {
         return (1, 1);
     }
 
@@ -400,29 +402,23 @@ contract BaseTestModular is Test {
         ERC1967Proxy settlementProxy = new ERC1967Proxy(address(settlementImpl), settlementInitData);
         settlementEngine = SettlementEngine(payable(address(settlementProxy)));
 
+        // Deploy Modular Vault components first (to get accessController)
+        _deployModularVault();
+
         // Deploy PositionManager (upgradeable via ERC1967Proxy)
+        // NOTE: Must be after accessController is deployed
         PositionManager positionImpl = new PositionManager();
-        bytes memory positionInitData =
-            abi.encodeWithSelector(PositionManager.initialize.selector, owner, admin);
+        bytes memory positionInitData = abi.encodeWithSelector(
+            PositionManager.initialize.selector, owner, address(accessController)
+        );
         ERC1967Proxy positionProxy = new ERC1967Proxy(address(positionImpl), positionInitData);
         positionManager = PositionManager(payable(address(positionProxy)));
 
-        // Deploy Modular Vault components
-        _deployModularVault();
+        // Now setup all addresses after PositionManager is deployed
+        _setupModularVaultAddresses();
     }
 
     function _deployModularVault() internal {
-        // Deploy VaultAccessController
-        VaultAccessController accessControllerImpl = new VaultAccessController();
-        bytes memory accessControllerInitData = abi.encodeWithSelector(
-            VaultAccessController.initialize.selector,
-            mockTimelockController, // admin
-            address(0), // vaultManager - will set later
-            address(positionManager),
-            mockMultisigWallet
-        );
-        // Note: Can't set vaultManager yet, so we deploy without init and initialize later
-
         // Deploy modules (these are logic contracts, not proxies)
         vaultCoreModule = new VaultCore();
         vaultFundingModule = new VaultFunding();
@@ -431,8 +427,8 @@ contract BaseTestModular is Test {
         // Deploy VaultRouter implementation
         vaultRouterImpl = new VaultRouter();
 
-        // Deploy VaultAccessController properly after we have all addresses
-        accessControllerImpl = new VaultAccessController();
+        // Deploy VaultAccessController (without initialize - will initialize after VaultManager)
+        VaultAccessController accessControllerImpl = new VaultAccessController();
         ERC1967Proxy accessControllerProxy = new ERC1967Proxy(
             address(accessControllerImpl),
             "" // Initialize later
@@ -452,10 +448,17 @@ contract BaseTestModular is Test {
             mockTimelockController,
             mockMultisigWallet
         );
-        ERC1967Proxy vaultManagerProxy = new ERC1967Proxy(address(vaultManagerImpl), vaultManagerInitData);
+        ERC1967Proxy vaultManagerProxy =
+            new ERC1967Proxy(address(vaultManagerImpl), vaultManagerInitData);
         vaultManager = ModularVM.VaultManager(payable(address(vaultManagerProxy)));
 
-        // Now initialize VaultAccessController
+        // Deploy VaultManagerHelper
+        vaultManagerHelper = new VaultManagerHelper(address(vaultManager));
+    }
+
+    function _setupModularVaultAddresses() internal {
+        // This is called after PositionManager is deployed
+        // Initialize VaultAccessController with all addresses
         accessController.initialize(
             mockTimelockController, // admin
             address(vaultManager),
@@ -463,8 +466,10 @@ contract BaseTestModular is Test {
             mockMultisigWallet
         );
 
-        // Deploy VaultManagerHelper
-        vaultManagerHelper = new VaultManagerHelper(address(vaultManager));
+        // Grant POSITION_KEEPER_ROLE to admin for testing
+        vm.startPrank(mockTimelockController);
+        accessController.grantRole(accessController.POSITION_KEEPER_ROLE(), admin);
+        vm.stopPrank();
 
         // Set addresses
         vm.startPrank(owner);
@@ -503,8 +508,7 @@ contract BaseTestModular is Test {
             priceFeedManager.CHAINLINK_PROVIDER(), chainlinkProvider
         );
 
-        IPriceFeedManager.OracleProvider memory blocksenseProvider = IPriceFeedManager
-            .OracleProvider({
+        IPriceFeedManager.OracleProvider memory blocksenseProvider = IPriceFeedManager.OracleProvider({
             oracleContract: address(blocksenseOracle),
             oracleType: IBaseOracle.OracleType.PUSH,
             enabled: true
@@ -530,10 +534,7 @@ contract BaseTestModular is Test {
     function _createVault() internal {
         vm.startPrank(owner);
         address vaultAddress = vaultManager.createVault(
-            address(projectToken),
-            DEFAULT_MIN_BET,
-            DEFAULT_MAX_BET,
-            DEFAULT_GRADUATION_THRESHOLD
+            address(projectToken), DEFAULT_MIN_BET, DEFAULT_MAX_BET, DEFAULT_GRADUATION_THRESHOLD
         );
         vault = VaultRouter(payable(vaultAddress));
         vm.stopPrank();

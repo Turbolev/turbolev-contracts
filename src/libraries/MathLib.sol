@@ -132,11 +132,7 @@ library MathLib {
      * @param bps Basis points
      * @return result Rounded to nearest (half up)
      */
-    function mulBpsHighPrecisionRound(uint256 amount, uint256 bps)
-        internal
-        pure
-        returns (uint256)
-    {
+    function mulBpsHighPrecisionRound(uint256 amount, uint256 bps) internal pure returns (uint256) {
         if (amount == 0 || bps == 0) return 0;
 
         if (amount > MAX_SAFE_UINT) {
@@ -370,7 +366,11 @@ library MathLib {
      * @return result (a * b) / denominator without intermediate overflow
      * @dev Uses 512-bit intermediate for large values, falls back to direct calc for small values
      */
-    function mulDiv(uint256 a, uint256 b, uint256 denominator) internal pure returns (uint256 result) {
+    function mulDiv(uint256 a, uint256 b, uint256 denominator)
+        internal
+        pure
+        returns (uint256 result)
+    {
         if (denominator == 0) revert DivisionByZero();
         if (a == 0 || b == 0) return 0;
 
@@ -446,7 +446,11 @@ library MathLib {
      * Example usage in FundingRateLib:
      *   fundingOwed = MathLib.mulDivSigned(rateDiff, int256(positionSize), int256(FUNDING_PRECISION));
      */
-    function mulDivSigned(int256 a, int256 b, int256 denominator) internal pure returns (int256 result) {
+    function mulDivSigned(int256 a, int256 b, int256 denominator)
+        internal
+        pure
+        returns (int256 result)
+    {
         if (denominator == 0) revert DivisionByZero();
         if (a == 0 || b == 0) return 0;
 

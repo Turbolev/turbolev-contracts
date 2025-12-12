@@ -8,7 +8,6 @@ import "./BaseTestModular.sol";
  * @notice Tests for VaultRewards module - daily snapshots and LP rewards
  */
 contract VaultRewardsTest is BaseTestModular {
-
     // ========================================================================
     // SETUP
     // ========================================================================
