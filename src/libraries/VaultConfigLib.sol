@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.22;
 
+import "./MathLib.sol";
+
 /**
  * @title VaultConfigLib
  * @notice Library containing all vault configuration constants and structs
@@ -8,13 +10,13 @@ pragma solidity ^0.8.22;
  *      - Constants: Immutable system limits and defaults
  *      - Structs: Configurable parameters that can be updated by admin
  *      - Default helpers: Functions to get default configurations
+ *      - BASIS_POINTS consolidated to MathLib.BASIS_POINTS (I-V3-06)
  */
 library VaultConfigLib {
     // ========================================================================
     // SYSTEM CONSTANTS
     // ========================================================================
 
-    uint256 constant BASIS_POINTS = 10_000;
     uint256 constant INITIAL_SHARE_MULTIPLIER = 1e18;
 
     // ========================================================================
@@ -77,6 +79,22 @@ library VaultConfigLib {
     // ========================================================================
 
     uint16 constant DEFAULT_MAX_DIRECTIONAL_EXPOSURE_BPS = 5000; // 50%
+
+    // ========================================================================
+    // DEFAULT VALUES - MAX PROFIT CAP CONFIG
+    // ========================================================================
+
+    uint8 constant DEFAULT_MAX_PROFIT_CAP_MULTIPLIER = 3; // 3x collateral
+    uint8 constant MIN_MAX_PROFIT_CAP_MULTIPLIER = 1; // 1x minimum
+    uint8 constant MAX_MAX_PROFIT_CAP_MULTIPLIER = 10; // 10x maximum
+
+    // ========================================================================
+    // RISK CONTROL BOUNDS
+    // ========================================================================
+
+    uint16 constant MAX_LEVERAGE_ALLOWED = 1000; // Safety cap for max leverage
+    uint16 constant MIN_DIRECTIONAL_EXPOSURE_BPS = 1000; // 10% minimum
+    uint16 constant MAX_DIRECTIONAL_EXPOSURE_BPS = 10_000; // 100% maximum
 
     // ========================================================================
     // DEFAULT VALUES - UTILIZATION CONFIG (for leverage adjustment)
@@ -298,7 +316,33 @@ library VaultConfigLib {
         if (config.tier1MaxLeverage == 0) return false;
         if (config.tier2MaxLeverage == 0) return false;
         if (config.tier3MaxLeverage == 0) return false;
+        // Leverage must not exceed safety cap
+        if (config.tier1MaxLeverage > MAX_LEVERAGE_ALLOWED) return false;
+        if (config.tier2MaxLeverage > MAX_LEVERAGE_ALLOWED) return false;
+        if (config.tier3MaxLeverage > MAX_LEVERAGE_ALLOWED) return false;
         return true;
+    }
+
+    /**
+     * @notice Validate max profit cap multiplier
+     * @param multiplier Max profit cap multiplier to validate
+     * @return valid True if multiplier is valid
+     */
+    function validateMaxProfitCapMultiplier(uint8 multiplier) internal pure returns (bool valid) {
+        return
+            multiplier >= MIN_MAX_PROFIT_CAP_MULTIPLIER
+                && multiplier <= MAX_MAX_PROFIT_CAP_MULTIPLIER;
+    }
+
+    /**
+     * @notice Validate directional exposure bps
+     * @param exposureBps Directional exposure in basis points
+     * @return valid True if exposure is valid
+     */
+    function validateDirectionalExposure(uint16 exposureBps) internal pure returns (bool valid) {
+        return
+            exposureBps >= MIN_DIRECTIONAL_EXPOSURE_BPS
+                && exposureBps <= MAX_DIRECTIONAL_EXPOSURE_BPS;
     }
 
     /**

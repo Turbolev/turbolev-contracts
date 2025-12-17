@@ -2,6 +2,7 @@
 pragma solidity ^0.8.22;
 
 import "./VaultConfigLib.sol";
+import "./MathLib.sol";
 
 /**
  * @title VaultRiskLib
@@ -190,7 +191,7 @@ library VaultRiskLib {
 
         // Calculate current utilization
         uint256 totalOI = totalLongExposure + totalShortExposure;
-        uint256 utilizationBps = (totalOI * VaultConfigLib.BASIS_POINTS) / totalLiquidity;
+        uint256 utilizationBps = (totalOI * MathLib.BASIS_POINTS) / totalLiquidity;
 
         // Determine leverage factor based on utilization tier (using config)
         uint256 leverageFactorBps;
@@ -211,7 +212,7 @@ library VaultRiskLib {
 
         // Calculate effective max leverage
         uint256 calculatedLeverage =
-            (uint256(baseMaxLeverage) * leverageFactorBps) / VaultConfigLib.BASIS_POINTS;
+            (uint256(baseMaxLeverage) * leverageFactorBps) / MathLib.BASIS_POINTS;
 
         // Ensure minimum leverage of 1
         if (calculatedLeverage < 1) {
@@ -247,7 +248,7 @@ library VaultRiskLib {
         }
 
         uint256 maxDirectionalExposure =
-            (totalLiquidity * maxDirectionalExposureBps) / VaultConfigLib.BASIS_POINTS;
+            (totalLiquidity * maxDirectionalExposureBps) / MathLib.BASIS_POINTS;
 
         // Calculate new exposures after adding this position
         uint256 newLongExposure = totalLongExposure;
@@ -294,8 +295,7 @@ library VaultRiskLib {
         }
 
         // Calculate maximum allowed total OI
-        uint256 maxTotalOI =
-            (totalLiquidity * totalOIRiskMultiplierBps) / VaultConfigLib.BASIS_POINTS;
+        uint256 maxTotalOI = (totalLiquidity * totalOIRiskMultiplierBps) / MathLib.BASIS_POINTS;
 
         // Calculate current total OI (sum of all open positions)
         uint256 currentTotalOI = totalLongExposure + totalShortExposure;
@@ -368,7 +368,7 @@ library VaultRiskLib {
             return 0;
         }
         uint256 totalOI = totalLongExposure + totalShortExposure;
-        return (totalOI * VaultConfigLib.BASIS_POINTS) / totalLiquidity;
+        return (totalOI * MathLib.BASIS_POINTS) / totalLiquidity;
     }
 
     /**
@@ -427,7 +427,7 @@ library VaultRiskLib {
         }
 
         uint256 totalOI = totalLongExposure + totalShortExposure;
-        utilizationBps = (totalOI * VaultConfigLib.BASIS_POINTS) / totalLiquidity;
+        utilizationBps = (totalOI * MathLib.BASIS_POINTS) / totalLiquidity;
 
         // Determine tier based on config
         if (utilizationBps < config.tier1Bps) {

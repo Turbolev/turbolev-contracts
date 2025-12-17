@@ -55,9 +55,6 @@ library PositionLib {
     // LEVERAGE & LIQUIDATION CONSTANTS
     // ========================================================================
 
-    /// @dev 8.4 FIX: This value MUST match MathLib.BASIS_POINTS (10_000)
-    ///      Kept as local constant for gas efficiency and library isolation
-    uint256 public constant BASIS_POINTS = 10_000;
     uint256 public constant MIN_LEVERAGE = 1;
     uint256 public constant MAX_LEVERAGE = 100;
 
@@ -147,7 +144,7 @@ library PositionLib {
         if (leverage < MIN_LEVERAGE || leverage > MAX_LEVERAGE) {
             revert InvalidLeverage();
         }
-        if (maintenanceMarginRatio >= BASIS_POINTS) {
+        if (maintenanceMarginRatio >= MathLib.BASIS_POINTS) {
             revert InvalidMaintenanceMarginRatio();
         }
         if (direction != BET_DIRECTION_LONG && direction != BET_DIRECTION_SHORT) {
@@ -156,7 +153,7 @@ library PositionLib {
 
         // Calculate liquidation threshold as % of collateral
         // If MMR = 20%, then liquidation at 80% loss
-        uint256 liquidationThreshold = BASIS_POINTS - maintenanceMarginRatio;
+        uint256 liquidationThreshold = MathLib.BASIS_POINTS - maintenanceMarginRatio;
 
         // Calculate price deviation percentage
         // priceDeviationBps = liquidationThreshold / leverage
@@ -166,7 +163,7 @@ library PositionLib {
             // LONG: liquidation when price decreases
 
             // Calculate price decrease with overflow check
-            uint256 priceDecrease = (openPrice * priceDeviationBps) / BASIS_POINTS;
+            uint256 priceDecrease = (openPrice * priceDeviationBps) / MathLib.BASIS_POINTS;
 
             if (priceDecrease >= openPrice) {
                 revert LiquidationPriceUnderflow();
@@ -184,7 +181,7 @@ library PositionLib {
             // SHORT: liquidation when price rises
 
             // Calculate price increase with overflow check
-            uint256 priceIncrease = (openPrice * priceDeviationBps) / BASIS_POINTS;
+            uint256 priceIncrease = (openPrice * priceDeviationBps) / MathLib.BASIS_POINTS;
 
             if (priceIncrease > type(uint256).max - openPrice) {
                 revert LiquidationPriceOverflow();
@@ -292,7 +289,7 @@ library PositionLib {
         }
 
         // H-02 FIX: Calculate absolute P&L using high precision
-        // This divides by both BASIS_POINTS and PRECISION to get the actual value
+        // This divides by both MathLib.BASIS_POINTS and PRECISION to get the actual value
         pnl = MathLib.calculatePnLFromHighPrecision(position.amount, leveragedPnLHighPrecision);
 
         // Convert back to standard BPS for return value compatibility
@@ -325,16 +322,16 @@ library PositionLib {
 
         if (currentPrice > position.openPrice) {
             uint256 priceIncrease = currentPrice - position.openPrice;
-            if (priceIncrease > type(uint256).max / BASIS_POINTS) {
+            if (priceIncrease > type(uint256).max / MathLib.BASIS_POINTS) {
                 revert PriceChangeTooLarge();
             }
-            priceChangeBps = int256((priceIncrease * BASIS_POINTS) / position.openPrice);
+            priceChangeBps = int256((priceIncrease * MathLib.BASIS_POINTS) / position.openPrice);
         } else if (currentPrice < position.openPrice) {
             uint256 priceDecrease = position.openPrice - currentPrice;
-            if (priceDecrease > type(uint256).max / BASIS_POINTS) {
+            if (priceDecrease > type(uint256).max / MathLib.BASIS_POINTS) {
                 revert PriceChangeTooLarge();
             }
-            priceChangeBps = -int256((priceDecrease * BASIS_POINTS) / position.openPrice);
+            priceChangeBps = -int256((priceDecrease * MathLib.BASIS_POINTS) / position.openPrice);
         } else {
             return (0, 0);
         }
@@ -370,7 +367,7 @@ library PositionLib {
             }
         }
 
-        int256 absolutePnL = (amountInt * leveragedPnLPercentage) / int256(BASIS_POINTS);
+        int256 absolutePnL = (amountInt * leveragedPnLPercentage) / int256(MathLib.BASIS_POINTS);
 
         return (absolutePnL, leveragedPnLPercentage);
     }

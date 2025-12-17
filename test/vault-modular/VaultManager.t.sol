@@ -280,16 +280,28 @@ contract VaultManagerModularTest is BaseTestModular {
     }
 
     function test_SetModules() public {
-        address newCore = makeAddr("newCore");
-        address newFunding = makeAddr("newFunding");
-        address newRewards = makeAddr("newRewards");
+        // Deploy new module contracts (L-V3-05 requires actual contracts)
+        VaultCore newCore = new VaultCore();
+        VaultFunding newFunding = new VaultFunding();
+        VaultRewards newRewards = new VaultRewards();
 
         vm.prank(owner);
-        vaultManager.setModules(newCore, newFunding, newRewards);
+        vaultManager.setModules(address(newCore), address(newFunding), address(newRewards));
 
-        assertEq(vaultManager.coreModule(), newCore);
-        assertEq(vaultManager.fundingModule(), newFunding);
-        assertEq(vaultManager.rewardsModule(), newRewards);
+        assertEq(vaultManager.coreModule(), address(newCore));
+        assertEq(vaultManager.fundingModule(), address(newFunding));
+        assertEq(vaultManager.rewardsModule(), address(newRewards));
+    }
+
+    function test_SetModules_RevertOnEOA() public {
+        // L-V3-05: Should revert when trying to set EOA addresses as modules
+        address eoaAddress = makeAddr("notAContract");
+
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSignature("NotAContract(address)", eoaAddress));
+        vaultManager.setModules(
+            eoaAddress, address(vaultFundingModule), address(vaultRewardsModule)
+        );
     }
 
     function test_Pause_VaultManager() public {
@@ -318,5 +330,83 @@ contract VaultManagerModularTest is BaseTestModular {
         );
 
         assertTrue(newVault != address(0));
+    }
+
+    // ========================================================================
+    // UPGRADE AUTHORIZATION TESTS
+    // ========================================================================
+
+    function test_Upgrade_ViaUpgraderRole() public {
+        // Deploy new implementation
+        ModularVM.VaultManager newImpl = new ModularVM.VaultManager();
+
+        // mockTimelockController already has UPGRADER_ROLE from setup
+        // (initialized as admin in VaultAccessController.initialize())
+
+        // Upgrade via UPGRADER_ROLE (Timelock) - should succeed
+        vm.prank(mockTimelockController);
+        vaultManager.upgradeToAndCall(address(newImpl), "");
+
+        // Verify version still works (upgrade succeeded)
+        assertEq(vaultManager.version(), "3.0.0-modular");
+    }
+
+    function test_Upgrade_ViaEmergencyRole_WhenPaused() public {
+        // Deploy new implementation
+        ModularVM.VaultManager newImpl = new ModularVM.VaultManager();
+
+        // First pause the contract (via owner)
+        vm.prank(owner);
+        vaultManager.pause();
+        assertTrue(vaultManager.paused());
+
+        // Now upgrade via EMERGENCY_ROLE (Multisig) - should succeed because paused
+        vm.prank(mockMultisigWallet);
+        vaultManager.upgradeToAndCall(address(newImpl), "");
+
+        // Verify version still works (upgrade succeeded)
+        assertEq(vaultManager.version(), "3.0.0-modular");
+    }
+
+    function test_Upgrade_RevertViaEmergencyRole_WhenNotPaused() public {
+        // Deploy new implementation
+        ModularVM.VaultManager newImpl = new ModularVM.VaultManager();
+
+        // Ensure not paused
+        assertFalse(vaultManager.paused());
+
+        // Try to upgrade via EMERGENCY_ROLE (Multisig) - should fail because not paused
+        vm.prank(mockMultisigWallet);
+        vm.expectRevert(ModularVM.VaultManager.MustPauseBeforeEmergencyUpgrade.selector);
+        vaultManager.upgradeToAndCall(address(newImpl), "");
+    }
+
+    function test_Upgrade_RevertIfNoRole() public {
+        // Deploy new implementation
+        ModularVM.VaultManager newImpl = new ModularVM.VaultManager();
+
+        // Try to upgrade from random user - should fail
+        vm.prank(user1);
+        vm.expectRevert(ModularVM.VaultManager.NotAuthorized.selector);
+        vaultManager.upgradeToAndCall(address(newImpl), "");
+    }
+
+    function test_Upgrade_EmitsEmergencyUpgradeEvent() public {
+        // Deploy new implementation
+        ModularVM.VaultManager newImpl = new ModularVM.VaultManager();
+
+        // Pause first
+        vm.prank(owner);
+        vaultManager.pause();
+
+        // Expect EmergencyUpgrade event
+        vm.expectEmit(true, true, false, true);
+        emit ModularVM.VaultManager.EmergencyUpgrade(
+            address(newImpl), mockMultisigWallet, block.timestamp
+        );
+
+        // Upgrade via EMERGENCY_ROLE
+        vm.prank(mockMultisigWallet);
+        vaultManager.upgradeToAndCall(address(newImpl), "");
     }
 }

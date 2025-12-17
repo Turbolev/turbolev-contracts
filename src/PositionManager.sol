@@ -10,6 +10,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./libraries/PositionLib.sol";
+import "./libraries/MathLib.sol";
 import "./interfaces/IVaultManager.sol";
 import "./interfaces/IVaultAccessController.sol";
 import "./interfaces/IAssetVault.sol";
@@ -218,6 +219,10 @@ contract PositionManager is
         uint256 timestamp
     );
 
+    event EmergencyUpgrade(
+        address indexed newImplementation, address indexed caller, uint256 timestamp
+    );
+
     // ========================================================================
     // ERRORS
     // ========================================================================
@@ -250,6 +255,8 @@ contract PositionManager is
     error TokenDecimalsNotSupported(uint8 decimals);
     error NotPositionKeeper();
     error AccessControllerNotSet();
+    error MustPauseBeforeEmergencyUpgrade();
+    error NotAuthorized();
 
     // ========================================================================
     // MODIFIERS
@@ -451,7 +458,12 @@ contract PositionManager is
             openPrice, direction, leverage, maintenanceMarginRatio
         );
 
-        pos.maxProfitCap = amount * PositionLib.MAX_PROFIT_CAP_MULTIPLIER;
+        // Get per-vault maxProfitCapMultiplier (falls back to default if not set)
+        uint8 vaultMultiplier = IAssetVault(vaultAddress).getMaxProfitCapMultiplier();
+        if (vaultMultiplier == 0) {
+            vaultMultiplier = uint8(PositionLib.MAX_PROFIT_CAP_MULTIPLIER);
+        }
+        pos.maxProfitCap = amount * vaultMultiplier;
         pos.minCloseTime = block.timestamp + minPositionHoldTime;
         pos.initialMargin = amount;
         pos.addedMargin = 0;
@@ -738,8 +750,14 @@ contract PositionManager is
         if (closePrice == 0) revert InvalidPrice();
 
         if (isLiquidation) {
-            uint256 liquidationFeeBps = PositionLib.calculateLiquidationFee();
-            uint256 liquidationFee = (pos.amount * liquidationFeeBps) / PositionLib.BASIS_POINTS;
+            // Use configurable liquidationFeeBps from SettlementEngine
+            uint256 effectiveLiquidationFeeBps =
+                ISettlementEngine(settlementEngine).liquidationFeeBps();
+            if (effectiveLiquidationFeeBps == 0) {
+                effectiveLiquidationFeeBps = PositionLib.LIQUIDATION_FEE_BPS;
+            }
+            uint256 liquidationFee =
+                (pos.amount * effectiveLiquidationFeeBps) / MathLib.BASIS_POINTS;
 
             emit BetLiquidated(positionId, pos.user, closePrice, liquidationFee, block.timestamp);
         }
@@ -1167,16 +1185,35 @@ contract PositionManager is
     }
 
     /**
-     * @notice Pause contract
+     * @notice Pause contract - owner only for normal operations
      */
     function pause() external onlyOwner {
         _pause();
     }
 
     /**
-     * @notice Unpause contract
+     * @notice Emergency pause - can be called by guardian or emergency role
+     * @dev Allows guardians to pause without waiting for timelock
      */
-    function unpause() external onlyOwner {
+    function pauseEmergency() external {
+        if (address(accessController) == address(0)) revert AccessControllerNotSet();
+        if (
+            !accessController.hasRole(accessController.EMERGENCY_ROLE(), msg.sender)
+                && !accessController.hasRole(accessController.GUARDIAN_ROLE(), msg.sender)
+        ) {
+            revert NotAuthorized();
+        }
+        _pause();
+    }
+
+    /**
+     * @notice Unpause contract - requires UPGRADER_ROLE (Timelock) to prevent abuse
+     */
+    function unpause() external {
+        if (address(accessController) == address(0)) revert AccessControllerNotSet();
+        if (!accessController.hasRole(accessController.UPGRADER_ROLE(), msg.sender)) {
+            revert NotAuthorized();
+        }
         _unpause();
     }
 
@@ -1224,9 +1261,35 @@ contract PositionManager is
     }
 
     /**
-     * @notice Authorize upgrade (UUPS pattern)
+     * @notice Authorize upgrade with Timelock + Emergency Guardian pattern
+     * @dev Two paths for upgrade:
+     *      1. Normal path: UPGRADER_ROLE (Timelock) - no restrictions
+     *      2. Emergency path: EMERGENCY_ROLE/GUARDIAN_ROLE - requires contract to be paused first
+     *      This ensures users have opportunity to close positions before emergency upgrades
      */
-    function _authorizeUpgrade(address newImplementation) internal override onlyOwner { }
+    function _authorizeUpgrade(address newImplementation) internal override {
+        if (address(accessController) == address(0)) revert AccessControllerNotSet();
+
+        // Path 1: Normal upgrade via Timelock (UPGRADER_ROLE)
+        if (accessController.hasRole(accessController.UPGRADER_ROLE(), msg.sender)) {
+            return; // Authorized
+        }
+
+        // Path 2: Emergency upgrade via Guardian/Multisig - only if paused
+        if (
+            accessController.hasRole(accessController.EMERGENCY_ROLE(), msg.sender)
+                || accessController.hasRole(accessController.GUARDIAN_ROLE(), msg.sender)
+        ) {
+            if (!paused()) {
+                revert MustPauseBeforeEmergencyUpgrade();
+            }
+            emit EmergencyUpgrade(newImplementation, msg.sender, block.timestamp);
+            return; // Authorized
+        }
+
+        // No valid role - revert
+        revert NotAuthorized();
+    }
 
     // ========================================================================
     // VIEW FUNCTIONS

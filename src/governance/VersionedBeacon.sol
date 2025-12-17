@@ -53,6 +53,10 @@ contract VersionedBeacon is UpgradeableBeacon {
     /// @notice Guardian addresses that can perform emergency upgrades
     mapping(address => bool) public guardians;
 
+    /// @notice Flag to track if currently in emergency upgrade context
+    /// @dev Used to allow admin/guardian to bypass onlyOwner check during emergency upgrade
+    bool private _inEmergencyUpgrade;
+
     // ========================================================================
     // EVENTS
     // ========================================================================
@@ -106,6 +110,29 @@ contract VersionedBeacon is UpgradeableBeacon {
             revert NotAdmin();
         }
         _;
+    }
+
+    // ========================================================================
+    // OWNABLE OVERRIDE
+    // ========================================================================
+
+    /**
+     * @notice Override Ownable._checkOwner to allow admin/guardian during emergency upgrade
+     * @dev This allows emergencyUpgrade to call super.upgradeTo() which has onlyOwner modifier
+     *      The _inEmergencyUpgrade flag ensures this bypass only works within emergencyUpgrade()
+     */
+    function _checkOwner() internal view override {
+        // Owner always allowed
+        if (owner() == _msgSender()) {
+            return;
+        }
+
+        // Allow admin/guardian ONLY when in emergency upgrade context
+        if (_inEmergencyUpgrade && (admins[_msgSender()] || guardians[_msgSender()])) {
+            return;
+        }
+
+        revert OwnableUnauthorizedAccount(_msgSender());
     }
 
     // ========================================================================
@@ -245,6 +272,9 @@ contract VersionedBeacon is UpgradeableBeacon {
      * NEW-H-02 FIX: This replaces rollbackTo()
      * Instead of rolling back to an old version (which can break positions),
      * we upgrade to a new hotfix version that is forward-compatible.
+     *
+     * SECURITY: Uses _inEmergencyUpgrade flag to temporarily allow admin/guardian
+     * to bypass onlyOwner check in super.upgradeTo(). Flag is reset after upgrade.
      */
     function emergencyUpgrade(address newImplementation, bytes32 infoHash)
         external
@@ -252,7 +282,13 @@ contract VersionedBeacon is UpgradeableBeacon {
     {
         if (!emergencyMode) revert NotInEmergencyMode();
 
+        // Set flag to allow admin/guardian to call super.upgradeTo()
+        _inEmergencyUpgrade = true;
+
         _registerAndUpgrade(newImplementation, infoHash, true);
+
+        // Reset flag immediately after upgrade
+        _inEmergencyUpgrade = false;
     }
 
     // ========================================================================

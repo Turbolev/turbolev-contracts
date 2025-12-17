@@ -448,4 +448,190 @@ contract VaultAdminProxyTest is BaseTestModular {
             "Keeper should have VAULT_KEEPER_ROLE"
         );
     }
+
+    // ========================================================================
+    // RISK CONFIG SETTERS TESTS
+    // ========================================================================
+
+    function test_SetVaultLeverageTierConfig() public {
+        vm.startPrank(mockTimelockController);
+        vaultAccessController.grantRole(VAULT_ADMIN_ROLE, admin);
+        vm.stopPrank();
+
+        vm.prank(admin);
+        vaultAdminProxy.setVaultLeverageTierConfig(
+            address(projectToken),
+            50_000 * 1e18, // tier1Threshold
+            200_000 * 1e18, // tier2Threshold
+            50, // tier1MaxLeverage
+            150, // tier2MaxLeverage
+            400 // tier3MaxLeverage
+        );
+
+        // Verify new values
+        (
+            uint256 tier1Threshold,
+            uint256 tier2Threshold,
+            uint16 tier1MaxLeverage,
+            uint16 tier2MaxLeverage,
+            uint16 tier3MaxLeverage
+        ) = IVaultRouter(testVault).getLeverageTierConfig();
+
+        assertEq(tier1Threshold, 50_000 * 1e18);
+        assertEq(tier2Threshold, 200_000 * 1e18);
+        assertEq(tier1MaxLeverage, 50);
+        assertEq(tier2MaxLeverage, 150);
+        assertEq(tier3MaxLeverage, 400);
+    }
+
+    function test_SetVaultLeverageTierConfig_RevertNotAuthorized() public {
+        vm.prank(user1);
+        vm.expectRevert(IVaultAdminProxy.NotAuthorized.selector);
+        vaultAdminProxy.setVaultLeverageTierConfig(
+            address(projectToken), 50_000 * 1e18, 200_000 * 1e18, 50, 150, 400
+        );
+    }
+
+    function test_SetVaultTotalOITierConfig() public {
+        vm.startPrank(mockTimelockController);
+        vaultAccessController.grantRole(VAULT_ADMIN_ROLE, admin);
+        vm.stopPrank();
+
+        vm.prank(admin);
+        vaultAdminProxy.setVaultTotalOITierConfig(
+            address(projectToken),
+            25_000, // totalOIRiskMultiplierBps (2.5x)
+            100_000 * 1e18, // tier1Threshold
+            500_000 * 1e18, // tier2Threshold
+            1_000_000 * 1e18, // tier3Threshold
+            12_000, // tier1MultiplierBps
+            18_000, // tier2MultiplierBps
+            24_000, // tier3MultiplierBps
+            35_000 // tier4MultiplierBps
+        );
+
+        // Verify new values
+        (
+            uint16 fixedMultiplier,
+            uint256 tier1Threshold,
+            uint256 tier2Threshold,
+            uint256 tier3Threshold,
+            uint16 tier1Multiplier,
+            uint16 tier2Multiplier,
+            uint16 tier3Multiplier,
+            uint16 tier4Multiplier
+        ) = IVaultRouter(testVault).getTotalOITierConfig();
+
+        assertEq(fixedMultiplier, 25_000);
+        assertEq(tier1Threshold, 100_000 * 1e18);
+        assertEq(tier2Threshold, 500_000 * 1e18);
+        assertEq(tier3Threshold, 1_000_000 * 1e18);
+        assertEq(tier1Multiplier, 12_000);
+        assertEq(tier2Multiplier, 18_000);
+        assertEq(tier3Multiplier, 24_000);
+        assertEq(tier4Multiplier, 35_000);
+    }
+
+    function test_SetVaultTotalOITierConfig_RevertNotAuthorized() public {
+        vm.prank(user1);
+        vm.expectRevert(IVaultAdminProxy.NotAuthorized.selector);
+        vaultAdminProxy.setVaultTotalOITierConfig(
+            address(projectToken),
+            25_000,
+            100_000 * 1e18,
+            500_000 * 1e18,
+            1_000_000 * 1e18,
+            12_000,
+            18_000,
+            24_000,
+            35_000
+        );
+    }
+
+    function test_SetVaultMaxDirectionalExposure() public {
+        vm.startPrank(mockTimelockController);
+        vaultAccessController.grantRole(VAULT_ADMIN_ROLE, admin);
+        vm.stopPrank();
+
+        vm.prank(admin);
+        vaultAdminProxy.setVaultMaxDirectionalExposure(
+            address(projectToken),
+            7500 // 75%
+        );
+
+        // Verify new value
+        assertEq(IVaultRouter(testVault).maxDirectionalExposureBps(), 7500);
+    }
+
+    function test_SetVaultMaxDirectionalExposure_RevertNotAuthorized() public {
+        vm.prank(user1);
+        vm.expectRevert(IVaultAdminProxy.NotAuthorized.selector);
+        vaultAdminProxy.setVaultMaxDirectionalExposure(address(projectToken), 7500);
+    }
+
+    function test_SetVaultUtilizationConfig() public {
+        vm.startPrank(mockTimelockController);
+        vaultAccessController.grantRole(VAULT_ADMIN_ROLE, admin);
+        vm.stopPrank();
+
+        vm.prank(admin);
+        vaultAdminProxy.setVaultUtilizationConfig(
+            address(projectToken),
+            2500, // tier1Bps (25%)
+            5000, // tier2Bps (50%)
+            7500, // tier3Bps (75%)
+            10_000, // factorTier1Bps (100%)
+            6000, // factorTier2Bps (60%)
+            3000, // factorTier3Bps (30%)
+            500 // factorEmergencyBps (5%)
+        );
+
+        // Verify new values
+        (
+            uint16 tier1Bps,
+            uint16 tier2Bps,
+            uint16 tier3Bps,
+            uint16 factorTier1Bps,
+            uint16 factorTier2Bps,
+            uint16 factorTier3Bps,
+            uint16 factorEmergencyBps
+        ) = IVaultRouter(testVault).getUtilizationConfig();
+
+        assertEq(tier1Bps, 2500);
+        assertEq(tier2Bps, 5000);
+        assertEq(tier3Bps, 7500);
+        assertEq(factorTier1Bps, 10_000);
+        assertEq(factorTier2Bps, 6000);
+        assertEq(factorTier3Bps, 3000);
+        assertEq(factorEmergencyBps, 500);
+    }
+
+    function test_SetVaultUtilizationConfig_RevertNotAuthorized() public {
+        vm.prank(user1);
+        vm.expectRevert(IVaultAdminProxy.NotAuthorized.selector);
+        vaultAdminProxy.setVaultUtilizationConfig(
+            address(projectToken), 2500, 5000, 7500, 10_000, 6000, 3000, 500
+        );
+    }
+
+    function test_SetVaultMaxProfitCapMultiplier() public {
+        vm.startPrank(mockTimelockController);
+        vaultAccessController.grantRole(VAULT_ADMIN_ROLE, admin);
+        vm.stopPrank();
+
+        vm.prank(admin);
+        vaultAdminProxy.setVaultMaxProfitCapMultiplier(
+            address(projectToken),
+            5 // 5x collateral
+        );
+
+        // Verify new value
+        assertEq(IVaultRouter(testVault).getMaxProfitCapMultiplier(), 5);
+    }
+
+    function test_SetVaultMaxProfitCapMultiplier_RevertNotAuthorized() public {
+        vm.prank(user1);
+        vm.expectRevert(IVaultAdminProxy.NotAuthorized.selector);
+        vaultAdminProxy.setVaultMaxProfitCapMultiplier(address(projectToken), 5);
+    }
 }

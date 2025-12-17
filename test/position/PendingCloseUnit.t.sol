@@ -19,6 +19,7 @@ contract MockVaultAccessController is IVaultAccessController {
     bytes32 public constant POSITION_KEEPER_ROLE = keccak256("POSITION_KEEPER_ROLE");
     bytes32 public constant EMERGENCY_ROLE = keccak256("EMERGENCY_ROLE");
     bytes32 public constant UPGRADER_ROLE = keccak256("UPGRADER_ROLE");
+    bytes32 public constant GUARDIAN_ROLE = keccak256("GUARDIAN_ROLE");
 
     function setPositionKeeper(address keeper, bool status) external {
         positionKeepers[keeper] = status;
@@ -54,6 +55,24 @@ contract MockVaultAccessController is IVaultAccessController {
 
     function hasRole(bytes32, address) external pure returns (bool) {
         return false;
+    }
+
+    // L-V4-02 FIX: Guardian functions
+    function isGuardian(address) external pure returns (bool) {
+        return false;
+    }
+
+    function getGuardianCount() external pure returns (uint256) {
+        return 0;
+    }
+
+    function getGuardianConfig() external pure returns (uint256, uint256, uint256) {
+        return (2, 10, 0); // min, max, current
+    }
+
+    // L-V4-01 FIX: Confirmation window functions
+    function getConfirmationWindowConfig() external pure returns (uint256, uint256, uint256) {
+        return (30 minutes, 24 hours, 1 hours); // min, max, current
     }
 }
 

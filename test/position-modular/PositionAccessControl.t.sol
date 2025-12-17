@@ -80,12 +80,37 @@ contract PositionAccessControlTest is BaseTestModular {
     }
 
     function test_Unpause() public {
-        vm.startPrank(owner);
+        // Pause with owner
+        vm.prank(owner);
         positionManager.pause();
+
+        // Unpause requires UPGRADER_ROLE (mockTimelockController)
+        vm.prank(mockTimelockController);
         positionManager.unpause();
-        vm.stopPrank();
 
         assertFalse(positionManager.paused(), "Contract should be unpaused");
+    }
+
+    function test_Unpause_RevertOnNonUpgrader() public {
+        vm.prank(owner);
+        positionManager.pause();
+
+        // Try unpause with non-upgrader should revert
+        vm.prank(user1);
+        vm.expectRevert(PositionManager.NotAuthorized.selector);
+        positionManager.unpause();
+    }
+
+    function test_PauseEmergency_ByGuardian() public {
+        // Add guardian
+        vm.prank(mockTimelockController);
+        vaultAccessController.addGuardian(admin);
+
+        // Guardian can emergency pause
+        vm.prank(admin);
+        positionManager.pauseEmergency();
+
+        assertTrue(positionManager.paused(), "Contract should be paused by guardian");
     }
 
     function test_Pause_RevertOnNonOwner() public {

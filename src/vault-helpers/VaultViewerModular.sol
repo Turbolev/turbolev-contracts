@@ -6,6 +6,7 @@ import "../interfaces/IVaultManager.sol";
 import "../interfaces/IPriceFeedManager.sol";
 import "../libraries/VaultRiskLib.sol";
 import "../libraries/FundingRateLib.sol";
+import "../libraries/MathLib.sol";
 
 /**
  * @title VaultViewerModular
@@ -19,7 +20,6 @@ contract VaultViewerModular {
     // CONSTANTS
     // ========================================================================
 
-    uint256 constant BASIS_POINTS = 10_000;
     uint256 public constant MAX_PRICE_AGE = 3600; // 1 hour
 
     // ========================================================================
@@ -115,10 +115,10 @@ contract VaultViewerModular {
         }
 
         if (tvl > 0) {
-            maxOI = (tvl * currentMultiplierBps) / BASIS_POINTS;
+            maxOI = (tvl * currentMultiplierBps) / MathLib.BASIS_POINTS;
 
             if (maxOI > 0) {
-                utilizationBps = (totalOI * BASIS_POINTS) / maxOI;
+                utilizationBps = (totalOI * MathLib.BASIS_POINTS) / maxOI;
             }
 
             if (totalOI < maxOI) {
@@ -161,11 +161,11 @@ contract VaultViewerModular {
             _calculateRiskMultiplier(tvl, fixedMultiplier, t1, t2, t3, m1, m2, m3, m4);
 
         if (tvl > 0) {
-            maxTotalOI = (tvl * currentMultiplierBps) / BASIS_POINTS;
+            maxTotalOI = (tvl * currentMultiplierBps) / MathLib.BASIS_POINTS;
             currentTotalOI = v.totalLongExposure() + v.totalShortExposure();
 
             if (maxTotalOI > 0) {
-                utilizationBps = (currentTotalOI * BASIS_POINTS) / maxTotalOI;
+                utilizationBps = (currentTotalOI * MathLib.BASIS_POINTS) / maxTotalOI;
             }
 
             canOpenMore = currentTotalOI < maxTotalOI;
@@ -349,9 +349,9 @@ contract VaultViewerModular {
 
         uint16 maxDirectionalBps = v.maxDirectionalExposureBps();
         if (info.totalLiquidity > 0 && maxDirectionalBps > 0) {
-            maxExposure = (info.totalLiquidity * maxDirectionalBps) / BASIS_POINTS;
+            maxExposure = (info.totalLiquidity * maxDirectionalBps) / MathLib.BASIS_POINTS;
             if (maxExposure > 0) {
-                netUtilization = (netExposure * BASIS_POINTS) / maxExposure;
+                netUtilization = (netExposure * MathLib.BASIS_POINTS) / maxExposure;
             }
         }
     }
@@ -552,7 +552,7 @@ contract VaultViewerModular {
 
         uint16 currentMultiplier =
             _calculateRiskMultiplier(tvl, fixedMultiplier, t1, t2, t3, m1, m2, m3, m4);
-        maxTotalOI = (tvl * currentMultiplier) / BASIS_POINTS;
+        maxTotalOI = (tvl * currentMultiplier) / MathLib.BASIS_POINTS;
         currentTotalOI = v.totalLongExposure() + v.totalShortExposure();
 
         uint256 newTotalOI = currentTotalOI + positionSize;
@@ -595,7 +595,7 @@ contract VaultViewerModular {
             _calculateRiskMultiplier(newTVL, fixedMultiplier, t1, t2, t3, m1, m2, m3, m4);
 
         if (newTVL > 0) {
-            newMaxTotalOI = (newTVL * newMultiplierBps) / BASIS_POINTS;
+            newMaxTotalOI = (newTVL * newMultiplierBps) / MathLib.BASIS_POINTS;
         }
 
         currentTotalOI = v.totalLongExposure() + v.totalShortExposure();
@@ -617,7 +617,7 @@ contract VaultViewerModular {
         totalOI = v.totalLongExposure() + v.totalShortExposure();
 
         if (tvl > 0) {
-            utilizationBps = (totalOI * BASIS_POINTS) / tvl;
+            utilizationBps = (totalOI * MathLib.BASIS_POINTS) / tvl;
             remainingCapacity = totalOI < tvl ? tvl - totalOI : 0;
         }
     }
@@ -654,7 +654,7 @@ contract VaultViewerModular {
         isEarlyWithdrawal = block.timestamp < lockEndTime;
 
         if (isEarlyWithdrawal && info.isGraduated) {
-            fee = (grossAmount * earlyWithdrawalFee) / BASIS_POINTS;
+            fee = (grossAmount * earlyWithdrawalFee) / MathLib.BASIS_POINTS;
             netAmount = grossAmount - fee;
         } else {
             fee = 0;
@@ -1129,7 +1129,8 @@ contract VaultViewerModular {
 
         // Calculate utilization
         if (metrics.totalLiquidity > 0) {
-            metrics.utilizationBps = (metrics.netExposure * BASIS_POINTS) / metrics.totalLiquidity;
+            metrics.utilizationBps =
+                (metrics.netExposure * MathLib.BASIS_POINTS) / metrics.totalLiquidity;
         }
 
         // Check if paused
@@ -1169,8 +1170,8 @@ contract VaultViewerModular {
 
         // 1. Utilization score (40% weight) - lower utilization = higher score
         // 0% utilization = 4000 points, 100% utilization = 0 points
-        if (metrics.utilizationBps <= BASIS_POINTS) {
-            utilizationScore = 4000 - ((metrics.utilizationBps * 4000) / BASIS_POINTS);
+        if (metrics.utilizationBps <= MathLib.BASIS_POINTS) {
+            utilizationScore = 4000 - ((metrics.utilizationBps * 4000) / MathLib.BASIS_POINTS);
         }
 
         // 2. Liquidity vs Pending Payouts score (30% weight)
@@ -1179,13 +1180,13 @@ contract VaultViewerModular {
                 liquidityScore = 3000;
             } else {
                 uint256 ratio =
-                    (metrics.totalLiquidity * BASIS_POINTS) / metrics.pendingPayoutsValue;
+                    (metrics.totalLiquidity * MathLib.BASIS_POINTS) / metrics.pendingPayoutsValue;
                 if (ratio >= 20_000) {
                     liquidityScore = 3000; // 2x or more = full score
-                } else if (ratio >= BASIS_POINTS) {
+                } else if (ratio >= MathLib.BASIS_POINTS) {
                     liquidityScore = 2000; // 1x-2x = partial score
                 } else {
-                    liquidityScore = (ratio * 2000) / BASIS_POINTS; // < 1x = proportional
+                    liquidityScore = (ratio * 2000) / MathLib.BASIS_POINTS; // < 1x = proportional
                 }
             }
         }
@@ -1193,8 +1194,8 @@ contract VaultViewerModular {
         // 3. Exposure balance score (20% weight)
         uint256 totalExposure = metrics.totalLongExposure + metrics.totalShortExposure;
         if (totalExposure > 0) {
-            uint256 imbalanceBps = (metrics.netExposure * BASIS_POINTS) / totalExposure;
-            balanceScore = 2000 - ((imbalanceBps * 2000) / BASIS_POINTS);
+            uint256 imbalanceBps = (metrics.netExposure * MathLib.BASIS_POINTS) / totalExposure;
+            balanceScore = 2000 - ((imbalanceBps * 2000) / MathLib.BASIS_POINTS);
         } else {
             balanceScore = 2000; // No exposure = balanced
         }
@@ -1209,8 +1210,8 @@ contract VaultViewerModular {
         score = utilizationScore + liquidityScore + balanceScore + statusScore;
 
         // Cap at 10000
-        if (score > BASIS_POINTS) {
-            score = BASIS_POINTS;
+        if (score > MathLib.BASIS_POINTS) {
+            score = MathLib.BASIS_POINTS;
         }
 
         return score;

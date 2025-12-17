@@ -21,28 +21,40 @@ import "../../libraries/VaultConfigLib.sol";
  */
 library VaultStorageLib {
     // ========================================================================
-    // STORAGE SLOT CONSTANTS (EIP-7201)
+    // EIP-7201 NAMESPACE CONSTANTS
     // ========================================================================
 
-    /// @dev keccak256(abi.encode(uint256(keccak256("boolean.vault.core")) - 1)) & ~bytes32(uint256(0xff))
-    bytes32 private constant CORE_STORAGE_SLOT =
-        0x6f6e2d636f726500000000000000000000000000000000000000000000000000;
+    /// @dev Namespace for core vault storage (liquidity, LP positions, payouts, fees)
+    string internal constant NAMESPACE_CORE = "boolean.vault.core";
 
-    /// @dev keccak256(abi.encode(uint256(keccak256("boolean.vault.funding")) - 1)) & ~bytes32(uint256(0xff))
-    bytes32 private constant FUNDING_STORAGE_SLOT =
-        0x6f6e2d66756e64696e6700000000000000000000000000000000000000000000;
+    /// @dev Namespace for funding rate storage (cumulative rates, exposure tracking)
+    string internal constant NAMESPACE_FUNDING = "boolean.vault.funding";
 
-    /// @dev keccak256(abi.encode(uint256(keccak256("boolean.vault.rewards")) - 1)) & ~bytes32(uint256(0xff))
-    bytes32 private constant REWARDS_STORAGE_SLOT =
-        0x6f6e2d7265776172647300000000000000000000000000000000000000000000;
+    /// @dev Namespace for rewards storage (daily snapshots, LP rewards)
+    string internal constant NAMESPACE_REWARDS = "boolean.vault.rewards";
 
-    /// @dev keccak256(abi.encode(uint256(keccak256("boolean.vault.risk")) - 1)) & ~bytes32(uint256(0xff))
-    bytes32 private constant RISK_STORAGE_SLOT =
-        0x6f6e2d7269736b00000000000000000000000000000000000000000000000000;
+    /// @dev Namespace for risk storage (exposure caps, OI limits, leverage tiers)
+    string internal constant NAMESPACE_RISK = "boolean.vault.risk";
 
-    /// @dev keccak256(abi.encode(uint256(keccak256("boolean.vault.router")) - 1)) & ~bytes32(uint256(0xff))
-    bytes32 private constant ROUTER_STORAGE_SLOT =
-        0x6f6e2d726f757465720000000000000000000000000000000000000000000000;
+    /// @dev Namespace for router storage (module addresses, initialization)
+    string internal constant NAMESPACE_ROUTER = "boolean.vault.router";
+
+    // ========================================================================
+    // EIP-7201 SLOT CALCULATION
+    // ========================================================================
+
+    /**
+     * @notice Calculate EIP-7201 storage slot from namespace string
+     * @param namespace The namespace identifier (e.g., "boolean.vault.core")
+     * @return slot The calculated storage slot
+     * @dev Formula: keccak256(abi.encode(uint256(keccak256(namespace)) - 1)) & ~bytes32(uint256(0xff))
+     *      The final AND with ~bytes32(uint256(0xff)) ensures the last byte is 0x00,
+     *      reserving 256 slots for struct members starting from that base slot.
+     */
+    function calculateEIP7201Slot(string memory namespace) internal pure returns (bytes32 slot) {
+        bytes32 namespaceHash = keccak256(bytes(namespace));
+        slot = keccak256(abi.encode(uint256(namespaceHash) - 1)) & ~bytes32(uint256(0xff));
+    }
 
     // ========================================================================
     // CORE STORAGE STRUCTS
@@ -195,6 +207,8 @@ library VaultStorageLib {
         uint16 tier3MaxLeverage;
         // Utilization config
         VaultConfigLib.UtilizationConfig utilizationConfig;
+        // Max profit cap multiplier (per-vault, default 3x)
+        uint8 maxProfitCapMultiplier;
     }
 
     /// @custom:storage-location erc7201:boolean.vault.router
@@ -216,8 +230,9 @@ library VaultStorageLib {
      * @return $ CoreStorage struct pointer
      */
     function getCoreStorage() internal pure returns (CoreStorage storage $) {
+        bytes32 slot = calculateEIP7201Slot(NAMESPACE_CORE);
         assembly {
-            $.slot := CORE_STORAGE_SLOT
+            $.slot := slot
         }
     }
 
@@ -226,8 +241,9 @@ library VaultStorageLib {
      * @return $ FundingStorage struct pointer
      */
     function getFundingStorage() internal pure returns (FundingStorage storage $) {
+        bytes32 slot = calculateEIP7201Slot(NAMESPACE_FUNDING);
         assembly {
-            $.slot := FUNDING_STORAGE_SLOT
+            $.slot := slot
         }
     }
 
@@ -236,8 +252,9 @@ library VaultStorageLib {
      * @return $ RewardsStorage struct pointer
      */
     function getRewardsStorage() internal pure returns (RewardsStorage storage $) {
+        bytes32 slot = calculateEIP7201Slot(NAMESPACE_REWARDS);
         assembly {
-            $.slot := REWARDS_STORAGE_SLOT
+            $.slot := slot
         }
     }
 
@@ -246,8 +263,9 @@ library VaultStorageLib {
      * @return $ RiskStorage struct pointer
      */
     function getRiskStorage() internal pure returns (RiskStorage storage $) {
+        bytes32 slot = calculateEIP7201Slot(NAMESPACE_RISK);
         assembly {
-            $.slot := RISK_STORAGE_SLOT
+            $.slot := slot
         }
     }
 
@@ -256,8 +274,9 @@ library VaultStorageLib {
      * @return $ RouterStorage struct pointer
      */
     function getRouterStorage() internal pure returns (RouterStorage storage $) {
+        bytes32 slot = calculateEIP7201Slot(NAMESPACE_ROUTER);
         assembly {
-            $.slot := ROUTER_STORAGE_SLOT
+            $.slot := slot
         }
     }
 
@@ -265,11 +284,9 @@ library VaultStorageLib {
     // CONSTANTS
     // ========================================================================
 
-    uint256 internal constant BASIS_POINTS = 10_000;
     uint256 internal constant INITIAL_SHARE_MULTIPLIER = 1e18;
     uint256 internal constant MIN_LOCK_PERIOD = 30 days;
     uint256 internal constant REWARD_MIN_STAKE_PERIOD = 1 days;
-    uint256 internal constant MAX_CATCHUP_HOURS = 2;
     uint256 internal constant MAX_PAYOUTS_PER_TX = 50;
     uint8 internal constant MAX_PAYOUT_RETRIES = 3;
     uint256 internal constant MAX_DAYS_PER_CALCULATION = 365;
@@ -289,6 +306,90 @@ library VaultStorageLib {
         CLOSE_POSITION,
         BET_DEPOSIT,
         PAYOUT_EXECUTION
+    }
+
+    // ========================================================================
+    // SLOT VERIFICATION HELPERS
+    // ========================================================================
+
+    /**
+     * @notice Get all namespace strings
+     * @return namespaces Array of all registered namespace strings
+     */
+    function getAllNamespaces() internal pure returns (string[5] memory namespaces) {
+        namespaces[0] = NAMESPACE_CORE;
+        namespaces[1] = NAMESPACE_FUNDING;
+        namespaces[2] = NAMESPACE_REWARDS;
+        namespaces[3] = NAMESPACE_RISK;
+        namespaces[4] = NAMESPACE_ROUTER;
+    }
+
+    /**
+     * @notice Get all calculated storage slots
+     * @return slots Array of all EIP-7201 calculated slots
+     */
+    function getAllSlots() internal pure returns (bytes32[5] memory slots) {
+        slots[0] = calculateEIP7201Slot(NAMESPACE_CORE);
+        slots[1] = calculateEIP7201Slot(NAMESPACE_FUNDING);
+        slots[2] = calculateEIP7201Slot(NAMESPACE_REWARDS);
+        slots[3] = calculateEIP7201Slot(NAMESPACE_RISK);
+        slots[4] = calculateEIP7201Slot(NAMESPACE_ROUTER);
+    }
+
+    /**
+     * @notice Verify all storage slots are unique (no collisions)
+     * @return unique True if all slots are unique
+     */
+    function verifyAllSlotsUnique() internal pure returns (bool unique) {
+        bytes32[5] memory slots = getAllSlots();
+        for (uint256 i = 0; i < 5; i++) {
+            for (uint256 j = i + 1; j < 5; j++) {
+                if (slots[i] == slots[j]) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    /**
+     * @notice Check if slot ranges overlap (each namespace reserves 256 slots)
+     * @return hasOverlap True if any ranges overlap
+     */
+    function checkSlotRangeOverlaps() internal pure returns (bool hasOverlap) {
+        bytes32[5] memory slots = getAllSlots();
+        for (uint256 i = 0; i < 5; i++) {
+            for (uint256 j = i + 1; j < 5; j++) {
+                uint256 s1 = uint256(slots[i]);
+                uint256 s2 = uint256(slots[j]);
+                uint256 diff = s1 > s2 ? s1 - s2 : s2 - s1;
+                // Each slot reserves 256 positions (0x00 to 0xff)
+                if (diff < 256) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * @notice Check if a new namespace would collide with existing ones
+     * @param newNamespace The new namespace to check
+     * @return hasCollision True if collision would occur
+     */
+    function checkNewNamespaceCollision(string memory newNamespace)
+        internal
+        pure
+        returns (bool hasCollision)
+    {
+        bytes32 newSlot = calculateEIP7201Slot(newNamespace);
+        bytes32[5] memory slots = getAllSlots();
+        for (uint256 i = 0; i < 5; i++) {
+            if (slots[i] == newSlot) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // ========================================================================

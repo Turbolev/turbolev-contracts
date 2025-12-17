@@ -46,6 +46,7 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
     error AlreadyInitialized();
     error NotInitialized();
     error DirectTransferNotAllowed();
+    error PendingOperationsExist(uint256 pendingPositions, uint256 pendingPayouts);
 
     // ========================================================================
     // MODULE IDs
@@ -360,6 +361,109 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
                 "updateVaultParams(uint256,uint256)", minBetAmount, maxBetAmount
             )
         );
+    }
+
+    // ========================================================================
+    // MODULE ROUTING - RISK CONFIG
+    // ========================================================================
+
+    /**
+     * @notice Set leverage tier configuration
+     */
+    function setLeverageTierConfig(
+        uint256 tier1Threshold,
+        uint256 tier2Threshold,
+        uint16 tier1MaxLeverage,
+        uint16 tier2MaxLeverage,
+        uint16 tier3MaxLeverage
+    ) external {
+        _delegateToCore(
+            abi.encodeWithSignature(
+                "setLeverageTierConfig(uint256,uint256,uint16,uint16,uint16)",
+                tier1Threshold,
+                tier2Threshold,
+                tier1MaxLeverage,
+                tier2MaxLeverage,
+                tier3MaxLeverage
+            )
+        );
+    }
+
+    /**
+     * @notice Set total OI tier configuration
+     */
+    function setTotalOITierConfig(
+        uint16 totalOIRiskMultiplierBps,
+        uint256 tier1Threshold,
+        uint256 tier2Threshold,
+        uint256 tier3Threshold,
+        uint16 tier1MultiplierBps,
+        uint16 tier2MultiplierBps,
+        uint16 tier3MultiplierBps,
+        uint16 tier4MultiplierBps
+    ) external {
+        _delegateToCore(
+            abi.encodeWithSignature(
+                "setTotalOITierConfig(uint16,uint256,uint256,uint256,uint16,uint16,uint16,uint16)",
+                totalOIRiskMultiplierBps,
+                tier1Threshold,
+                tier2Threshold,
+                tier3Threshold,
+                tier1MultiplierBps,
+                tier2MultiplierBps,
+                tier3MultiplierBps,
+                tier4MultiplierBps
+            )
+        );
+    }
+
+    /**
+     * @notice Set max directional exposure cap
+     */
+    function setMaxDirectionalExposure(uint16 maxDirectionalExposureBps) external {
+        _delegateToCore(
+            abi.encodeWithSignature("setMaxDirectionalExposure(uint16)", maxDirectionalExposureBps)
+        );
+    }
+
+    /**
+     * @notice Set utilization-based leverage configuration
+     */
+    function setUtilizationConfig(
+        uint16 tier1Bps,
+        uint16 tier2Bps,
+        uint16 tier3Bps,
+        uint16 factorTier1Bps,
+        uint16 factorTier2Bps,
+        uint16 factorTier3Bps,
+        uint16 factorEmergencyBps
+    ) external {
+        _delegateToCore(
+            abi.encodeWithSignature(
+                "setUtilizationConfig(uint16,uint16,uint16,uint16,uint16,uint16,uint16)",
+                tier1Bps,
+                tier2Bps,
+                tier3Bps,
+                factorTier1Bps,
+                factorTier2Bps,
+                factorTier3Bps,
+                factorEmergencyBps
+            )
+        );
+    }
+
+    /**
+     * @notice Set max profit cap multiplier (per-vault)
+     */
+    function setMaxProfitCapMultiplier(uint8 multiplier) external {
+        _delegateToCore(abi.encodeWithSignature("setMaxProfitCapMultiplier(uint8)", multiplier));
+    }
+
+    /**
+     * @notice Get max profit cap multiplier
+     */
+    function getMaxProfitCapMultiplier() external view returns (uint8) {
+        return VaultStorageLib.getRiskStorage().maxProfitCapMultiplier;
     }
 
     // ========================================================================
@@ -843,6 +947,34 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
     }
 
     /**
+     * @notice Get utilization-based leverage configuration
+     */
+    function getUtilizationConfig()
+        external
+        view
+        returns (
+            uint16 tier1Bps,
+            uint16 tier2Bps,
+            uint16 tier3Bps,
+            uint16 factorTier1Bps,
+            uint16 factorTier2Bps,
+            uint16 factorTier3Bps,
+            uint16 factorEmergencyBps
+        )
+    {
+        VaultStorageLib.RiskStorage storage risk = VaultStorageLib.getRiskStorage();
+        return (
+            risk.utilizationConfig.tier1Bps,
+            risk.utilizationConfig.tier2Bps,
+            risk.utilizationConfig.tier3Bps,
+            risk.utilizationConfig.factorTier1Bps,
+            risk.utilizationConfig.factorTier2Bps,
+            risk.utilizationConfig.factorTier3Bps,
+            risk.utilizationConfig.factorEmergencyBps
+        );
+    }
+
+    /**
      * @notice Get fee configuration
      * @return stakingFeeBps Staking fee in bps
      * @return earlyWithdrawalFeeBps Early withdrawal fee in bps
@@ -898,6 +1030,7 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
     /**
      * @notice Update module address
      * @dev Only callable by admin via VaultManager or governance
+     *      Requires no pending operations to ensure safe module swap
      */
     function updateModule(bytes4 moduleId, address newModule) external {
         // Check caller is VaultManager or admin
@@ -910,6 +1043,13 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
         }
 
         if (newModule == address(0)) revert InvalidModule();
+
+        // Check no pending operations before allowing module swap
+        uint256 pendingPositions = core.vaultInfo.pendingPositions;
+        uint256 pendingPayouts = core.pendingPayoutQueue.length;
+        if (pendingPositions > 0 || pendingPayouts > 0) {
+            revert PendingOperationsExist(pendingPositions, pendingPayouts);
+        }
 
         VaultStorageLib.RouterStorage storage router = VaultStorageLib.getRouterStorage();
         address oldModule;

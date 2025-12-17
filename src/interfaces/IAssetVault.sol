@@ -466,6 +466,80 @@ interface IAssetVault {
     function maxDirectionalExposureBps() external view returns (uint16);
 
     // ========================================================================
+    // RISK CONFIG SETTERS
+    // ========================================================================
+
+    /**
+     * @notice Set leverage tier configuration
+     * @param tier1Threshold TVL threshold for tier 1 (Launch Phase)
+     * @param tier2Threshold TVL threshold for tier 2 (Growth Phase)
+     * @param tier1MaxLeverage Max leverage for TVL < tier1Threshold
+     * @param tier2MaxLeverage Max leverage for tier1Threshold <= TVL < tier2Threshold
+     * @param tier3MaxLeverage Max leverage for TVL >= tier2Threshold (Mature Phase)
+     */
+    function setLeverageTierConfig(
+        uint256 tier1Threshold,
+        uint256 tier2Threshold,
+        uint16 tier1MaxLeverage,
+        uint16 tier2MaxLeverage,
+        uint16 tier3MaxLeverage
+    ) external;
+
+    /**
+     * @notice Set total OI tier configuration
+     * @param totalOIRiskMultiplierBps Fixed multiplier when tiers disabled
+     * @param tier1Threshold Small vault threshold
+     * @param tier2Threshold Medium vault threshold
+     * @param tier3Threshold Large vault threshold
+     * @param tier1MultiplierBps Multiplier for tier 1
+     * @param tier2MultiplierBps Multiplier for tier 2
+     * @param tier3MultiplierBps Multiplier for tier 3
+     * @param tier4MultiplierBps Multiplier for tier 4
+     */
+    function setTotalOITierConfig(
+        uint16 totalOIRiskMultiplierBps,
+        uint256 tier1Threshold,
+        uint256 tier2Threshold,
+        uint256 tier3Threshold,
+        uint16 tier1MultiplierBps,
+        uint16 tier2MultiplierBps,
+        uint16 tier3MultiplierBps,
+        uint16 tier4MultiplierBps
+    ) external;
+
+    /**
+     * @notice Set utilization-based leverage configuration
+     * @param tier1Bps Threshold for full leverage
+     * @param tier2Bps Threshold for reduced leverage
+     * @param tier3Bps Threshold for emergency mode
+     * @param factorTier1Bps Leverage factor below tier1
+     * @param factorTier2Bps Leverage factor tier1-tier2
+     * @param factorTier3Bps Leverage factor tier2-tier3
+     * @param factorEmergencyBps Leverage factor above tier3
+     */
+    function setUtilizationConfig(
+        uint16 tier1Bps,
+        uint16 tier2Bps,
+        uint16 tier3Bps,
+        uint16 factorTier1Bps,
+        uint16 factorTier2Bps,
+        uint16 factorTier3Bps,
+        uint16 factorEmergencyBps
+    ) external;
+
+    /**
+     * @notice Set max profit cap multiplier (per-vault)
+     * @param multiplier New multiplier (e.g., 3 = 3x collateral)
+     */
+    function setMaxProfitCapMultiplier(uint8 multiplier) external;
+
+    /**
+     * @notice Get max profit cap multiplier
+     * @return multiplier Current max profit cap multiplier
+     */
+    function getMaxProfitCapMultiplier() external view returns (uint8);
+
+    // ========================================================================
     // FUNDING RATE FUNCTIONS
     // ========================================================================
 

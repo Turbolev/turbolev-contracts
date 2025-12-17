@@ -16,6 +16,7 @@ interface IVaultAccessController {
     function POSITION_KEEPER_ROLE() external view returns (bytes32);
     function EMERGENCY_ROLE() external view returns (bytes32);
     function UPGRADER_ROLE() external view returns (bytes32);
+    function GUARDIAN_ROLE() external view returns (bytes32);
 
     // ========================================================================
     // ACCESS CHECK FUNCTIONS
@@ -83,4 +84,47 @@ interface IVaultAccessController {
      * @return hasRoleResult True if account has the role
      */
     function hasRole(bytes32 role, address account) external view returns (bool hasRoleResult);
+
+    // ========================================================================
+    // GUARDIAN FUNCTIONS (L-V4-02 FIX)
+    // ========================================================================
+
+    /**
+     * @notice Check if account is a guardian
+     * @param account Account to check
+     * @return isGuardianResult True if account is guardian
+     */
+    function isGuardian(address account) external view returns (bool isGuardianResult);
+
+    /**
+     * @notice Get current guardian count
+     * @return count Number of guardians
+     */
+    function getGuardianCount() external view returns (uint256 count);
+
+    /**
+     * @notice Get guardian configuration
+     * @return minGuardians Minimum guardians required
+     * @return maxGuardians Maximum guardians allowed
+     * @return currentCount Current guardian count
+     */
+    function getGuardianConfig()
+        external
+        view
+        returns (uint256 minGuardians, uint256 maxGuardians, uint256 currentCount);
+
+    // ========================================================================
+    // CONFIRMATION WINDOW FUNCTIONS (L-V4-01 FIX)
+    // ========================================================================
+
+    /**
+     * @notice Get confirmation window configuration
+     * @return minWindow Minimum allowed window
+     * @return maxWindow Maximum allowed window
+     * @return currentWindow Current confirmation window
+     */
+    function getConfirmationWindowConfig()
+        external
+        view
+        returns (uint256 minWindow, uint256 maxWindow, uint256 currentWindow);
 }

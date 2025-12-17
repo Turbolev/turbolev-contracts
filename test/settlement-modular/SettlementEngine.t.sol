@@ -88,6 +88,63 @@ contract SettlementEngineTest is BaseTestModular {
     }
 
     // ========================================================================
+    // LIQUIDATION FEE CONFIG TESTS
+    // ========================================================================
+
+    function test_SetLiquidationFeeBps_Success() public {
+        // Default value
+        uint16 initialFee = settlementEngine.liquidationFeeBps();
+        assertEq(initialFee, 200, "Default should be 200 bps (2%)");
+
+        // Update
+        vm.prank(owner);
+        settlementEngine.setLiquidationFeeBps(300); // 3%
+
+        // Verify
+        assertEq(settlementEngine.liquidationFeeBps(), 300, "Should be updated to 300");
+    }
+
+    function test_SetLiquidationFeeBps_RevertAboveMax() public {
+        vm.prank(owner);
+        vm.expectRevert();
+        settlementEngine.setLiquidationFeeBps(1001); // Above max 10%
+    }
+
+    function test_SetLiquidationFeeBps_RevertNotOwner() public {
+        vm.prank(user1);
+        vm.expectRevert();
+        settlementEngine.setLiquidationFeeBps(300);
+    }
+
+    function test_SetLiquidationFeeBps_RevertWhenPaused() public {
+        vm.prank(owner);
+        settlementEngine.pause();
+
+        vm.prank(owner);
+        vm.expectRevert();
+        settlementEngine.setLiquidationFeeBps(300);
+    }
+
+    function test_SetMaxProfitCapBps_Success() public {
+        // Default value
+        uint16 initialCap = settlementEngine.maxProfitCapBps();
+        assertEq(initialCap, 200, "Default should be 200 bps (2%)");
+
+        // Update
+        vm.prank(owner);
+        settlementEngine.setMaxProfitCapBps(500); // 5%
+
+        // Verify
+        assertEq(settlementEngine.maxProfitCapBps(), 500, "Should be updated to 500");
+    }
+
+    function test_SetMaxProfitCapBps_RevertAboveMax() public {
+        vm.prank(owner);
+        vm.expectRevert();
+        settlementEngine.setMaxProfitCapBps(1001); // Above max 10%
+    }
+
+    // ========================================================================
     // PAUSE FUNCTIONALITY TESTS
     // ========================================================================
 
@@ -99,12 +156,50 @@ contract SettlementEngineTest is BaseTestModular {
     }
 
     function test_Unpause() public {
-        vm.startPrank(owner);
+        // Pause with owner
+        vm.prank(owner);
         settlementEngine.pause();
+
+        // Unpause requires UPGRADER_ROLE (mockTimelockController)
+        vm.prank(mockTimelockController);
         settlementEngine.unpause();
-        vm.stopPrank();
 
         assertFalse(settlementEngine.paused(), "Contract should be unpaused");
+    }
+
+    function test_Unpause_RevertOnNonUpgrader() public {
+        vm.prank(owner);
+        settlementEngine.pause();
+
+        // Try unpause with non-upgrader should revert
+        vm.prank(user1);
+        vm.expectRevert(SettlementEngine.NotAuthorized.selector);
+        settlementEngine.unpause();
+    }
+
+    function test_PauseEmergency_ByGuardian() public {
+        // Add guardian
+        vm.prank(mockTimelockController);
+        vaultAccessController.addGuardian(admin);
+
+        // Guardian can emergency pause
+        vm.prank(admin);
+        settlementEngine.pauseEmergency();
+
+        assertTrue(settlementEngine.paused(), "Contract should be paused by guardian");
+    }
+
+    function test_SetAccessController() public {
+        address newController = makeAddr("newAccessController");
+
+        vm.prank(owner);
+        settlementEngine.setAccessController(newController);
+
+        assertEq(
+            address(settlementEngine.accessController()),
+            newController,
+            "AccessController should be updated"
+        );
     }
 
     // ========================================================================

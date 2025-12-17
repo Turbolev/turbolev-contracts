@@ -4,6 +4,7 @@ pragma solidity ^0.8.22;
 import "../VaultModuleBase.sol";
 import "../libraries/VaultStorageLib.sol";
 import "../../libraries/FundingRateLib.sol";
+import "../../libraries/VaultConfigLib.sol";
 
 /**
  * @title VaultFunding
@@ -17,12 +18,6 @@ import "../../libraries/FundingRateLib.sol";
  * - Funding Config: setFundingConfig, setFundingEnabled
  */
 contract VaultFunding is VaultModuleBase {
-    // ========================================================================
-    // CONSTANTS
-    // ========================================================================
-
-    uint256 private constant MAX_CATCHUP_HOURS = 2;
-
     // ========================================================================
     // EVENTS
     // ========================================================================
@@ -64,6 +59,7 @@ contract VaultFunding is VaultModuleBase {
      */
     function updateHourlyFunding()
         external
+        nonReentrant
         permissionlessOrKeeper
         returns (
             int256 newLongRate,
@@ -90,9 +86,9 @@ contract VaultFunding is VaultModuleBase {
 
         // H-04 FIX: Cap hours to limit manipulation impact
         bool wasCapped = false;
-        if (hoursElapsed > MAX_CATCHUP_HOURS) {
+        if (hoursElapsed > VaultConfigLib.MAX_CATCHUP_HOURS) {
             wasCapped = true;
-            hoursElapsed = MAX_CATCHUP_HOURS;
+            hoursElapsed = VaultConfigLib.MAX_CATCHUP_HOURS;
         }
 
         // Calculate current imbalance
@@ -135,7 +131,9 @@ contract VaultFunding is VaultModuleBase {
         // H-04 FIX: Emit event if hours were capped
         if (wasCapped) {
             emit FundingUpdateCapped(
-                currentHour - funding.lastFundingUpdateHour, MAX_CATCHUP_HOURS, block.timestamp
+                currentHour - funding.lastFundingUpdateHour,
+                VaultConfigLib.MAX_CATCHUP_HOURS,
+                block.timestamp
             );
         }
 
@@ -372,7 +370,7 @@ contract VaultFunding is VaultModuleBase {
         uint16 tier3RateBps,
         uint16 tier4RateBps,
         uint16 tier5RateBps
-    ) external onlyVaultManagerOrHelper {
+    ) external nonReentrant onlyVaultManagerOrHelper {
         VaultStorageLib.FundingStorage storage funding = _funding();
 
         FundingRateLib.FundingConfig memory newConfig = FundingRateLib.FundingConfig({
@@ -399,7 +397,7 @@ contract VaultFunding is VaultModuleBase {
      * @notice Enable or disable funding rate
      * @param enabled True to enable funding
      */
-    function setFundingEnabled(bool enabled) external onlyVaultManagerOrHelper {
+    function setFundingEnabled(bool enabled) external nonReentrant onlyVaultManagerOrHelper {
         VaultStorageLib.FundingStorage storage funding = _funding();
         funding.fundingEnabled = enabled;
         funding.fundingConfig.isEnabled = enabled;

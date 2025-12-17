@@ -66,7 +66,12 @@ contract VaultRewards is VaultModuleBase {
      *      Pre-calculates and stores rewards for all LPs to avoid recalculation on claim
      * @return isComplete True if all LPs processed in this call
      */
-    function finalizeDailyReward() external onlyVaultAdminOrKeeper returns (bool isComplete) {
+    function finalizeDailyReward()
+        external
+        nonReentrant
+        onlyVaultAdminOrKeeper
+        returns (bool isComplete)
+    {
         VaultStorageLib.CoreStorage storage core = _core();
         VaultStorageLib.RewardsStorage storage rewards = _rewards();
 
@@ -149,6 +154,7 @@ contract VaultRewards is VaultModuleBase {
      */
     function finalizeDailyRewardRemaining()
         external
+        nonReentrant
         onlyVaultAdminOrKeeper
         returns (bool isComplete)
     {

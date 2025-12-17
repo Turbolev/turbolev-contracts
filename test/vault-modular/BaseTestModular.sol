@@ -483,6 +483,10 @@ contract BaseTestModular is Test {
         settlementEngine.setPositionManager(address(positionManager));
         settlementEngine.setVaultManager(address(vaultManager));
         settlementEngine.setPriceFeedManager(address(priceFeedManager));
+        settlementEngine.setAccessController(address(vaultAccessController));
+
+        // Set accessController for PriceFeedManager
+        priceFeedManager.setAccessController(address(vaultAccessController));
 
         vm.stopPrank();
     }

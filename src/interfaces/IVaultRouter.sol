@@ -193,4 +193,56 @@ interface IVaultRouter {
         uint16 tier5RateBps
     ) external;
     function setFundingEnabled(bool enabled) external;
+
+    // ========================================================================
+    // RISK CONFIG SETTERS (used by VaultAdminProxy)
+    // ========================================================================
+
+    function setLeverageTierConfig(
+        uint256 tier1Threshold,
+        uint256 tier2Threshold,
+        uint16 tier1MaxLeverage,
+        uint16 tier2MaxLeverage,
+        uint16 tier3MaxLeverage
+    ) external;
+
+    function setTotalOITierConfig(
+        uint16 totalOIRiskMultiplierBps,
+        uint256 tier1Threshold,
+        uint256 tier2Threshold,
+        uint256 tier3Threshold,
+        uint16 tier1MultiplierBps,
+        uint16 tier2MultiplierBps,
+        uint16 tier3MultiplierBps,
+        uint16 tier4MultiplierBps
+    ) external;
+
+    function setMaxDirectionalExposure(uint16 maxDirectionalExposureBps) external;
+
+    function setUtilizationConfig(
+        uint16 tier1Bps,
+        uint16 tier2Bps,
+        uint16 tier3Bps,
+        uint16 factorTier1Bps,
+        uint16 factorTier2Bps,
+        uint16 factorTier3Bps,
+        uint16 factorEmergencyBps
+    ) external;
+
+    function setMaxProfitCapMultiplier(uint8 multiplier) external;
+
+    function getMaxProfitCapMultiplier() external view returns (uint8);
+
+    function getUtilizationConfig()
+        external
+        view
+        returns (
+            uint16 tier1Bps,
+            uint16 tier2Bps,
+            uint16 tier3Bps,
+            uint16 factorTier1Bps,
+            uint16 factorTier2Bps,
+            uint16 factorTier3Bps,
+            uint16 factorEmergencyBps
+        );
 }

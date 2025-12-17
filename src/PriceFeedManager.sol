@@ -9,6 +9,7 @@ import "./interfaces/IPriceFeedManager.sol";
 import "./interfaces/oracles/IPushOracle.sol";
 import "./interfaces/oracles/IPullOracle.sol";
 import "./interfaces/oracles/IHybridOracle.sol";
+import "./interfaces/IVaultAccessController.sol";
 
 /**
  * @title PriceFeedManager V2 with Oracle Registry Pattern
@@ -86,17 +87,21 @@ contract PriceFeedManager is
     /// @notice Tokens with circuit breaker temporarily bypassed (emergency use only)
     mapping(address => bool) public circuitBreakerBypassed;
 
+    /// @notice Access controller for role-based access
+    IVaultAccessController public accessController;
+
     // ========================================================================
     // STORAGE GAP (for future upgrades)
     // ========================================================================
 
     /// @dev Storage gap to allow for new variables in future versions
-    /// @notice Reduced from 46 to 42 slots due to circuit breaker additions:
+    /// @notice Reduced from 46 to 42 slots due to circuit breaker and accessController additions:
     /// - circuitBreakerConfig: 1 slot (packed struct)
     /// - lastPriceRecords: 1 slot (mapping)
     /// - circuitBreakerBypassed: 1 slot (mapping)
-    /// Total new slots used: 3, remaining gap: 46 - 3 = 43
-    uint256[43] private __gap;
+    /// - accessController: 1 slot
+    /// Total new slots used: 4, remaining gap: 46 - 4 = 42
+    uint256[42] private __gap;
 
     // ========================================================================
     // EVENTS
@@ -149,6 +154,12 @@ contract PriceFeedManager is
         address indexed projectToken, uint256 price, uint256 publishTime, bytes32 indexed providerId
     );
 
+    // Access Control Events
+    event AccessControllerUpdated(address indexed oldAddress, address indexed newAddress);
+    event EmergencyUpgrade(
+        address indexed newImplementation, address indexed caller, uint256 timestamp
+    );
+
     // ========================================================================
     // ERRORS
     // ========================================================================
@@ -172,6 +183,11 @@ contract PriceFeedManager is
     error InitialPriceNotSet(address projectToken);
     error InitialPriceFetchFailed(address projectToken, bytes32 providerId);
     error RefundFailed();
+
+    // Access Control Errors
+    error AccessControllerNotSet();
+    error MustPauseBeforeEmergencyUpgrade();
+    error NotAuthorized();
 
     // ========================================================================
     // CONSTRUCTOR / INITIALIZER
@@ -1216,30 +1232,86 @@ contract PriceFeedManager is
     // ========================================================================
 
     /**
-     * @notice Pause contract
+     * @notice Set access controller address
+     * @param _accessController Access controller address
+     */
+    function setAccessController(address _accessController) external onlyOwner whenNotPaused {
+        if (_accessController == address(0)) revert InvalidAddress();
+        address oldAddress = address(accessController);
+        accessController = IVaultAccessController(_accessController);
+        emit AccessControllerUpdated(oldAddress, _accessController);
+    }
+
+    /**
+     * @notice Pause contract - owner only for normal operations
      */
     function pause() external onlyOwner {
         _pause();
     }
 
     /**
-     * @notice Unpause contract
+     * @notice Emergency pause - can be called by guardian or emergency role
+     * @dev Allows guardians to pause without waiting for timelock
      */
-    function unpause() external onlyOwner {
+    function pauseEmergency() external {
+        if (address(accessController) == address(0)) revert AccessControllerNotSet();
+        if (
+            !accessController.hasRole(accessController.EMERGENCY_ROLE(), msg.sender)
+                && !accessController.hasRole(accessController.GUARDIAN_ROLE(), msg.sender)
+        ) {
+            revert NotAuthorized();
+        }
+        _pause();
+    }
+
+    /**
+     * @notice Unpause contract - requires UPGRADER_ROLE (Timelock) to prevent abuse
+     */
+    function unpause() external {
+        if (address(accessController) == address(0)) revert AccessControllerNotSet();
+        if (!accessController.hasRole(accessController.UPGRADER_ROLE(), msg.sender)) {
+            revert NotAuthorized();
+        }
         _unpause();
     }
 
     /**
-     * @notice Authorize upgrade (UUPS pattern)
+     * @notice Authorize upgrade with Timelock + Emergency Guardian pattern
+     * @dev Two paths for upgrade:
+     *      1. Normal path: UPGRADER_ROLE (Timelock) - no restrictions
+     *      2. Emergency path: EMERGENCY_ROLE/GUARDIAN_ROLE - requires contract to be paused first
+     *      This ensures users have opportunity to react before emergency upgrades
      */
-    function _authorizeUpgrade(address newImplementation) internal override onlyOwner { }
+    function _authorizeUpgrade(address newImplementation) internal override {
+        if (address(accessController) == address(0)) revert AccessControllerNotSet();
+
+        // Path 1: Normal upgrade via Timelock (UPGRADER_ROLE)
+        if (accessController.hasRole(accessController.UPGRADER_ROLE(), msg.sender)) {
+            return; // Authorized
+        }
+
+        // Path 2: Emergency upgrade via Guardian/Multisig - only if paused
+        if (
+            accessController.hasRole(accessController.EMERGENCY_ROLE(), msg.sender)
+                || accessController.hasRole(accessController.GUARDIAN_ROLE(), msg.sender)
+        ) {
+            if (!paused()) {
+                revert MustPauseBeforeEmergencyUpgrade();
+            }
+            emit EmergencyUpgrade(newImplementation, msg.sender, block.timestamp);
+            return; // Authorized
+        }
+
+        // No valid role - revert
+        revert NotAuthorized();
+    }
 
     /**
      * @notice Get contract version
-     * @dev V2.2.0: Added circuit breaker for L-10 fix
+     * @dev V2.3.0: Added upgrade security with Timelock + Guardian pattern
      */
     function version() external pure returns (string memory) {
-        return "2.2.0-circuit-breaker";
+        return "2.3.0-upgrade-security";
     }
 
     /**

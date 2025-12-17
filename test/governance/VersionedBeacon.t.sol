@@ -258,35 +258,37 @@ contract VersionedBeaconTest is Test {
     // EMERGENCY UPGRADE TESTS
     // ========================================================================
 
-    // NOTE: emergencyUpgrade() calls super.upgradeTo() which has onlyOwner modifier.
-    // This means admin/guardian cannot directly call emergencyUpgrade - it will revert.
-    // This appears to be a potential bug in the contract design.
-    // Tests below verify the current behavior.
-
-    function test_EmergencyUpgrade_RevertNotOwner() public {
-        // Admin can activate emergency mode
+    function test_EmergencyUpgrade_Success() public {
+        // Activate emergency mode
         vm.prank(admin);
         beacon.activateEmergencyMode();
 
-        // But admin cannot perform the upgrade because super.upgradeTo() has onlyOwner
+        // Perform emergency upgrade
         bytes32 infoHash = keccak256("Emergency hotfix for critical bug");
 
         vm.prank(admin);
-        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", admin));
         beacon.emergencyUpgrade(address(implV2), infoHash);
+
+        assertEq(beacon.currentVersion(), 2);
+        assertEq(beacon.implementation(), address(implV2));
+
+        // Check it's marked as emergency
+        (,,,, bool isEmergency) = beacon.getCurrentVersionInfo();
+        assertTrue(isEmergency);
     }
 
-    function test_EmergencyUpgrade_ByGuardian_RevertNotOwner() public {
+    function test_EmergencyUpgrade_ByGuardian() public {
         vm.prank(owner);
         beacon.addGuardian(guardian);
 
         vm.prank(guardian);
         beacon.activateEmergencyMode();
 
-        // Guardian cannot perform the upgrade because super.upgradeTo() has onlyOwner
         vm.prank(guardian);
-        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", guardian));
         beacon.emergencyUpgrade(address(implV2), keccak256("Guardian emergency fix"));
+
+        assertEq(beacon.currentVersion(), 2);
+        assertEq(beacon.implementation(), address(implV2));
     }
 
     function test_EmergencyUpgrade_RevertNotInEmergencyMode() public {
@@ -304,7 +306,22 @@ contract VersionedBeaconTest is Test {
         beacon.emergencyUpgrade(address(implV2), bytes32(0));
     }
 
-    // NOTE: For actual emergency upgrades, owner should use upgradeToVersion() with appropriate info
+    function test_EmergencyUpgrade_AdminCannotBypassOutsideEmergencyContext() public {
+        // Admin should NOT be able to call normal upgradeTo or upgradeToVersion
+        // even when emergency mode is active (only emergencyUpgrade is allowed)
+        vm.prank(admin);
+        beacon.activateEmergencyMode();
+
+        // Try to call upgradeTo directly (should fail)
+        vm.prank(admin);
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", admin));
+        beacon.upgradeTo(address(implV2));
+
+        // Try to call upgradeToVersion directly (should fail)
+        vm.prank(admin);
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", admin));
+        beacon.upgradeToVersion(address(implV2), bytes32(0));
+    }
 
     // ========================================================================
     // VERSION HISTORY TESTS
@@ -408,20 +425,16 @@ contract VersionedBeaconTest is Test {
         assertEq(beacon.currentVersion(), 1 + numUpgrades);
     }
 
-    function testFuzz_EmergencyModeToggle(uint8 toggleCount) public {
-        toggleCount = uint8(bound(toggleCount, 1, 10));
+    function testFuzz_EmergencyUpgradeMarking(bytes32 infoHash) public {
+        vm.prank(admin);
+        beacon.activateEmergencyMode();
 
-        for (uint8 i = 0; i < toggleCount; i++) {
-            // Activate
-            vm.prank(admin);
-            beacon.activateEmergencyMode();
-            assertTrue(beacon.emergencyMode());
+        vm.prank(admin);
+        beacon.emergencyUpgrade(address(implV2), infoHash);
 
-            // Deactivate
-            vm.prank(admin);
-            beacon.deactivateEmergencyMode();
-            assertFalse(beacon.emergencyMode());
-        }
+        (,,, bytes32 storedInfo, bool isEmergency) = beacon.getCurrentVersionInfo();
+        assertEq(storedInfo, infoHash);
+        assertTrue(isEmergency);
     }
 
     // ========================================================================
@@ -443,9 +456,9 @@ contract VersionedBeaconTest is Test {
         beacon.activateEmergencyMode();
         assertTrue(beacon.emergencyMode());
 
-        // 4. Owner performs emergency upgrade (since super.upgradeTo has onlyOwner)
-        vm.prank(owner);
-        beacon.upgradeToVersion(address(implV3), keccak256("Hotfix for critical bug"));
+        // 4. Admin performs emergency upgrade (now works with the fix!)
+        vm.prank(admin);
+        beacon.emergencyUpgrade(address(implV3), keccak256("Hotfix for critical bug"));
         assertEq(beacon.currentVersion(), 3);
 
         // 5. Admin deactivates emergency mode
@@ -463,7 +476,7 @@ contract VersionedBeaconTest is Test {
 
         assertFalse(emergencyFlags[0]);
         assertFalse(emergencyFlags[1]);
-        assertFalse(emergencyFlags[2]); // V3 was NOT emergency since owner used upgradeToVersion
+        assertTrue(emergencyFlags[2]); // V3 was emergency upgrade
 
         assertEq(infos[2], keccak256("Hotfix for critical bug"));
     }
@@ -486,13 +499,16 @@ contract VersionedBeaconTest is Test {
         beacon.activateEmergencyMode();
         assertTrue(beacon.emergencyMode());
 
-        // But neither can perform emergencyUpgrade due to super.upgradeTo's onlyOwner
+        // Guardian can perform emergency upgrade
         vm.prank(guardian);
-        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", guardian));
         beacon.emergencyUpgrade(address(implV2), keccak256("Guardian upgrade"));
 
-        // Version unchanged
-        assertEq(beacon.currentVersion(), 1);
+        assertEq(beacon.currentVersion(), 2);
+        assertEq(beacon.implementation(), address(implV2));
+
+        // Verify it's marked as emergency
+        (,,,, bool isEmergency) = beacon.getCurrentVersionInfo();
+        assertTrue(isEmergency);
     }
 }
 

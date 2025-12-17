@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.22;
 
+import "./MathLib.sol";
+
 /**
  * @title VaultLiquidityLib
  * @notice Library for vault liquidity calculations
@@ -12,7 +14,6 @@ library VaultLiquidityLib {
     // CONSTANTS
     // ========================================================================
 
-    uint256 constant BASIS_POINTS = 10_000;
     uint256 constant INITIAL_SHARE_MULTIPLIER = 1e18;
 
     // ========================================================================
@@ -78,7 +79,7 @@ library VaultLiquidityLib {
         if (params.amount == 0) revert InvalidAmount();
 
         // Calculate staking fee
-        result.stakingFee = (params.amount * params.stakingFeeBps) / BASIS_POINTS;
+        result.stakingFee = (params.amount * params.stakingFeeBps) / MathLib.BASIS_POINTS;
         result.netAmount = params.amount - result.stakingFee;
 
         if (result.netAmount < params.minLiquidityAmount) {
@@ -127,7 +128,7 @@ library VaultLiquidityLib {
         // Early withdrawal penalty only applies AFTER vault has graduated
         if (result.isEarlyWithdrawal && params.isGraduated) {
             result.withdrawalFee =
-                (result.grossAmount * params.earlyWithdrawalFeeBps) / BASIS_POINTS;
+                (result.grossAmount * params.earlyWithdrawalFeeBps) / MathLib.BASIS_POINTS;
             result.netPayout = result.grossAmount - result.withdrawalFee;
         }
 
@@ -189,7 +190,7 @@ library VaultLiquidityLib {
         pure
         returns (uint256 fee, uint256 netAmount)
     {
-        fee = (amount * stakingFeeBps) / BASIS_POINTS;
+        fee = (amount * stakingFeeBps) / MathLib.BASIS_POINTS;
         netAmount = amount - fee;
         return (fee, netAmount);
     }
@@ -219,7 +220,7 @@ library VaultLiquidityLib {
         isEarly = currentTimestamp < lockEndTime;
 
         if (isEarly && isGraduated) {
-            fee = (amount * earlyWithdrawalFeeBps) / BASIS_POINTS;
+            fee = (amount * earlyWithdrawalFeeBps) / MathLib.BASIS_POINTS;
             netAmount = amount - fee;
         } else {
             fee = 0;

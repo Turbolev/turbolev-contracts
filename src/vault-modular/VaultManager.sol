@@ -118,6 +118,9 @@ contract VaultManager is
     event EmergencyUnpauseVault(address indexed vault, address indexed caller, uint256 timestamp);
     event EmergencyBatchPauseVaults(address[] vaults, address indexed caller, uint256 timestamp);
     event EmergencyBatchUnpauseVaults(address[] vaults, address indexed caller, uint256 timestamp);
+    event EmergencyUpgrade(
+        address indexed newImplementation, address indexed caller, uint256 timestamp
+    );
 
     // ========================================================================
     // ERRORS
@@ -132,6 +135,8 @@ contract VaultManager is
     error NotAuthorized();
     error LengthMismatch();
     error BatchTooLarge();
+    error MustPauseBeforeEmergencyUpgrade();
+    error NotAContract(address addr);
 
     // ========================================================================
     // MODIFIERS
@@ -595,6 +600,11 @@ contract VaultManager is
         ) {
             revert InvalidAddress();
         }
+        // Contract existence checks (L-V3-05 fix)
+        if (_coreModule.code.length == 0) revert NotAContract(_coreModule);
+        if (_fundingModule.code.length == 0) revert NotAContract(_fundingModule);
+        if (_rewardsModule.code.length == 0) revert NotAContract(_rewardsModule);
+
         coreModule = _coreModule;
         fundingModule = _fundingModule;
         rewardsModule = _rewardsModule;
@@ -617,7 +627,33 @@ contract VaultManager is
         _unpause();
     }
 
-    function _authorizeUpgrade(address newImplementation) internal override onlyOwner { }
+    /**
+     * @notice Authorize upgrade with Timelock + Emergency Guardian pattern
+     * @dev Two paths for upgrade:
+     *      1. Normal path: UPGRADER_ROLE (Timelock) - no restrictions
+     *      2. Emergency path: EMERGENCY_ROLE (Multisig) - requires contract to be paused first
+     *      This ensures users have opportunity to withdraw before emergency upgrades
+     */
+    function _authorizeUpgrade(address newImplementation) internal override {
+        VaultAccessController ac = VaultAccessController(accessController);
+
+        // Path 1: Normal upgrade via Timelock (UPGRADER_ROLE)
+        if (ac.hasRole(ac.UPGRADER_ROLE(), msg.sender)) {
+            return; // Authorized
+        }
+
+        // Path 2: Emergency upgrade via Multisig (EMERGENCY_ROLE) - only if paused
+        if (ac.hasRole(ac.EMERGENCY_ROLE(), msg.sender)) {
+            if (!paused()) {
+                revert MustPauseBeforeEmergencyUpgrade();
+            }
+            emit EmergencyUpgrade(newImplementation, msg.sender, block.timestamp);
+            return; // Authorized
+        }
+
+        // No valid role - revert
+        revert NotAuthorized();
+    }
 
     // ========================================================================
     // VIEW FUNCTIONS

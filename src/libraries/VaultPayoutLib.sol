@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.22;
 
+import "./MathLib.sol";
+
 /**
  * @title VaultPayoutLib
  * @notice Library for vault payout calculations
@@ -8,12 +10,6 @@ pragma solidity ^0.8.22;
  *      Used by AssetVaultUpgradeable for position payout calculations
  */
 library VaultPayoutLib {
-    // ========================================================================
-    // CONSTANTS
-    // ========================================================================
-
-    uint256 constant BASIS_POINTS = 10_000;
-
     // ========================================================================
     // CUSTOM ERRORS
     // ========================================================================
@@ -89,7 +85,7 @@ library VaultPayoutLib {
         returns (uint256 fee)
     {
         if (closeFeeBps == 0 || collateral == 0) return 0;
-        return (collateral * closeFeeBps) / BASIS_POINTS;
+        return (collateral * closeFeeBps) / MathLib.BASIS_POINTS;
     }
 
     /**
@@ -105,7 +101,7 @@ library VaultPayoutLib {
         returns (uint256 fee, uint256 netAmount)
     {
         if (openFeeBps == 0 || amount == 0) return (0, amount);
-        fee = (amount * openFeeBps) / BASIS_POINTS;
+        fee = (amount * openFeeBps) / MathLib.BASIS_POINTS;
         netAmount = amount - fee;
         return (fee, netAmount);
     }
@@ -122,7 +118,7 @@ library VaultPayoutLib {
     {
         // Calculate close fee
         if (params.closeFeeBps > 0 && params.collateral > 0) {
-            result.closeFee = (params.collateral * params.closeFeeBps) / BASIS_POINTS;
+            result.closeFee = (params.collateral * params.closeFeeBps) / MathLib.BASIS_POINTS;
         }
 
         // Initialize with current values

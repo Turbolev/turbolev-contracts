@@ -78,7 +78,7 @@ contract PositionLibTest is Test {
     }
 
     function test_Constants_LeverageAndLiquidation() public {
-        assertEq(PositionLib.BASIS_POINTS, 10_000, "BASIS_POINTS should be 10000");
+        assertEq(MathLib.BASIS_POINTS, 10_000, "BASIS_POINTS should be 10000");
         assertEq(PositionLib.MIN_LEVERAGE, 1, "MIN_LEVERAGE should be 1");
         assertEq(PositionLib.MAX_LEVERAGE, 100, "MAX_LEVERAGE should be 100");
         assertEq(

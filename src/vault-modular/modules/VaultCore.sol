@@ -8,6 +8,7 @@ import "../../libraries/VaultPayoutLib.sol";
 import "../../libraries/VaultRiskLib.sol";
 import "../../libraries/VaultConfigLib.sol";
 import "../../libraries/FundingRateLib.sol";
+import "../../libraries/MathLib.sol";
 
 /**
  * @title VaultCore
@@ -115,6 +116,40 @@ contract VaultCore is VaultModuleBase {
     event Paused(address account);
     event Unpaused(address account);
     event FeesWithdrawn(address indexed to, uint256 amount, uint256 timestamp);
+    event LeverageTierConfigUpdated(
+        uint256 tier1Threshold,
+        uint256 tier2Threshold,
+        uint16 tier1MaxLeverage,
+        uint16 tier2MaxLeverage,
+        uint16 tier3MaxLeverage,
+        uint256 timestamp
+    );
+    event TotalOITierConfigUpdated(
+        uint16 totalOIRiskMultiplierBps,
+        uint256 tier1Threshold,
+        uint256 tier2Threshold,
+        uint256 tier3Threshold,
+        uint16 tier1MultiplierBps,
+        uint16 tier2MultiplierBps,
+        uint16 tier3MultiplierBps,
+        uint16 tier4MultiplierBps,
+        uint256 timestamp
+    );
+    event MaxDirectionalExposureConfigUpdated(uint16 oldBps, uint16 newBps, uint256 timestamp);
+    event UtilizationConfigUpdated(
+        uint16 tier1Bps,
+        uint16 tier2Bps,
+        uint16 tier3Bps,
+        uint16 factorTier1Bps,
+        uint16 factorTier2Bps,
+        uint16 factorTier3Bps,
+        uint16 factorEmergencyBps,
+        uint256 timestamp
+    );
+    event MaxProfitCapMultiplierUpdated(
+        uint8 oldMultiplier, uint8 newMultiplier, uint256 timestamp
+    );
+    event QueueIndexUpdated(uint256 oldIndex, uint256 newIndex, uint256 timestamp);
 
     // ========================================================================
     // ERRORS
@@ -133,7 +168,6 @@ contract VaultCore is VaultModuleBase {
     // CONSTANTS
     // ========================================================================
 
-    uint256 private constant BASIS_POINTS = 10_000;
     uint256 private constant INITIAL_SHARE_MULTIPLIER = 1e18;
     uint256 private constant MIN_LOCK_PERIOD = 30 days;
     uint256 private constant MAX_PAYOUTS_PER_TX = 50;
@@ -218,6 +252,9 @@ contract VaultCore is VaultModuleBase {
         // Initialize utilization config
         risk.utilizationConfig = VaultConfigLib.getDefaultUtilizationConfig();
 
+        // Initialize max profit cap multiplier
+        risk.maxProfitCapMultiplier = VaultConfigLib.DEFAULT_MAX_PROFIT_CAP_MULTIPLIER;
+
         // Initialize funding config
         funding.fundingConfig = FundingRateLib.getDefaultConfig();
         funding.fundingEnabled = true;
@@ -244,7 +281,7 @@ contract VaultCore is VaultModuleBase {
         VaultStorageLib.CoreStorage storage core = _core();
 
         // Calculate staking fee
-        uint256 stakingFee = (amount * core.feeConfig.stakingFeeBps) / BASIS_POINTS;
+        uint256 stakingFee = (amount * core.feeConfig.stakingFeeBps) / MathLib.BASIS_POINTS;
         uint256 netAmount = amount - stakingFee;
 
         if (netAmount < core.vaultParams.minLiquidityAmount) {
@@ -329,7 +366,8 @@ contract VaultCore is VaultModuleBase {
         uint256 netPayout = grossAmount;
 
         if (isEarlyWithdrawal && core.vaultInfo.isGraduated) {
-            withdrawalFee = (grossAmount * core.feeConfig.earlyWithdrawalFeeBps) / BASIS_POINTS;
+            withdrawalFee =
+                (grossAmount * core.feeConfig.earlyWithdrawalFeeBps) / MathLib.BASIS_POINTS;
             netPayout = grossAmount - withdrawalFee;
         }
 
@@ -820,6 +858,204 @@ contract VaultCore is VaultModuleBase {
     }
 
     // ========================================================================
+    // RISK CONFIG SETTERS
+    // ========================================================================
+
+    /**
+     * @notice Set leverage tier configuration
+     * @param tier1Threshold TVL threshold for tier 1 (Launch Phase)
+     * @param tier2Threshold TVL threshold for tier 2 (Growth Phase)
+     * @param tier1MaxLeverage Max leverage for TVL < tier1Threshold
+     * @param tier2MaxLeverage Max leverage for tier1Threshold <= TVL < tier2Threshold
+     * @param tier3MaxLeverage Max leverage for TVL >= tier2Threshold (Mature Phase)
+     */
+    function setLeverageTierConfig(
+        uint256 tier1Threshold,
+        uint256 tier2Threshold,
+        uint16 tier1MaxLeverage,
+        uint16 tier2MaxLeverage,
+        uint16 tier3MaxLeverage
+    ) external onlyVaultManagerOrHelper {
+        // Validate using VaultConfigLib
+        VaultConfigLib.LeverageTierConfig memory config = VaultConfigLib.LeverageTierConfig({
+            tier1Threshold: tier1Threshold,
+            tier2Threshold: tier2Threshold,
+            tier1MaxLeverage: tier1MaxLeverage,
+            tier2MaxLeverage: tier2MaxLeverage,
+            tier3MaxLeverage: tier3MaxLeverage
+        });
+        if (!VaultConfigLib.validateLeverageTierConfig(config)) {
+            revert InvalidParameters();
+        }
+
+        VaultStorageLib.RiskStorage storage risk = _risk();
+        risk.leverageTier1Threshold = tier1Threshold;
+        risk.leverageTier2Threshold = tier2Threshold;
+        risk.tier1MaxLeverage = tier1MaxLeverage;
+        risk.tier2MaxLeverage = tier2MaxLeverage;
+        risk.tier3MaxLeverage = tier3MaxLeverage;
+
+        emit LeverageTierConfigUpdated(
+            tier1Threshold,
+            tier2Threshold,
+            tier1MaxLeverage,
+            tier2MaxLeverage,
+            tier3MaxLeverage,
+            block.timestamp
+        );
+    }
+
+    /**
+     * @notice Set total OI tier configuration
+     * @param totalOIRiskMultiplierBps Fixed multiplier when tiers disabled
+     * @param tier1Threshold Small vault threshold (0 to disable tiers)
+     * @param tier2Threshold Medium vault threshold
+     * @param tier3Threshold Large vault threshold
+     * @param tier1MultiplierBps Multiplier for TVL < tier1
+     * @param tier2MultiplierBps Multiplier for tier1 <= TVL < tier2
+     * @param tier3MultiplierBps Multiplier for tier2 <= TVL < tier3
+     * @param tier4MultiplierBps Multiplier for TVL >= tier3
+     */
+    function setTotalOITierConfig(
+        uint16 totalOIRiskMultiplierBps,
+        uint256 tier1Threshold,
+        uint256 tier2Threshold,
+        uint256 tier3Threshold,
+        uint16 tier1MultiplierBps,
+        uint16 tier2MultiplierBps,
+        uint16 tier3MultiplierBps,
+        uint16 tier4MultiplierBps
+    ) external onlyVaultManagerOrHelper {
+        // Validate using VaultConfigLib
+        VaultConfigLib.OITierConfig memory config = VaultConfigLib.OITierConfig({
+            fixedMultiplierBps: totalOIRiskMultiplierBps,
+            tier1Threshold: tier1Threshold,
+            tier2Threshold: tier2Threshold,
+            tier3Threshold: tier3Threshold,
+            tier1MultiplierBps: tier1MultiplierBps,
+            tier2MultiplierBps: tier2MultiplierBps,
+            tier3MultiplierBps: tier3MultiplierBps,
+            tier4MultiplierBps: tier4MultiplierBps
+        });
+        if (!VaultConfigLib.validateOITierConfig(config)) {
+            revert InvalidParameters();
+        }
+
+        VaultStorageLib.RiskStorage storage risk = _risk();
+        risk.totalOIRiskMultiplierBps = totalOIRiskMultiplierBps;
+        risk.tier1Threshold = tier1Threshold;
+        risk.tier2Threshold = tier2Threshold;
+        risk.tier3Threshold = tier3Threshold;
+        risk.tier1MultiplierBps = tier1MultiplierBps;
+        risk.tier2MultiplierBps = tier2MultiplierBps;
+        risk.tier3MultiplierBps = tier3MultiplierBps;
+        risk.tier4MultiplierBps = tier4MultiplierBps;
+
+        emit TotalOITierConfigUpdated(
+            totalOIRiskMultiplierBps,
+            tier1Threshold,
+            tier2Threshold,
+            tier3Threshold,
+            tier1MultiplierBps,
+            tier2MultiplierBps,
+            tier3MultiplierBps,
+            tier4MultiplierBps,
+            block.timestamp
+        );
+    }
+
+    /**
+     * @notice Set max directional exposure cap
+     * @param maxDirectionalExposureBps New max directional exposure in basis points (e.g., 5000 = 50%)
+     */
+    function setMaxDirectionalExposure(uint16 maxDirectionalExposureBps)
+        external
+        onlyVaultManagerOrHelper
+    {
+        if (!VaultConfigLib.validateDirectionalExposure(maxDirectionalExposureBps)) {
+            revert InvalidParameters();
+        }
+
+        VaultStorageLib.RiskStorage storage risk = _risk();
+        uint16 oldBps = risk.maxDirectionalExposureBps;
+        risk.maxDirectionalExposureBps = maxDirectionalExposureBps;
+
+        emit MaxDirectionalExposureConfigUpdated(oldBps, maxDirectionalExposureBps, block.timestamp);
+    }
+
+    /**
+     * @notice Set utilization-based leverage configuration
+     * @param tier1Bps Threshold for full leverage (default 30%)
+     * @param tier2Bps Threshold for reduced leverage (default 60%)
+     * @param tier3Bps Threshold for emergency mode (default 80%)
+     * @param factorTier1Bps Leverage factor below tier1 (default 100%)
+     * @param factorTier2Bps Leverage factor tier1-tier2 (default 50%)
+     * @param factorTier3Bps Leverage factor tier2-tier3 (default 20%)
+     * @param factorEmergencyBps Leverage factor above tier3 (default 4%)
+     */
+    function setUtilizationConfig(
+        uint16 tier1Bps,
+        uint16 tier2Bps,
+        uint16 tier3Bps,
+        uint16 factorTier1Bps,
+        uint16 factorTier2Bps,
+        uint16 factorTier3Bps,
+        uint16 factorEmergencyBps
+    ) external onlyVaultManagerOrHelper {
+        // Validate using VaultConfigLib
+        VaultConfigLib.UtilizationConfig memory config = VaultConfigLib.UtilizationConfig({
+            tier1Bps: tier1Bps,
+            tier2Bps: tier2Bps,
+            tier3Bps: tier3Bps,
+            factorTier1Bps: factorTier1Bps,
+            factorTier2Bps: factorTier2Bps,
+            factorTier3Bps: factorTier3Bps,
+            factorEmergencyBps: factorEmergencyBps
+        });
+        if (!VaultConfigLib.validateUtilizationConfig(config)) {
+            revert InvalidParameters();
+        }
+
+        VaultStorageLib.RiskStorage storage risk = _risk();
+        risk.utilizationConfig = config;
+
+        emit UtilizationConfigUpdated(
+            tier1Bps,
+            tier2Bps,
+            tier3Bps,
+            factorTier1Bps,
+            factorTier2Bps,
+            factorTier3Bps,
+            factorEmergencyBps,
+            block.timestamp
+        );
+    }
+
+    /**
+     * @notice Set max profit cap multiplier (per-vault)
+     * @param multiplier New multiplier (e.g., 3 = 3x collateral)
+     */
+    function setMaxProfitCapMultiplier(uint8 multiplier) external onlyVaultManagerOrHelper {
+        if (!VaultConfigLib.validateMaxProfitCapMultiplier(multiplier)) {
+            revert InvalidParameters();
+        }
+
+        VaultStorageLib.RiskStorage storage risk = _risk();
+        uint8 oldMultiplier = risk.maxProfitCapMultiplier;
+        risk.maxProfitCapMultiplier = multiplier;
+
+        emit MaxProfitCapMultiplierUpdated(oldMultiplier, multiplier, block.timestamp);
+    }
+
+    /**
+     * @notice Get max profit cap multiplier
+     * @return multiplier Current max profit cap multiplier
+     */
+    function getMaxProfitCapMultiplier() external view returns (uint8) {
+        return _risk().maxProfitCapMultiplier;
+    }
+
+    // ========================================================================
     // VIEW FUNCTIONS
     // ========================================================================
 
@@ -922,7 +1158,9 @@ contract VaultCore is VaultModuleBase {
         }
 
         if (currentIdx > core.queueStartIndex) {
+            uint256 oldIndex = core.queueStartIndex;
             core.queueStartIndex = currentIdx;
+            emit QueueIndexUpdated(oldIndex, currentIdx, block.timestamp);
         }
     }
 

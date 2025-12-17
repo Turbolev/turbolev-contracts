@@ -30,10 +30,6 @@ library FundingRateLib {
     /// @notice Precision for funding rate calculations (18 decimals)
     uint256 public constant FUNDING_PRECISION = 1e18;
 
-    /// @notice Basis points denominator
-    /// @dev 8.4 FIX: This value MUST match MathLib.BASIS_POINTS (10_000)
-    uint256 public constant BASIS_POINTS = 10_000;
-
     /// @notice Seconds in one hour
     uint256 public constant SECONDS_PER_HOUR = 3600;
 
@@ -128,7 +124,7 @@ library FundingRateLib {
 
         // Calculate imbalance in basis points
         // imbalanceBps = (difference * 10000) / totalOI
-        imbalanceBps = (difference * BASIS_POINTS) / totalOI;
+        imbalanceBps = (difference * MathLib.BASIS_POINTS) / totalOI;
 
         return (imbalanceBps, isLongDominant, hasCounterparty);
     }
@@ -192,8 +188,8 @@ library FundingRateLib {
     {
         // Convert rate from bps to scaled value
         // rateBps = 1 means 0.01% = 0.0001 = 1/10000
-        // Scaled: 1 * FUNDING_PRECISION / BASIS_POINTS
-        int256 scaledRate = int256((uint256(rateBps) * FUNDING_PRECISION) / BASIS_POINTS);
+        // Scaled: 1 * FUNDING_PRECISION / MathLib.BASIS_POINTS
+        int256 scaledRate = int256((uint256(rateBps) * FUNDING_PRECISION) / MathLib.BASIS_POINTS);
 
         if (isLongDominant) {
             // Longs pay, shorts receive
@@ -295,7 +291,7 @@ library FundingRateLib {
         }
 
         // Check if effective collateral is below maintenance margin
-        uint256 maintenanceMargin = (collateral * maintenanceMarginRatio) / BASIS_POINTS;
+        uint256 maintenanceMargin = (collateral * maintenanceMarginRatio) / MathLib.BASIS_POINTS;
 
         return effectiveCollateral < maintenanceMargin;
     }

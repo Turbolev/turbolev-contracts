@@ -60,6 +60,15 @@ contract VaultAdminProxy is Initializable, UUPSUpgradeable {
     event FeesWithdrawn(address indexed vault, uint256 amount, uint256 timestamp);
     event BatchFundingUpdated(uint256 vaultsUpdated, uint256 timestamp);
     event PriceFeedManagerUpdated(address indexed oldManager, address indexed newManager);
+    event VaultLeverageTierConfigUpdated(address indexed vault, uint256 timestamp);
+    event VaultTotalOITierConfigUpdated(address indexed vault, uint256 timestamp);
+    event VaultMaxDirectionalExposureUpdated(
+        address indexed vault, uint16 maxDirectionalExposureBps, uint256 timestamp
+    );
+    event VaultUtilizationConfigUpdated(address indexed vault, uint256 timestamp);
+    event VaultMaxProfitCapMultiplierUpdated(
+        address indexed vault, uint8 multiplier, uint256 timestamp
+    );
 
     // ========================================================================
     // ERRORS
@@ -410,6 +419,136 @@ contract VaultAdminProxy is Initializable, UUPSUpgradeable {
                 continue;
             }
         }
+    }
+
+    // ========================================================================
+    // RISK CONFIG ADMIN (VAULT_ADMIN_ROLE)
+    // ========================================================================
+
+    /**
+     * @notice Set leverage tier configuration for a vault
+     * @param projectToken Project token address
+     * @param tier1Threshold TVL threshold for tier 1
+     * @param tier2Threshold TVL threshold for tier 2
+     * @param tier1MaxLeverage Max leverage for tier 1
+     * @param tier2MaxLeverage Max leverage for tier 2
+     * @param tier3MaxLeverage Max leverage for tier 3
+     */
+    function setVaultLeverageTierConfig(
+        address projectToken,
+        uint256 tier1Threshold,
+        uint256 tier2Threshold,
+        uint16 tier1MaxLeverage,
+        uint16 tier2MaxLeverage,
+        uint16 tier3MaxLeverage
+    ) external onlyVaultAdmin {
+        address vault = _getVault(projectToken);
+        IVaultRouter(vault)
+            .setLeverageTierConfig(
+                tier1Threshold, tier2Threshold, tier1MaxLeverage, tier2MaxLeverage, tier3MaxLeverage
+            );
+        emit VaultLeverageTierConfigUpdated(vault, block.timestamp);
+    }
+
+    /**
+     * @notice Set total OI tier configuration for a vault
+     * @param projectToken Project token address
+     * @param totalOIRiskMultiplierBps Fixed multiplier when tiers disabled
+     * @param tier1Threshold Small vault threshold
+     * @param tier2Threshold Medium vault threshold
+     * @param tier3Threshold Large vault threshold
+     * @param tier1MultiplierBps Multiplier for tier 1
+     * @param tier2MultiplierBps Multiplier for tier 2
+     * @param tier3MultiplierBps Multiplier for tier 3
+     * @param tier4MultiplierBps Multiplier for tier 4
+     */
+    function setVaultTotalOITierConfig(
+        address projectToken,
+        uint16 totalOIRiskMultiplierBps,
+        uint256 tier1Threshold,
+        uint256 tier2Threshold,
+        uint256 tier3Threshold,
+        uint16 tier1MultiplierBps,
+        uint16 tier2MultiplierBps,
+        uint16 tier3MultiplierBps,
+        uint16 tier4MultiplierBps
+    ) external onlyVaultAdmin {
+        address vault = _getVault(projectToken);
+        IVaultRouter(vault)
+            .setTotalOITierConfig(
+                totalOIRiskMultiplierBps,
+                tier1Threshold,
+                tier2Threshold,
+                tier3Threshold,
+                tier1MultiplierBps,
+                tier2MultiplierBps,
+                tier3MultiplierBps,
+                tier4MultiplierBps
+            );
+        emit VaultTotalOITierConfigUpdated(vault, block.timestamp);
+    }
+
+    /**
+     * @notice Set max directional exposure for a vault
+     * @param projectToken Project token address
+     * @param maxDirectionalExposureBps Max directional exposure in basis points
+     */
+    function setVaultMaxDirectionalExposure(address projectToken, uint16 maxDirectionalExposureBps)
+        external
+        onlyVaultAdmin
+    {
+        address vault = _getVault(projectToken);
+        IVaultRouter(vault).setMaxDirectionalExposure(maxDirectionalExposureBps);
+        emit VaultMaxDirectionalExposureUpdated(vault, maxDirectionalExposureBps, block.timestamp);
+    }
+
+    /**
+     * @notice Set utilization config for a vault
+     * @param projectToken Project token address
+     * @param tier1Bps Threshold for full leverage
+     * @param tier2Bps Threshold for reduced leverage
+     * @param tier3Bps Threshold for emergency mode
+     * @param factorTier1Bps Leverage factor for tier 1
+     * @param factorTier2Bps Leverage factor for tier 2
+     * @param factorTier3Bps Leverage factor for tier 3
+     * @param factorEmergencyBps Leverage factor for emergency
+     */
+    function setVaultUtilizationConfig(
+        address projectToken,
+        uint16 tier1Bps,
+        uint16 tier2Bps,
+        uint16 tier3Bps,
+        uint16 factorTier1Bps,
+        uint16 factorTier2Bps,
+        uint16 factorTier3Bps,
+        uint16 factorEmergencyBps
+    ) external onlyVaultAdmin {
+        address vault = _getVault(projectToken);
+        IVaultRouter(vault)
+            .setUtilizationConfig(
+                tier1Bps,
+                tier2Bps,
+                tier3Bps,
+                factorTier1Bps,
+                factorTier2Bps,
+                factorTier3Bps,
+                factorEmergencyBps
+            );
+        emit VaultUtilizationConfigUpdated(vault, block.timestamp);
+    }
+
+    /**
+     * @notice Set max profit cap multiplier for a vault
+     * @param projectToken Project token address
+     * @param multiplier Max profit cap multiplier
+     */
+    function setVaultMaxProfitCapMultiplier(address projectToken, uint8 multiplier)
+        external
+        onlyVaultAdmin
+    {
+        address vault = _getVault(projectToken);
+        IVaultRouter(vault).setMaxProfitCapMultiplier(multiplier);
+        emit VaultMaxProfitCapMultiplierUpdated(vault, multiplier, block.timestamp);
     }
 
     // ========================================================================
