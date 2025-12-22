@@ -191,6 +191,7 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
 
     /**
      * @notice Update vault P&L after position settlement
+     * @return closeFee The close fee collected (to be deducted from trader payout)
      */
     function updateVaultPnL(
         uint64 positionId,
@@ -200,8 +201,8 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
         uint256 positionSize,
         uint8 direction,
         address user
-    ) external {
-        _delegateToCore(
+    ) external returns (uint256 closeFee) {
+        bytes memory result = _delegateToCore(
             abi.encodeWithSignature(
                 "updateVaultPnL(uint64,uint256,int256,uint256,uint256,uint8,address)",
                 positionId,
@@ -213,6 +214,7 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
                 user
             )
         );
+        return abi.decode(result, (uint256));
     }
 
     /**
@@ -799,10 +801,17 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
     }
 
     /**
-     * @notice Get withdrawable fees
+     * @notice Get withdrawable fees (from fee pool)
      */
     function withdrawableFees() external view returns (uint256) {
-        return VaultStorageLib.getCoreStorage().withdrawableFees;
+        return VaultStorageLib.getCoreStorage().feePool;
+    }
+
+    /**
+     * @notice Get fee pool balance
+     */
+    function feePool() external view returns (uint256) {
+        return VaultStorageLib.getCoreStorage().feePool;
     }
 
     /**

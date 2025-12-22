@@ -88,9 +88,24 @@ contract VaultFundingTest is BaseTestModular {
         (uint256 rateBps, bool longsPayShorts, uint256 imbalanceBps, bool hasCounterparty) =
             vault.getCurrentHourlyFundingRate();
 
-        // With no exposure, should have minimal rate
-        assertGe(rateBps, 0);
+        // With no exposure, rate should be 0 (no counterparty)
+        assertEq(rateBps, 0);
         // longsPayShorts can be either true or false with no exposure
+        assertEq(imbalanceBps, 0);
+        assertFalse(hasCounterparty);
+    }
+
+    function test_GetCurrentHourlyFundingRate_FundingDisabled() public {
+        // Disable funding
+        vm.prank(address(vaultManager));
+        vault.setFundingEnabled(false);
+
+        (uint256 rateBps, bool longsPayShorts, uint256 imbalanceBps, bool hasCounterparty) =
+            vault.getCurrentHourlyFundingRate();
+
+        // When funding is disabled, all values should be 0/false
+        assertEq(rateBps, 0);
+        assertFalse(longsPayShorts);
         assertEq(imbalanceBps, 0);
         assertFalse(hasCounterparty);
     }

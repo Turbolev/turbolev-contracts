@@ -149,7 +149,7 @@ library VaultStorageLib {
         uint256 queueStartIndex;
         // Fees
         FeeConfig feeConfig;
-        uint256 withdrawableFees;
+        uint256 feePool; // Accumulated fees (open, close, staking, penalty) - separate from LP liquidity
         // Reentrancy guard
         uint256 reentrancyStatus;
         // Paused state

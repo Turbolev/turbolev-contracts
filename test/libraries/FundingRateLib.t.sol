@@ -23,6 +23,28 @@ contract FundingRateLibWrapper {
             direction
         );
     }
+
+    function calculatePositionFundingZeroSum(
+        int256 entryRateLong,
+        int256 entryRateShort,
+        int256 currentRateLong,
+        int256 currentRateShort,
+        uint256 positionSize,
+        uint8 direction,
+        uint256 longOI,
+        uint256 shortOI
+    ) external pure returns (int256) {
+        return FundingRateLib.calculatePositionFundingZeroSum(
+            entryRateLong,
+            entryRateShort,
+            currentRateLong,
+            currentRateShort,
+            positionSize,
+            direction,
+            longOI,
+            shortOI
+        );
+    }
 }
 
 contract FundingRateLibTest is Test {
@@ -442,6 +464,316 @@ contract FundingRateLibTest is Test {
     function test_CalculateFundingDistribution_ZeroPosition() public pure {
         uint256 share = FundingRateLib.calculateFundingDistribution(1000 ether, 100_000 ether, 0);
         assertEq(share, 0);
+    }
+
+    // ========================================================================
+    // ZERO-SUM FUNDING TESTS
+    // ========================================================================
+
+    function test_CalculatePositionFundingZeroSum_LongPays() public pure {
+        // Long OI: 80,000, Short OI: 20,000
+        // Long is dominant, pays 0.1% rate
+        // Rate = +0.1% for longs (they pay)
+        int256 entryRateLong = 0;
+        int256 currentRateLong = int256(10 * FUNDING_PRECISION / BASIS_POINTS); // +0.1%
+        int256 entryRateShort = 0;
+        int256 currentRateShort = -int256(10 * FUNDING_PRECISION / BASIS_POINTS); // -0.1%
+
+        uint256 longOI = 80_000 ether;
+        uint256 shortOI = 20_000 ether;
+
+        // Long position of 10,000 (pays)
+        int256 longFunding = FundingRateLib.calculatePositionFundingZeroSum(
+            entryRateLong,
+            entryRateShort,
+            currentRateLong,
+            currentRateShort,
+            10_000 ether, // position size
+            1, // LONG
+            longOI,
+            shortOI
+        );
+
+        // Long pays: 10,000 * 0.1% = 10 ether
+        assertEq(longFunding, 10 ether);
+    }
+
+    function test_CalculatePositionFundingZeroSum_ShortReceives() public pure {
+        // Long OI: 80,000, Short OI: 20,000
+        // Long is dominant, shorts receive
+        int256 entryRateLong = 0;
+        int256 currentRateLong = int256(10 * FUNDING_PRECISION / BASIS_POINTS); // +0.1%
+        int256 entryRateShort = 0;
+        int256 currentRateShort = -int256(10 * FUNDING_PRECISION / BASIS_POINTS); // -0.1% (receives)
+
+        uint256 longOI = 80_000 ether;
+        uint256 shortOI = 20_000 ether;
+
+        // Short position of 5,000 (receives)
+        int256 shortFunding = FundingRateLib.calculatePositionFundingZeroSum(
+            entryRateLong,
+            entryRateShort,
+            currentRateLong,
+            currentRateShort,
+            5000 ether, // position size
+            2, // SHORT
+            longOI,
+            shortOI
+        );
+
+        // Short receives: amplified by OI ratio
+        // Rate is -0.1%, amplified by (80k/20k) = 4x
+        // So effective rate = -0.4%
+        // 5,000 * 0.4% = 20 ether (negative = receives)
+        assertEq(shortFunding, -20 ether);
+    }
+
+    function test_CalculatePositionFundingZeroSum_IsZeroSum() public pure {
+        // CRITICAL TEST: Verify total Long pays = total Short receives
+        // Long OI: 80,000, Short OI: 20,000
+        int256 entryRateLong = 0;
+        int256 currentRateLong = int256(10 * FUNDING_PRECISION / BASIS_POINTS); // +0.1%
+        int256 entryRateShort = 0;
+        int256 currentRateShort = -int256(10 * FUNDING_PRECISION / BASIS_POINTS); // -0.1%
+
+        uint256 longOI = 80_000 ether;
+        uint256 shortOI = 20_000 ether;
+
+        // Calculate total Long pays (sum of all long positions)
+        // For simplicity, treat entire longOI as one position
+        int256 totalLongPays = FundingRateLib.calculatePositionFundingZeroSum(
+            entryRateLong,
+            entryRateShort,
+            currentRateLong,
+            currentRateShort,
+            longOI, // entire long OI
+            1, // LONG
+            longOI,
+            shortOI
+        );
+
+        // Calculate total Short receives (sum of all short positions)
+        int256 totalShortReceives = FundingRateLib.calculatePositionFundingZeroSum(
+            entryRateLong,
+            entryRateShort,
+            currentRateLong,
+            currentRateShort,
+            shortOI, // entire short OI
+            2, // SHORT
+            longOI,
+            shortOI
+        );
+
+        // totalLongPays should be positive (longs pay)
+        assertTrue(totalLongPays > 0, "Longs should pay");
+        // totalShortReceives should be negative (shorts receive)
+        assertTrue(totalShortReceives < 0, "Shorts should receive");
+
+        // ZERO-SUM: totalLongPays = |totalShortReceives|
+        assertEq(totalLongPays, -totalShortReceives, "Funding should be zero-sum");
+    }
+
+    function test_CalculatePositionFundingZeroSum_NoCounterparty_LongOnly() public pure {
+        // Only longs exist, no funding should be charged
+        int256 entryRateLong = 0;
+        int256 currentRateLong = int256(10 * FUNDING_PRECISION / BASIS_POINTS);
+        int256 entryRateShort = 0;
+        int256 currentRateShort = 0;
+
+        int256 funding = FundingRateLib.calculatePositionFundingZeroSum(
+            entryRateLong,
+            entryRateShort,
+            currentRateLong,
+            currentRateShort,
+            10_000 ether,
+            1, // LONG
+            10_000 ether, // longOI
+            0 // NO SHORT OI
+        );
+
+        assertEq(funding, 0, "No funding when no counterparty");
+    }
+
+    function test_CalculatePositionFundingZeroSum_NoCounterparty_ShortOnly() public pure {
+        // Only shorts exist, no funding should be charged
+        int256 entryRateLong = 0;
+        int256 currentRateLong = 0;
+        int256 entryRateShort = 0;
+        int256 currentRateShort = int256(10 * FUNDING_PRECISION / BASIS_POINTS);
+
+        int256 funding = FundingRateLib.calculatePositionFundingZeroSum(
+            entryRateLong,
+            entryRateShort,
+            currentRateLong,
+            currentRateShort,
+            10_000 ether,
+            2, // SHORT
+            0, // NO LONG OI
+            10_000 ether // shortOI
+        );
+
+        assertEq(funding, 0, "No funding when no counterparty");
+    }
+
+    function test_CalculatePositionFundingZeroSum_InvalidDirection() public {
+        vm.expectRevert(FundingRateLib.InvalidDirection.selector);
+        wrapper.calculatePositionFundingZeroSum(0, 0, 0, 0, 1000 ether, 0, 1000 ether, 1000 ether);
+    }
+
+    function test_CalculatePositionFundingZeroSum_BalancedOI() public pure {
+        // Equal OI on both sides
+        // Long OI: 50,000, Short OI: 50,000
+        int256 entryRateLong = 0;
+        int256 currentRateLong = int256(5 * FUNDING_PRECISION / BASIS_POINTS); // +0.05%
+        int256 entryRateShort = 0;
+        int256 currentRateShort = -int256(5 * FUNDING_PRECISION / BASIS_POINTS); // -0.05%
+
+        uint256 longOI = 50_000 ether;
+        uint256 shortOI = 50_000 ether;
+
+        // Long position pays
+        int256 longFunding = FundingRateLib.calculatePositionFundingZeroSum(
+            entryRateLong,
+            entryRateShort,
+            currentRateLong,
+            currentRateShort,
+            10_000 ether,
+            1,
+            longOI,
+            shortOI
+        );
+
+        // Short position receives
+        int256 shortFunding = FundingRateLib.calculatePositionFundingZeroSum(
+            entryRateLong,
+            entryRateShort,
+            currentRateLong,
+            currentRateShort,
+            10_000 ether,
+            2,
+            longOI,
+            shortOI
+        );
+
+        // With balanced OI, ratio is 1:1, so both should be equal magnitude
+        // Long pays 10,000 * 0.05% = 5 ether
+        assertEq(longFunding, 5 ether);
+        // Short receives 10,000 * 0.05% * (50k/50k) = 5 ether
+        assertEq(shortFunding, -5 ether);
+    }
+
+    function test_ZeroSumFunding_LongDominant() public pure {
+        // Long OI: 80,000, Short OI: 20,000 (Long pays, Short receives)
+        uint256 longOI = 80_000 ether;
+        uint256 shortOI = 20_000 ether;
+        uint16 rateBps = 5; // 0.05%
+
+        (int256 longDelta, int256 shortDelta) =
+            FundingRateLib.calculateHourlyRateDelta(rateBps, true);
+
+        int256 totalLongFunding = FundingRateLib.calculatePositionFundingZeroSum(
+            0, 0, longDelta, shortDelta, longOI, 1, longOI, shortOI
+        );
+
+        int256 totalShortFunding = FundingRateLib.calculatePositionFundingZeroSum(
+            0, 0, longDelta, shortDelta, shortOI, 2, longOI, shortOI
+        );
+
+        // Zero-sum check
+        assertEq(totalLongFunding + totalShortFunding, 0, "Should be zero-sum");
+
+        // Long pays 80000 * 0.05% = 40 ether
+        assertEq(totalLongFunding, 40 ether, "Long should pay 40 ether");
+        // Short receives 40 ether (full amount long paid)
+        assertEq(totalShortFunding, -40 ether, "Short should receive 40 ether");
+    }
+
+    function test_ZeroSumFunding_ShortDominant() public pure {
+        // Long OI: 30,000, Short OI: 70,000 (Short pays, Long receives)
+        uint256 longOI = 30_000 ether;
+        uint256 shortOI = 70_000 ether;
+        uint16 rateBps = 3; // 0.03%
+
+        (int256 longDelta, int256 shortDelta) =
+            FundingRateLib.calculateHourlyRateDelta(rateBps, false);
+
+        int256 totalLongFunding = FundingRateLib.calculatePositionFundingZeroSum(
+            0, 0, longDelta, shortDelta, longOI, 1, longOI, shortOI
+        );
+
+        int256 totalShortFunding = FundingRateLib.calculatePositionFundingZeroSum(
+            0, 0, longDelta, shortDelta, shortOI, 2, longOI, shortOI
+        );
+
+        // Zero-sum check
+        assertEq(totalLongFunding + totalShortFunding, 0, "Should be zero-sum");
+
+        // Short pays 70000 * 0.03% = 21 ether
+        assertEq(totalShortFunding, 21 ether, "Short should pay 21 ether");
+        // Long receives 21 ether (full amount short paid)
+        assertEq(totalLongFunding, -21 ether, "Long should receive 21 ether");
+    }
+
+    function test_ZeroSumFunding_HeavyImbalance() public pure {
+        // Long OI: 95,000, Short OI: 5,000 (extreme imbalance)
+        uint256 longOI = 95_000 ether;
+        uint256 shortOI = 5000 ether;
+        uint16 rateBps = 10; // 0.10%
+
+        (int256 longDelta, int256 shortDelta) =
+            FundingRateLib.calculateHourlyRateDelta(rateBps, true);
+
+        int256 totalLongFunding = FundingRateLib.calculatePositionFundingZeroSum(
+            0, 0, longDelta, shortDelta, longOI, 1, longOI, shortOI
+        );
+
+        int256 totalShortFunding = FundingRateLib.calculatePositionFundingZeroSum(
+            0, 0, longDelta, shortDelta, shortOI, 2, longOI, shortOI
+        );
+
+        // Zero-sum check
+        assertEq(totalLongFunding + totalShortFunding, 0, "Should be zero-sum");
+
+        // Long pays 95000 * 0.10% = 95 ether
+        assertEq(totalLongFunding, 95 ether, "Long should pay 95 ether");
+        // Short receives 95 ether total (amplified rate)
+        assertEq(totalShortFunding, -95 ether, "Short should receive 95 ether");
+    }
+
+    function test_ZeroSumFunding_IndividualPositions() public pure {
+        // Test that individual position funding also follows zero-sum
+        // Long OI: 100,000 (2 traders: 60k + 40k)
+        // Short OI: 50,000 (1 trader: 50k)
+        uint256 longOI = 100_000 ether;
+        uint256 shortOI = 50_000 ether;
+        uint16 rateBps = 5;
+
+        (int256 longDelta, int256 shortDelta) =
+            FundingRateLib.calculateHourlyRateDelta(rateBps, true);
+
+        // Long trader 1: 60k position
+        int256 long1Funding = FundingRateLib.calculatePositionFundingZeroSum(
+            0, 0, longDelta, shortDelta, 60_000 ether, 1, longOI, shortOI
+        );
+
+        // Long trader 2: 40k position
+        int256 long2Funding = FundingRateLib.calculatePositionFundingZeroSum(
+            0, 0, longDelta, shortDelta, 40_000 ether, 1, longOI, shortOI
+        );
+
+        // Short trader: 50k position
+        int256 shortFunding = FundingRateLib.calculatePositionFundingZeroSum(
+            0, 0, longDelta, shortDelta, 50_000 ether, 2, longOI, shortOI
+        );
+
+        // Total long pays = 60k * 0.05% + 40k * 0.05% = 30 + 20 = 50 ether
+        assertEq(long1Funding + long2Funding, 50 ether, "Total long should pay 50 ether");
+
+        // Short receives all 50 ether
+        assertEq(shortFunding, -50 ether, "Short should receive 50 ether");
+
+        // Zero-sum across all traders
+        assertEq(long1Funding + long2Funding + shortFunding, 0, "Total should be zero-sum");
     }
 
     // ========================================================================

@@ -61,6 +61,7 @@ interface IVaultRouter {
     function tradingEnabled() external view returns (bool);
     function isGraduated() external view returns (bool);
     function withdrawableFees() external view returns (uint256);
+    function feePool() external view returns (uint256);
 
     // ========================================================================
     // EXPOSURE GETTERS
@@ -166,7 +167,7 @@ interface IVaultRouter {
         uint256 positionSize,
         uint8 direction,
         address user
-    ) external;
+    ) external returns (uint256 closeFee);
 
     function checkPositionRisk(uint256 positionSize, uint8 leverage, uint8 direction) external view;
 

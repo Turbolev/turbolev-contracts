@@ -1074,9 +1074,10 @@ contract PositionManager is
             emit FundingSettled(positionId, pos.user, fundingOwed, pos.direction, block.timestamp);
         }
 
-        // Update vault P&L (includes funding adjustment)
+        // Update vault P&L and get close fee (includes funding adjustment)
+        uint256 closeFee = 0;
         if (vaultManager != address(0)) {
-            IVaultManager(vaultManager)
+            closeFee = IVaultManager(vaultManager)
                 .updateVaultPnLWithLeverage(
                     pos.projectToken, // Project token
                     positionId, // Position ID for tracking
@@ -1087,6 +1088,14 @@ contract PositionManager is
                     pos.direction, // Pass position direction
                     pos.user // M-05 FIX: Pass user address instead of tx.origin
                 );
+        }
+
+        // Deduct close fee from payout (fee is collected by vault)
+        if (closeFee > 0 && adjustedPayout > closeFee) {
+            adjustedPayout -= closeFee;
+        } else if (closeFee > 0) {
+            // If close fee >= payout, trader gets nothing
+            adjustedPayout = 0;
         }
 
         // Execute payout if user has any payout (v1: always project token)

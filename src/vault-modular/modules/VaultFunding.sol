@@ -159,12 +159,13 @@ contract VaultFunding is VaultModuleBase {
     }
 
     /**
-     * @notice Calculate funding owed by a position
+     * @notice Calculate funding owed by a position (zero-sum distribution)
      * @param entryRateLong Entry cumulative funding rate for Longs
      * @param entryRateShort Entry cumulative funding rate for Shorts
      * @param positionSize Position size
      * @param direction Position direction (1 = LONG, 2 = SHORT)
      * @return fundingOwed Funding owed (positive = owes, negative = receives)
+     * @dev Uses zero-sum distribution: Total paid by dominant = Total received by minority
      */
     function calculatePositionFunding(
         int256 entryRateLong,
@@ -176,22 +177,25 @@ contract VaultFunding is VaultModuleBase {
 
         if (!funding.fundingEnabled) return 0;
 
-        return FundingRateLib.calculatePositionFunding(
+        return FundingRateLib.calculatePositionFundingZeroSum(
             entryRateLong,
             entryRateShort,
             funding.cumulativeFundingRateLong,
             funding.cumulativeFundingRateShort,
             positionSize,
-            direction
+            direction,
+            funding.totalLongExposure,
+            funding.totalShortExposure
         );
     }
 
     /**
      * @notice Get current hourly funding rate based on imbalance
-     * @return rateBps Current hourly rate in basis points
+     * @return rateBps Current hourly rate in basis points (0 if disabled or no counterparty)
      * @return longsPayShorts True if longs pay shorts
      * @return imbalanceBps Current imbalance in basis points
      * @return hasCounterparty True if there's a counterparty
+     * @dev Returns rateBps = 0 if funding is disabled or no counterparty exists
      */
     function getCurrentHourlyFundingRate()
         external
@@ -200,9 +204,20 @@ contract VaultFunding is VaultModuleBase {
     {
         VaultStorageLib.FundingStorage storage funding = _funding();
 
+        // Return 0 if funding is disabled
+        if (!funding.fundingEnabled) {
+            return (0, false, 0, false);
+        }
+
         (imbalanceBps, longsPayShorts, hasCounterparty) = FundingRateLib.calculateImbalance(
             funding.totalLongExposure, funding.totalShortExposure
         );
+
+        // Only return rate if there's a counterparty (funding only applies when both sides exist)
+        if (!hasCounterparty) {
+            return (0, longsPayShorts, imbalanceBps, false);
+        }
+
         rateBps = FundingRateLib.getHourlyRate(imbalanceBps, funding.fundingConfig);
     }
 
@@ -217,6 +232,7 @@ contract VaultFunding is VaultModuleBase {
      * @return isLiquidatable True if position should be liquidated
      * @return fundingOwed Funding owed
      * @return effectiveCollateral Effective collateral after funding
+     * @dev Uses zero-sum funding calculation
      */
     function checkFundingLiquidation(
         uint256 collateral,
@@ -230,13 +246,15 @@ contract VaultFunding is VaultModuleBase {
 
         if (!funding.fundingEnabled) return (false, 0, collateral);
 
-        fundingOwed = FundingRateLib.calculatePositionFunding(
+        fundingOwed = FundingRateLib.calculatePositionFundingZeroSum(
             entryRateLong,
             entryRateShort,
             funding.cumulativeFundingRateLong,
             funding.cumulativeFundingRateShort,
             positionSize,
-            direction
+            direction,
+            funding.totalLongExposure,
+            funding.totalShortExposure
         );
 
         bool isNegative;

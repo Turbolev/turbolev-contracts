@@ -318,14 +318,16 @@ contract VaultCore is VaultModuleBase {
         lpPos.shares += shares;
         lpPos.stakedAmount += netAmount;
 
-        // Update vault info
-        core.vaultInfo.totalLiquidity += amount;
+        // Update vault info - only add netAmount to LP liquidity pool
+        core.vaultInfo.totalLiquidity += netAmount;
         core.vaultInfo.totalShares += shares;
 
-        // Track fees
-        core.vaultInfo.totalFeesCollected += stakingFee;
-        core.vaultInfo.totalStakingFees += stakingFee;
-        core.withdrawableFees += stakingFee;
+        // Track staking fees in separate fee pool (not mixed with LP liquidity)
+        if (stakingFee > 0) {
+            core.feePool += stakingFee;
+            core.vaultInfo.totalFeesCollected += stakingFee;
+            core.vaultInfo.totalStakingFees += stakingFee;
+        }
 
         // Emit events
         emit LiquidityAdded(
@@ -373,24 +375,27 @@ contract VaultCore is VaultModuleBase {
             netPayout = grossAmount - withdrawalFee;
         }
 
-        if (netPayout > core.vaultInfo.totalLiquidity) revert InsufficientLiquidity();
+        if (grossAmount > core.vaultInfo.totalLiquidity) revert InsufficientLiquidity();
 
-        // Update state
+        // Update state - keep user address for reward claiming
         lpPos.shares = 0;
         lpPos.stakedAmount = 0;
+        // NOTE: Do NOT reset lpPos.user - user can still claim pending rewards!
 
-        // Remove LP from array
+        // Remove LP from active array
         if (core.lpIndex[msg.sender] > 0) {
             _removeLPFromArray(msg.sender);
         }
 
-        core.vaultInfo.totalLiquidity -= netPayout;
+        // Deduct FULL grossAmount from LP liquidity pool
+        core.vaultInfo.totalLiquidity -= grossAmount;
         core.vaultInfo.totalShares -= shares;
 
+        // Early withdrawal fee goes to separate fee pool (not LP liquidity)
         if (withdrawalFee > 0) {
+            core.feePool += withdrawalFee;
             core.vaultInfo.totalWithdrawalFees += withdrawalFee;
             core.vaultInfo.totalFeesCollected += withdrawalFee;
-            core.withdrawableFees += withdrawalFee;
         }
 
         // Emit events
@@ -442,9 +447,9 @@ contract VaultCore is VaultModuleBase {
                 VaultPayoutLib.calculateOpenFee(amount, core.feeConfig.openPositionFeeBps);
 
             if (openFee > 0) {
-                core.vaultInfo.totalLiquidity += openFee;
+                // Open fee goes to feePool (separate from LP liquidity)
+                core.feePool += openFee;
                 core.vaultInfo.totalFeesCollected += openFee;
-                core.withdrawableFees += openFee;
                 emit OpenPositionFeeCollected(
                     positionId, msg.sender, openFee, netCollateral, block.timestamp
                 );
@@ -548,8 +553,13 @@ contract VaultCore is VaultModuleBase {
             );
         }
 
-        // Clear collateral
+        // Clear collateral and emit event
+        uint256 clearedCollateral = core.betCollateral[positionId];
         delete core.betCollateral[positionId];
+
+        if (clearedCollateral > 0) {
+            emit BetCollateralUpdated(positionId, clearedCollateral, 0, false, block.timestamp);
+        }
 
         emit PayoutExecuted(user, amount, block.timestamp);
 
@@ -562,6 +572,7 @@ contract VaultCore is VaultModuleBase {
 
     /**
      * @notice Update vault P&L after position settlement
+     * @return closeFee The close fee collected (to be deducted from trader payout)
      */
     function updateVaultPnL(
         uint64 positionId,
@@ -571,23 +582,22 @@ contract VaultCore is VaultModuleBase {
         uint256 positionSize,
         uint8 direction,
         address user
-    ) external onlyVaultManagerOrHelper {
+    ) external onlyVaultManagerOrHelper returns (uint256 closeFee) {
         VaultStorageLib.CoreStorage storage core = _core();
         VaultStorageLib.FundingStorage storage funding = _funding();
         VaultStorageLib.RewardsStorage storage rewards = _rewards();
 
-        // Calculate close fee
-        uint256 closeFee =
-            VaultPayoutLib.calculateCloseFee(collateral, core.feeConfig.closePositionFeeBps);
+        // Calculate close fee (returned to caller for deduction from payout)
+        closeFee = VaultPayoutLib.calculateCloseFee(collateral, core.feeConfig.closePositionFeeBps);
 
         if (closeFee > 0) {
-            core.vaultInfo.totalLiquidity += closeFee;
+            // Close fee goes to feePool (separate from LP liquidity)
+            core.feePool += closeFee;
             core.vaultInfo.totalFeesCollected += closeFee;
-            core.withdrawableFees += closeFee;
             emit ClosePositionFeeCollected(positionId, user, closeFee, block.timestamp);
         }
 
-        // Calculate PnL update
+        // Calculate PnL update for lifetime tracking (stats only)
         VaultPayoutLib.PnLUpdateParams memory pnlParams = VaultPayoutLib.PnLUpdateParams({
             collateral: collateral,
             vaultPnL: vaultPnL,
@@ -599,26 +609,15 @@ contract VaultCore is VaultModuleBase {
         VaultPayoutLib.PnLUpdateResult memory pnlResult =
             VaultPayoutLib.calculatePnLUpdate(pnlParams);
 
-        // Apply liquidity change
-        if (pnlResult.isLiquidityIncrease && pnlResult.liquidityChange > 0) {
-            core.vaultInfo.totalLiquidity += pnlResult.liquidityChange;
+        // NOTE: PnL is NOT added to totalLiquidity!
+        // PnL is distributed to LPs via dailyNetPnL -> finalizeDailyReward -> claimableRewards
+        // This prevents double-counting (LP already gets PnL via rewards system)
 
-            emit LiquidityAdded(
-                address(this),
-                address(this),
-                pnlResult.liquidityChange,
-                0,
-                core.vaultInfo.totalLiquidity,
-                VaultStorageLib.LiquidityOperationType.CLOSE_POSITION,
-                block.timestamp
-            );
-        }
-
-        // Update lifetime P&L
+        // Update lifetime P&L (for stats/tracking only)
         core.vaultInfo.lifetimePnL = pnlResult.newLifetimePnL;
         core.vaultInfo.isNegativePnL = pnlResult.newIsNegativePnL;
 
-        // Track daily P&L
+        // Track daily P&L for reward distribution via finalizeDailyReward
         rewards.dailyNetPnL += VaultPayoutLib.calculateAdjustedPnL(vaultPnL, closeFee);
         rewards.dailyPositionIds.push(positionId);
 
@@ -660,13 +659,8 @@ contract VaultCore is VaultModuleBase {
         // Update positions settled
         core.vaultInfo.totalPositionsSettled++;
 
-        // Clear bet collateral
-        uint256 oldBetCollateral = core.betCollateral[positionId];
-        delete core.betCollateral[positionId];
-
-        if (oldBetCollateral > 0) {
-            emit BetCollateralUpdated(positionId, oldBetCollateral, 0, false, block.timestamp);
-        }
+        // NOTE: betCollateral is cleared in executePayout(), not here
+        // This allows executePayout() to verify position validity via betCollateral check
 
         emit VaultPnLUpdated(
             collateral,
@@ -831,13 +825,14 @@ contract VaultCore is VaultModuleBase {
     function withdrawFees(uint256 amount) external onlyVaultManagerOrHelper nonReentrant {
         VaultStorageLib.CoreStorage storage core = _core();
 
-        uint256 toWithdraw = amount == 0 ? core.withdrawableFees : amount;
-        if (toWithdraw > core.withdrawableFees) revert InsufficientLiquidity();
+        uint256 toWithdraw = amount == 0 ? core.feePool : amount;
+        if (toWithdraw > core.feePool) revert InsufficientLiquidity();
 
         address recipient = core.treasury != address(0) ? core.treasury : msg.sender;
 
-        core.withdrawableFees -= toWithdraw;
-        core.vaultInfo.totalLiquidity -= toWithdraw;
+        // Withdraw from feePool (separate from LP liquidity)
+        core.feePool -= toWithdraw;
+        // NOTE: Do NOT deduct from totalLiquidity - fees are in separate pool
 
         IERC20(core.projectToken).safeTransfer(recipient, toWithdraw);
 

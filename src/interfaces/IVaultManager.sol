@@ -94,7 +94,7 @@ interface IVaultManager {
         uint256 positionSize,
         uint8 direction,
         address user
-    ) external;
+    ) external returns (uint256 closeFee);
 
     /**
      * @notice Get vault address by project token (alias for getVault)

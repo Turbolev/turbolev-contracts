@@ -115,7 +115,7 @@ interface IAssetVault {
         uint256 positionSize,
         uint8 direction,
         address user
-    ) external;
+    ) external returns (uint256 closeFee);
 
     function updateVaultParams(uint256 _minBetAmount, uint256 _maxBetAmount) external;
 
