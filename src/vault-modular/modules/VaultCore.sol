@@ -163,6 +163,8 @@ contract VaultCore is VaultModuleBase {
     error NativeTokenNotAllowed();
     error InvalidParameters();
     error DirectTransferNotAllowed();
+    error InvalidPositionId();
+    error UserMismatch();
 
     // ========================================================================
     // CONSTANTS
@@ -502,10 +504,20 @@ contract VaultCore is VaultModuleBase {
 
         VaultStorageLib.CoreStorage storage core = _core();
 
+        // Defense-in-depth: Position must have collateral (valid position)
+        uint256 collateral = core.betCollateral[positionId];
+        if (collateral == 0) revert InvalidPositionId();
+
+        // Defense-in-depth: If pending payout exists, user must match
+        address expectedUser = core.pendingPayoutUsers[positionId];
+        if (expectedUser != address(0) && expectedUser != user) {
+            revert UserMismatch();
+        }
+
         // Calculate payout
         VaultPayoutLib.PayoutParams memory params = VaultPayoutLib.PayoutParams({
             totalAmount: amount,
-            collateral: core.betCollateral[positionId],
+            collateral: collateral,
             availableLiquidity: core.vaultInfo.totalLiquidity
         });
 
