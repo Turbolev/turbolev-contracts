@@ -164,11 +164,11 @@ contract PendingCloseUnitTest is Test {
         // Non-keeper cannot call
         vm.prank(user1);
         vm.expectRevert(PositionManager.NotPositionKeeper.selector);
-        positionManager.processPendingClosePositions(10, 3600);
+        positionManager.processPendingClosePositions(10, 3600, "");
 
         // Keeper can call (but nothing to process)
         vm.prank(keeper);
-        positionManager.processPendingClosePositions(10, 3600);
+        positionManager.processPendingClosePositions(10, 3600, "");
     }
 
     function test_CancelPendingClose_OnlyPositionKeeper() public {
@@ -209,7 +209,7 @@ contract PendingCloseUnitTest is Test {
     function test_GasEstimate_ProcessEmptyQueue() public {
         vm.prank(keeper);
         uint256 gasBefore = gasleft();
-        positionManager.processPendingClosePositions(10, 3600);
+        positionManager.processPendingClosePositions(10, 3600, "");
         uint256 gasUsed = gasBefore - gasleft();
 
         console.log("Gas used for empty queue:", gasUsed);

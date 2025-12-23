@@ -381,9 +381,9 @@ contract VaultRiskLibTest is Test {
         params.totalLongExposure = 0;
         params.totalShortExposure = 0;
 
-        // With zero TVL, getEffectiveMaxLeverage returns 1
-        // So leverage of 10 will exceed max
-        vm.expectRevert(VaultRiskLib.ExceedsMaxLeverage.selector);
+        // With zero TVL, checkPositionRisk reverts with NoLiquidityAvailable()
+        // This check happens before leverage check (line 107-109 in VaultRiskLib.sol)
+        vm.expectRevert(VaultRiskLib.NoLiquidityAvailable.selector);
         wrapper.checkPositionRisk(params);
     }
 

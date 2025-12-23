@@ -833,13 +833,15 @@ contract PositionManager is
     /**
      * @notice Admin function to process pending close positions
      * @param maxPositions Maximum number of positions to process in this batch
+     * @param maxAge Maximum age of price data
+     * @param priceUpdateData Price update data for pull oracles (Pyth)
      * @dev Should be called by backend cron task
      */
-    function processPendingClosePositions(uint256 maxPositions, uint256 maxAge)
-        external
-        nonReentrant
-        onlyPositionKeeper
-    {
+    function processPendingClosePositions(
+        uint256 maxPositions,
+        uint256 maxAge,
+        bytes calldata priceUpdateData
+    ) external payable nonReentrant onlyPositionKeeper {
         uint256 processed = 0;
         uint256 i = 0;
 
@@ -847,7 +849,7 @@ contract PositionManager is
             uint64 positionId = pendingClosePositionIds[i];
 
             // Process single pending close
-            bool success = _processSinglePendingClose(positionId, maxAge);
+            bool success = _processSinglePendingClose(positionId, maxAge, priceUpdateData);
 
             if (success) {
                 // Don't increment i since we removed an element
@@ -862,12 +864,15 @@ contract PositionManager is
     /**
      * @notice Process a single pending close position
      * @param positionId Position ID to process
+     * @param maxAge Maximum age of price data
+     * @param priceUpdateData Price update data for pull oracles (Pyth)
      * @return success True if position was successfully closed
      */
-    function _processSinglePendingClose(uint64 positionId, uint256 maxAge)
-        internal
-        returns (bool success)
-    {
+    function _processSinglePendingClose(
+        uint64 positionId,
+        uint256 maxAge,
+        bytes calldata priceUpdateData
+    ) internal returns (bool success) {
         PendingCloseRequest memory request = pendingCloseRequests[positionId];
         PositionLib.Position storage pos = positions[positionId];
 
@@ -887,7 +892,7 @@ contract PositionManager is
 
         // Try to get price and close position
         (bool closed, PendingCloseReason reason) =
-            _tryClosePendingPosition(positionId, request, pos, maxAge);
+            _tryClosePendingPosition(positionId, request, pos, maxAge, priceUpdateData);
 
         emit PendingCloseProcessed(positionId, closed, reason);
         return closed;
@@ -898,6 +903,8 @@ contract PositionManager is
      * @param positionId Position ID
      * @param request Pending close request data
      * @param pos Position storage reference
+     * @param maxAge Maximum age of price data
+     * @param priceUpdateData Price update data for pull oracles (Pyth)
      * @return success True if successfully closed
      * @return reason Reason code for success/failure
      */
@@ -905,40 +912,63 @@ contract PositionManager is
         uint64 positionId,
         PendingCloseRequest memory request,
         PositionLib.Position storage pos,
-        uint256 maxAge
+        uint256 maxAge,
+        bytes calldata priceUpdateData
     ) internal returns (bool success, PendingCloseReason reason) {
         // Try to get settlement price
         if (priceFeedManager == address(0)) {
             return (false, PendingCloseReason.SETTLEMENT_ENGINE_NOT_SET);
         }
-        try IPriceFeedManager(priceFeedManager).getPrice(pos.projectToken, maxAge) returns (
-            uint256 closePrice, uint256 pricePublishTime
-        ) {
-            // Validate price
-            if (closePrice == 0) {
-                return (false, PendingCloseReason.INVALID_PRICE);
+
+        uint256 closePrice;
+        uint256 pricePublishTime;
+
+        // Try with price update data first (for pull oracles like Pyth)
+        if (priceUpdateData.length > 0) {
+            try IPriceFeedManager(priceFeedManager).getPriceWithUpdate{ value: msg.value }(
+                pos.projectToken, maxAge, priceUpdateData
+            ) returns (
+                uint256 _price, uint256 _publishTime
+            ) {
+                closePrice = _price;
+                pricePublishTime = _publishTime;
+            } catch {
+                return (false, PendingCloseReason.PRICE_STALE);
             }
-
-            // Check if price is acceptable
-            if (!_isPriceAcceptable(closePrice, request.maxAcceptablePrice, pos.direction)) {
-                return (false, PendingCloseReason.PRICE_NOT_ACCEPTABLE);
+        } else {
+            // Fallback to cached/push oracle price
+            try IPriceFeedManager(priceFeedManager).getPrice(pos.projectToken, maxAge) returns (
+                uint256 _price, uint256 _publishTime
+            ) {
+                closePrice = _price;
+                pricePublishTime = _publishTime;
+            } catch {
+                return (false, PendingCloseReason.PRICE_STALE);
             }
-
-            // Close position (liquidation or normal)
-            bool isLiquidation = PositionLib.isLiquidated(pos, closePrice);
-            _processSettlement(
-                positionId,
-                closePrice,
-                isLiquidation,
-                pricePublishTime,
-                PositionClosedBy.PENDING_CLOSE_REQUESTED
-            );
-            _removePendingCloseRequest(positionId);
-
-            return (true, PendingCloseReason.NONE);
-        } catch {
-            return (false, PendingCloseReason.PRICE_STALE);
         }
+
+        // Validate price
+        if (closePrice == 0) {
+            return (false, PendingCloseReason.INVALID_PRICE);
+        }
+
+        // Check if price is acceptable
+        if (!_isPriceAcceptable(closePrice, request.maxAcceptablePrice, pos.direction)) {
+            return (false, PendingCloseReason.PRICE_NOT_ACCEPTABLE);
+        }
+
+        // Close position (liquidation or normal)
+        bool isLiquidation = PositionLib.isLiquidated(pos, closePrice);
+        _processSettlement(
+            positionId,
+            closePrice,
+            isLiquidation,
+            pricePublishTime,
+            PositionClosedBy.PENDING_CLOSE_REQUESTED
+        );
+        _removePendingCloseRequest(positionId);
+
+        return (true, PendingCloseReason.NONE);
     }
 
     /**
