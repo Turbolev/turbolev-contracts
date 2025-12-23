@@ -55,9 +55,8 @@ contract DeploySettlementEngine is DeployHelper {
 
             // Apply config (only for new deployments)
             console.log("Applying configuration...");
-            SettlementEngine(settlementEngine).updateConfig(
-                HOUSE_EDGE_BPS, WIN_MULTIPLIER_BPS, MIN_BET_AMOUNT, MAX_BET_AMOUNT
-            );
+            SettlementEngine(settlementEngine)
+                .updateConfig(HOUSE_EDGE_BPS, WIN_MULTIPLIER_BPS, MIN_BET_AMOUNT, MAX_BET_AMOUNT);
             SettlementEngine(settlementEngine).setMaxProfitCapBps(MAX_PROFIT_CAP_BPS);
 
             console.log("[SUCCESS] Deployed new SettlementEngine proxy");

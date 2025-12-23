@@ -5,6 +5,7 @@ pragma solidity ^0.8.22;
  * @title AdminAccessControl
  * @notice Access control contract for managing multiple admin addresses
  * @dev Similar to Ownable but for admin role management
+ * @custom:deprecated Use VaultAccessController for new contracts
  *
  * Features:
  * - Support multiple admin addresses
@@ -13,6 +14,14 @@ pragma solidity ^0.8.22;
  * - Only owner can manage admin addresses
  */
 abstract contract AdminAccessControl {
+    // ========================================================================
+    // CONSTANTS
+    // ========================================================================
+
+    /// @notice Maximum number of admins allowed
+    /// @dev Prevents gas DOS in _clearAdmins() by capping admin list size
+    uint256 public constant MAX_ADMINS = 50;
+
     // ========================================================================
     // STATE VARIABLES
     // ========================================================================
@@ -41,6 +50,7 @@ abstract contract AdminAccessControl {
     error InvalidAdminAddress();
     error AdminAlreadyExists();
     error AdminNotFound();
+    error MaxAdminsReached();
 
     // ========================================================================
     // MODIFIERS
@@ -94,6 +104,7 @@ abstract contract AdminAccessControl {
     function _addAdmin(address admin) internal {
         if (admin == address(0)) revert InvalidAdminAddress();
         if (_admins[admin]) revert AdminAlreadyExists();
+        if (_adminList.length >= MAX_ADMINS) revert MaxAdminsReached();
 
         _admins[admin] = true;
         _adminList.push(admin);

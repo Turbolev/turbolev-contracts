@@ -3,12 +3,14 @@ pragma solidity ^0.8.22;
 
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "./interfaces/IPriceFeedManager.sol";
 import "./interfaces/oracles/IPushOracle.sol";
 import "./interfaces/oracles/IPullOracle.sol";
 import "./interfaces/oracles/IHybridOracle.sol";
+import "./interfaces/IVaultAccessController.sol";
 
 /**
  * @title PriceFeedManager V2 with Oracle Registry Pattern
@@ -33,6 +35,7 @@ contract PriceFeedManager is
     Initializable,
     OwnableUpgradeable,
     PausableUpgradeable,
+    ReentrancyGuardUpgradeable,
     UUPSUpgradeable,
     IPriceFeedManager
 {
@@ -61,11 +64,46 @@ contract PriceFeedManager is
     bytes32 public constant PYTH_PROVIDER = keccak256("PYTH");
 
     // ========================================================================
+    // CIRCUIT BREAKER STATE
+    // ========================================================================
+
+    /// @notice Circuit breaker configuration for extreme price movements
+    struct CircuitBreakerConfig {
+        uint256 maxDeviationBps; // Max price deviation in bps (default: 5000 = 50%)
+        uint256 minDeviationWindow; // Time window to check deviation in seconds (default: 60s)
+        bool enabled; // Whether circuit breaker is enabled
+    }
+
+    /// @notice Last known price record per token
+    struct LastPriceRecord {
+        uint256 price; // Last recorded price
+        uint256 timestamp; // When price was recorded
+    }
+
+    /// @notice Global circuit breaker configuration
+    CircuitBreakerConfig public circuitBreakerConfig;
+
+    /// @notice Last known prices per token for deviation tracking
+    mapping(address => LastPriceRecord) private lastPriceRecords;
+
+    /// @notice Tokens with circuit breaker temporarily bypassed (emergency use only)
+    mapping(address => bool) public circuitBreakerBypassed;
+
+    /// @notice Access controller for role-based access
+    IVaultAccessController public accessController;
+
+    // ========================================================================
     // STORAGE GAP (for future upgrades)
     // ========================================================================
 
     /// @dev Storage gap to allow for new variables in future versions
-    uint256[46] private __gap;
+    /// @notice Reduced from 46 to 42 slots due to circuit breaker and accessController additions:
+    /// - circuitBreakerConfig: 1 slot (packed struct)
+    /// - lastPriceRecords: 1 slot (mapping)
+    /// - circuitBreakerBypassed: 1 slot (mapping)
+    /// - accessController: 1 slot
+    /// Total new slots used: 4, remaining gap: 46 - 4 = 42
+    uint256[42] private __gap;
 
     // ========================================================================
     // EVENTS
@@ -99,6 +137,31 @@ contract PriceFeedManager is
         address indexed projectToken, bytes32 indexed providerId, uint256 updateFee
     );
 
+    // Circuit Breaker Events
+    event CircuitBreakerTriggered(
+        address indexed projectToken,
+        uint256 lastPrice,
+        uint256 newPrice,
+        uint256 deviationBps,
+        uint256 timeDelta
+    );
+    event CircuitBreakerConfigUpdated(
+        uint256 maxDeviationBps, uint256 minDeviationWindow, bool enabled
+    );
+    event CircuitBreakerBypassUpdated(address indexed projectToken, bool bypassed);
+    event LastPriceRecordUpdated(address indexed projectToken, uint256 price, uint256 timestamp);
+
+    // Initial Price Setup Events
+    event InitialPriceSet(
+        address indexed projectToken, uint256 price, uint256 publishTime, bytes32 indexed providerId
+    );
+
+    // Access Control Events
+    event AccessControllerUpdated(address indexed oldAddress, address indexed newAddress);
+    event EmergencyUpgrade(
+        address indexed newImplementation, address indexed caller, uint256 timestamp
+    );
+
     // ========================================================================
     // ERRORS
     // ========================================================================
@@ -113,6 +176,20 @@ contract PriceFeedManager is
     error ProviderAlreadyExists(bytes32 providerId);
     error ProviderInUse(bytes32 providerId);
     error ArrayLengthMismatch();
+
+    // Circuit Breaker Errors
+    error CircuitBreakerTripped(uint256 deviationBps, uint256 maxAllowedBps);
+    error InvalidCircuitBreakerConfig();
+
+    // Initial Price Setup Errors
+    error InitialPriceNotSet(address projectToken);
+    error InitialPriceFetchFailed(address projectToken, bytes32 providerId);
+    error RefundFailed();
+
+    // Access Control Errors
+    error AccessControllerNotSet();
+    error MustPauseBeforeEmergencyUpgrade();
+    error NotAuthorized();
 
     // ========================================================================
     // CONSTRUCTOR / INITIALIZER
@@ -132,7 +209,35 @@ contract PriceFeedManager is
 
         __Ownable_init(initialOwner);
         __Pausable_init();
+        __ReentrancyGuard_init();
         __UUPSUpgradeable_init();
+
+        _initCircuitBreaker();
+    }
+
+    /**
+     * @notice Initialize circuit breaker for existing deployments (upgrade scenario)
+     * @dev Call this after upgrading if circuit breaker was not initialized
+     */
+    function initializeCircuitBreaker() external onlyOwner whenNotPaused {
+        // Only initialize if not already set (maxDeviationBps == 0 means uninitialized)
+        if (circuitBreakerConfig.maxDeviationBps == 0) {
+            _initCircuitBreaker();
+        }
+    }
+
+    /**
+     * @notice Internal function to initialize circuit breaker with default values
+     * @dev Default: 50% max deviation, 60s window, enabled
+     */
+    function _initCircuitBreaker() internal {
+        circuitBreakerConfig = CircuitBreakerConfig({
+            maxDeviationBps: 5000, // 50% max deviation
+            minDeviationWindow: 60, // Check if within 60 seconds
+            enabled: true // Enabled by default
+        });
+
+        emit CircuitBreakerConfigUpdated(5000, 60, true);
     }
 
     // ========================================================================
@@ -317,6 +422,70 @@ contract PriceFeedManager is
     }
 
     /**
+     * @notice Set price feed configuration and initialize circuit breaker with first price
+     * @param projectToken Project token address
+     * @param config Complete price feed configuration
+     * @param updateData Price update data for pull oracles (empty bytes for push oracles)
+     * @param maxAge Maximum acceptable price age in seconds
+     * @dev This ensures circuit breaker has a valid baseline price from the start
+     * @dev For pull oracles (e.g., Pyth), caller must send ETH for update fee and provide updateData
+     * @dev For push oracles (e.g., Chainlink), updateData can be empty and no ETH needed
+     */
+    function setPriceFeedConfigWithInit(
+        address projectToken,
+        PriceFeedConfig calldata config,
+        bytes calldata updateData,
+        uint256 maxAge
+    ) external payable nonReentrant onlyOwner whenNotPaused {
+        // ========== STEP 1: Validate config (same as setPriceFeedConfig) ==========
+        if (projectToken == address(0)) revert InvalidAddress();
+        if (config.primaryProviderId == bytes32(0)) revert NoPrimaryProvider();
+        if (!providerRegistered[config.primaryProviderId]) {
+            revert ProviderNotFound(config.primaryProviderId);
+        }
+        if (
+            config.secondaryProviderId != bytes32(0)
+                && !providerRegistered[config.secondaryProviderId]
+        ) {
+            revert ProviderNotFound(config.secondaryProviderId);
+        }
+
+        // ========== STEP 2: Save config ==========
+        priceFeedConfigs[projectToken] = config;
+
+        // ========== STEP 3: Fetch initial price ==========
+        OracleProvider memory primary = oracleProviders[config.primaryProviderId];
+
+        (bool success, uint256 initialPrice, uint256 publishTime) = _tryGetPriceFromProviderWithUpdate(
+            primary,
+            config.primaryFeed,
+            config.primaryProviderId,
+            config.usePullMode,
+            maxAge,
+            updateData
+        );
+
+        if (!success || initialPrice == 0) {
+            revert InitialPriceFetchFailed(projectToken, config.primaryProviderId);
+        }
+
+        // ========== STEP 4: Set initial price record for circuit breaker ==========
+        _updateLastPriceRecord(projectToken, initialPrice);
+
+        // ========== STEP 5: Emit events ==========
+        emit PriceFeedConfigUpdated(
+            projectToken, config.primaryProviderId, config.secondaryProviderId
+        );
+        emit InitialPriceSet(projectToken, initialPrice, publishTime, config.primaryProviderId);
+
+        // ========== STEP 6: Refund excess ETH (for pull oracle fee) ==========
+        if (address(this).balance > 0) {
+            (bool sent,) = payable(msg.sender).call{ value: address(this).balance }("");
+            if (!sent) revert RefundFailed();
+        }
+    }
+
+    /**
      * @notice Set primary provider for a project token
      * @param projectToken Project token address
      * @param providerId Primary provider ID
@@ -480,11 +649,14 @@ contract PriceFeedManager is
     {
         PriceFeedConfig memory config = priceFeedConfigs[projectToken];
 
+        uint256 fetchedPrice;
+        uint256 fetchedTime;
+        bool priceFound = false;
+
         // Try primary provider
         if (config.primaryProviderId != bytes32(0)) {
             OracleProvider memory primary = oracleProviders[config.primaryProviderId];
-            (bool success, uint256 primaryPrice, uint256 primaryTime) =
-            _tryGetPriceFromProviderWithUpdate(
+            (bool success, uint256 primaryPrice, uint256 primaryTime) = _tryGetPriceFromProviderWithUpdate(
                 primary,
                 config.primaryFeed,
                 config.primaryProviderId,
@@ -494,15 +666,16 @@ contract PriceFeedManager is
             );
 
             if (success) {
-                return (primaryPrice, primaryTime);
+                fetchedPrice = primaryPrice;
+                fetchedTime = primaryTime;
+                priceFound = true;
             }
         }
 
-        // Try secondary provider
-        if (config.secondaryProviderId != bytes32(0)) {
+        // Try secondary provider if primary failed
+        if (!priceFound && config.secondaryProviderId != bytes32(0)) {
             OracleProvider memory secondary = oracleProviders[config.secondaryProviderId];
-            (bool success, uint256 secondaryPrice, uint256 secondaryTime) =
-            _tryGetPriceFromProviderWithUpdate(
+            (bool success, uint256 secondaryPrice, uint256 secondaryTime) = _tryGetPriceFromProviderWithUpdate(
                 secondary,
                 config.secondaryFeed,
                 config.secondaryProviderId,
@@ -518,12 +691,25 @@ contract PriceFeedManager is
                     config.secondaryProviderId,
                     "Primary provider failed, using secondary"
                 );
-                return (secondaryPrice, secondaryTime);
+                fetchedPrice = secondaryPrice;
+                fetchedTime = secondaryTime;
+                priceFound = true;
             }
         }
 
-        // Both failed
-        revert InvalidOraclePrice();
+        // If no price found, revert
+        if (!priceFound) {
+            revert InvalidOraclePrice();
+        }
+
+        // Check circuit breaker before returning price
+        if (!_checkCircuitBreaker(projectToken, fetchedPrice)) {
+            LastPriceRecord memory lastRecord = lastPriceRecords[projectToken];
+            uint256 deviationBps = _calculateDeviationBps(lastRecord.price, fetchedPrice);
+            revert CircuitBreakerTripped(deviationBps, circuitBreakerConfig.maxDeviationBps);
+        }
+
+        return (fetchedPrice, fetchedTime);
     }
 
     /**
@@ -544,11 +730,14 @@ contract PriceFeedManager is
     {
         PriceFeedConfig storage config = priceFeedConfigs[projectToken];
 
+        uint256 fetchedPrice;
+        uint256 fetchedTime;
+        bool priceFound = false;
+
         // Try primary provider with update if needed
         if (config.primaryProviderId != bytes32(0)) {
             OracleProvider memory primary = oracleProviders[config.primaryProviderId];
-            (bool success, uint256 primaryPrice, uint256 primaryTime) =
-            _tryGetPriceFromProviderWithUpdate(
+            (bool success, uint256 primaryPrice, uint256 primaryTime) = _tryGetPriceFromProviderWithUpdate(
                 primary,
                 config.primaryFeed,
                 config.primaryProviderId,
@@ -558,15 +747,16 @@ contract PriceFeedManager is
             );
 
             if (success) {
-                return (primaryPrice, primaryTime);
+                fetchedPrice = primaryPrice;
+                fetchedTime = primaryTime;
+                priceFound = true;
             }
         }
 
-        // Try secondary provider with update if needed
-        if (config.secondaryProviderId != bytes32(0)) {
+        // Try secondary provider if primary failed
+        if (!priceFound && config.secondaryProviderId != bytes32(0)) {
             OracleProvider memory secondary = oracleProviders[config.secondaryProviderId];
-            (bool success, uint256 secondaryPrice, uint256 secondaryTime) =
-            _tryGetPriceFromProviderWithUpdate(
+            (bool success, uint256 secondaryPrice, uint256 secondaryTime) = _tryGetPriceFromProviderWithUpdate(
                 secondary,
                 config.secondaryFeed,
                 config.secondaryProviderId,
@@ -582,12 +772,27 @@ contract PriceFeedManager is
                     config.secondaryProviderId,
                     "Primary provider failed, using secondary"
                 );
-                return (secondaryPrice, secondaryTime);
+                fetchedPrice = secondaryPrice;
+                fetchedTime = secondaryTime;
+                priceFound = true;
             }
         }
 
-        // Both failed
-        revert InvalidOraclePrice();
+        // If no price found, revert
+        if (!priceFound) {
+            revert InvalidOraclePrice();
+        }
+
+        // Check circuit breaker before returning price
+        // This protects against extreme price movements that could be manipulation
+        if (!_checkCircuitBreaker(projectToken, fetchedPrice)) {
+            // Get the last recorded price for error context
+            LastPriceRecord memory lastRecord = lastPriceRecords[projectToken];
+            uint256 deviationBps = _calculateDeviationBps(lastRecord.price, fetchedPrice);
+            revert CircuitBreakerTripped(deviationBps, circuitBreakerConfig.maxDeviationBps);
+        }
+
+        return (fetchedPrice, fetchedTime);
     }
 
     /**
@@ -619,16 +824,20 @@ contract PriceFeedManager is
 
         // Check based on oracle type
         if (provider.oracleType == IBaseOracle.OracleType.PUSH) {
-            try IPushOracle(provider.oracleContract).isPriceStale(config.primaryFeed, maxAge)
-            returns (bool stale) {
+            try IPushOracle(provider.oracleContract)
+                .isPriceStale(config.primaryFeed, maxAge) returns (
+                bool stale
+            ) {
                 return stale;
             } catch {
                 return true;
             }
         } else {
             // PULL oracle
-            try IPullOracle(provider.oracleContract).isPriceStale(config.primaryFeed, maxAge)
-            returns (bool stale) {
+            try IPullOracle(provider.oracleContract)
+                .isPriceStale(config.primaryFeed, maxAge) returns (
+                bool stale
+            ) {
                 return stale;
             } catch {
                 return true;
@@ -715,8 +924,11 @@ contract PriceFeedManager is
         }
         // Update if stale
         if (isStale && updateData.length > 0) {
-            try pullOracle.getPriceWithUpdate{ value: msg.value }(feed, maxAge, updateData)
-            returns (int256 _price, uint256 _updatedAt) {
+            try pullOracle.getPriceWithUpdate{ value: msg.value }(
+                feed, maxAge, updateData
+            ) returns (
+                int256 _price, uint256 _updatedAt
+            ) {
                 if (_price <= 0) {
                     return (false, 0, 0);
                 }
@@ -790,33 +1002,318 @@ contract PriceFeedManager is
     }
 
     // ========================================================================
+    // CIRCUIT BREAKER FUNCTIONS
+    // ========================================================================
+
+    /**
+     * @notice Set circuit breaker configuration
+     * @param _maxDeviationBps Maximum allowed deviation in basis points (100 = 1%, 5000 = 50%)
+     * @param _minDeviationWindow Time window for deviation check in seconds
+     * @param _enabled Whether circuit breaker is enabled
+     */
+    function setCircuitBreakerConfig(
+        uint256 _maxDeviationBps,
+        uint256 _minDeviationWindow,
+        bool _enabled
+    ) external onlyOwner {
+        // Validation: deviation should be between 1% (100 bps) and 90% (9000 bps)
+        if (_maxDeviationBps < 100 || _maxDeviationBps > 9000) {
+            revert InvalidCircuitBreakerConfig();
+        }
+        // Min window should be at least 10 seconds
+        if (_minDeviationWindow < 10) {
+            revert InvalidCircuitBreakerConfig();
+        }
+
+        circuitBreakerConfig = CircuitBreakerConfig({
+            maxDeviationBps: _maxDeviationBps,
+            minDeviationWindow: _minDeviationWindow,
+            enabled: _enabled
+        });
+
+        emit CircuitBreakerConfigUpdated(_maxDeviationBps, _minDeviationWindow, _enabled);
+    }
+
+    /**
+     * @notice Bypass circuit breaker for specific token (emergency use only)
+     * @param projectToken Token to bypass
+     * @param bypassed Whether to bypass circuit breaker for this token
+     * @dev Use with caution - bypassing removes price manipulation protection
+     */
+    function setCircuitBreakerBypass(address projectToken, bool bypassed)
+        external
+        onlyOwner
+        whenNotPaused
+    {
+        if (projectToken == address(0)) revert InvalidAddress();
+        circuitBreakerBypassed[projectToken] = bypassed;
+        emit CircuitBreakerBypassUpdated(projectToken, bypassed);
+    }
+
+    /**
+     * @notice Check circuit breaker and update last price record
+     * @param projectToken Token address
+     * @param newPrice New price to validate
+     * @return valid True if price passes circuit breaker check
+     * @dev Returns true and updates record if check passes, returns false if triggered
+     */
+    function _checkCircuitBreaker(address projectToken, uint256 newPrice)
+        internal
+        returns (bool valid)
+    {
+        // Skip if disabled globally or bypassed for this token
+        if (!circuitBreakerConfig.enabled || circuitBreakerBypassed[projectToken]) {
+            _updateLastPriceRecord(projectToken, newPrice);
+            return true;
+        }
+
+        LastPriceRecord memory lastRecord = lastPriceRecords[projectToken];
+
+        // First price MUST be set via setPriceFeedConfigWithInit
+        // This prevents circuit breaker bypass by manipulating the first price
+        if (lastRecord.price == 0 || lastRecord.timestamp == 0) {
+            revert InitialPriceNotSet(projectToken);
+        }
+
+        // Check time window - only validate deviation if within the deviation window
+        // This allows gradual price movements over longer periods
+        uint256 timeDelta = block.timestamp - lastRecord.timestamp;
+        if (timeDelta > circuitBreakerConfig.minDeviationWindow) {
+            // Price update is outside the time window - accept and update record
+            _updateLastPriceRecord(projectToken, newPrice);
+            return true;
+        }
+
+        // Calculate deviation between last recorded price and new price
+        uint256 deviationBps = _calculateDeviationBps(lastRecord.price, newPrice);
+
+        // Check if deviation exceeds maximum allowed threshold
+        if (deviationBps > circuitBreakerConfig.maxDeviationBps) {
+            emit CircuitBreakerTriggered(
+                projectToken, lastRecord.price, newPrice, deviationBps, timeDelta
+            );
+            return false;
+        }
+
+        // Price is valid - update last price record
+        _updateLastPriceRecord(projectToken, newPrice);
+        return true;
+    }
+
+    /**
+     * @notice Calculate deviation between two prices in basis points
+     * @param oldPrice Previous price
+     * @param newPrice Current price
+     * @return deviationBps Absolute deviation in basis points
+     */
+    function _calculateDeviationBps(uint256 oldPrice, uint256 newPrice)
+        internal
+        pure
+        returns (uint256 deviationBps)
+    {
+        if (oldPrice == 0) return 0;
+
+        uint256 diff;
+        if (newPrice > oldPrice) {
+            diff = newPrice - oldPrice;
+        } else {
+            diff = oldPrice - newPrice;
+        }
+
+        // deviation = (diff / oldPrice) * 10000 (for basis points)
+        deviationBps = (diff * 10_000) / oldPrice;
+    }
+
+    /**
+     * @notice Update last price record for a token
+     * @param projectToken Token address
+     * @param price New price to record
+     */
+    function _updateLastPriceRecord(address projectToken, uint256 price) internal {
+        lastPriceRecords[projectToken] =
+            LastPriceRecord({ price: price, timestamp: block.timestamp });
+
+        emit LastPriceRecordUpdated(projectToken, price, block.timestamp);
+    }
+
+    /**
+     * @notice View function to check if price would trigger circuit breaker
+     * @param projectToken Token address
+     * @param newPrice Price to check
+     * @return wouldTrip True if circuit breaker would trip
+     * @return deviationBps Calculated deviation in basis points
+     * @return lastPrice Last recorded price
+     * @return timeSinceLastUpdate Seconds since last price update
+     */
+    function checkPriceDeviation(address projectToken, uint256 newPrice)
+        external
+        view
+        returns (
+            bool wouldTrip,
+            uint256 deviationBps,
+            uint256 lastPrice,
+            uint256 timeSinceLastUpdate
+        )
+    {
+        LastPriceRecord memory lastRecord = lastPriceRecords[projectToken];
+
+        // If disabled or bypassed, never trips
+        if (!circuitBreakerConfig.enabled || circuitBreakerBypassed[projectToken]) {
+            return (false, 0, lastRecord.price, 0);
+        }
+
+        // First price - never trips
+        if (lastRecord.price == 0) {
+            return (false, 0, 0, 0);
+        }
+
+        timeSinceLastUpdate = block.timestamp - lastRecord.timestamp;
+
+        // Outside time window - never trips
+        if (timeSinceLastUpdate > circuitBreakerConfig.minDeviationWindow) {
+            return (false, 0, lastRecord.price, timeSinceLastUpdate);
+        }
+
+        deviationBps = _calculateDeviationBps(lastRecord.price, newPrice);
+        wouldTrip = deviationBps > circuitBreakerConfig.maxDeviationBps;
+        lastPrice = lastRecord.price;
+    }
+
+    /**
+     * @notice Get last price record for a token
+     * @param projectToken Token address
+     * @return price Last recorded price
+     * @return timestamp Last update timestamp
+     */
+    function getLastPriceRecord(address projectToken)
+        external
+        view
+        returns (uint256 price, uint256 timestamp)
+    {
+        LastPriceRecord memory record = lastPriceRecords[projectToken];
+        return (record.price, record.timestamp);
+    }
+
+    /**
+     * @notice Get circuit breaker configuration
+     * @return maxDeviationBps Maximum deviation in basis points
+     * @return minDeviationWindow Time window in seconds
+     * @return enabled Whether circuit breaker is enabled
+     */
+    function getCircuitBreakerConfig()
+        external
+        view
+        returns (uint256 maxDeviationBps, uint256 minDeviationWindow, bool enabled)
+    {
+        return (
+            circuitBreakerConfig.maxDeviationBps,
+            circuitBreakerConfig.minDeviationWindow,
+            circuitBreakerConfig.enabled
+        );
+    }
+
+    /**
+     * @notice Admin function to manually set last price record
+     * @param projectToken Token address
+     * @param price Price to set
+     * @dev Use to bootstrap circuit breaker or reset after known manipulation
+     */
+    function setLastPriceRecord(address projectToken, uint256 price)
+        external
+        onlyOwner
+        whenNotPaused
+    {
+        if (projectToken == address(0)) revert InvalidAddress();
+        if (price == 0) revert InvalidOraclePrice();
+
+        _updateLastPriceRecord(projectToken, price);
+    }
+
+    // ========================================================================
     // ADMIN FUNCTIONS
     // ========================================================================
 
     /**
-     * @notice Pause contract
+     * @notice Set access controller address
+     * @param _accessController Access controller address
+     */
+    function setAccessController(address _accessController) external onlyOwner whenNotPaused {
+        if (_accessController == address(0)) revert InvalidAddress();
+        address oldAddress = address(accessController);
+        accessController = IVaultAccessController(_accessController);
+        emit AccessControllerUpdated(oldAddress, _accessController);
+    }
+
+    /**
+     * @notice Pause contract - owner only for normal operations
      */
     function pause() external onlyOwner {
         _pause();
     }
 
     /**
-     * @notice Unpause contract
+     * @notice Emergency pause - can be called by guardian or emergency role
+     * @dev Allows guardians to pause without waiting for timelock
      */
-    function unpause() external onlyOwner {
+    function pauseEmergency() external {
+        if (address(accessController) == address(0)) revert AccessControllerNotSet();
+        if (
+            !accessController.hasRole(accessController.EMERGENCY_ROLE(), msg.sender)
+                && !accessController.hasRole(accessController.GUARDIAN_ROLE(), msg.sender)
+        ) {
+            revert NotAuthorized();
+        }
+        _pause();
+    }
+
+    /**
+     * @notice Unpause contract - requires UPGRADER_ROLE (Timelock) to prevent abuse
+     */
+    function unpause() external {
+        if (address(accessController) == address(0)) revert AccessControllerNotSet();
+        if (!accessController.hasRole(accessController.UPGRADER_ROLE(), msg.sender)) {
+            revert NotAuthorized();
+        }
         _unpause();
     }
 
     /**
-     * @notice Authorize upgrade (UUPS pattern)
+     * @notice Authorize upgrade with Timelock + Emergency Guardian pattern
+     * @dev Two paths for upgrade:
+     *      1. Normal path: UPGRADER_ROLE (Timelock) - no restrictions
+     *      2. Emergency path: EMERGENCY_ROLE/GUARDIAN_ROLE - requires contract to be paused first
+     *      This ensures users have opportunity to react before emergency upgrades
      */
-    function _authorizeUpgrade(address newImplementation) internal override onlyOwner { }
+    function _authorizeUpgrade(address newImplementation) internal override {
+        if (address(accessController) == address(0)) revert AccessControllerNotSet();
+
+        // Path 1: Normal upgrade via Timelock (UPGRADER_ROLE)
+        if (accessController.hasRole(accessController.UPGRADER_ROLE(), msg.sender)) {
+            return; // Authorized
+        }
+
+        // Path 2: Emergency upgrade via Guardian/Multisig - only if paused
+        if (
+            accessController.hasRole(accessController.EMERGENCY_ROLE(), msg.sender)
+                || accessController.hasRole(accessController.GUARDIAN_ROLE(), msg.sender)
+        ) {
+            if (!paused()) {
+                revert MustPauseBeforeEmergencyUpgrade();
+            }
+            emit EmergencyUpgrade(newImplementation, msg.sender, block.timestamp);
+            return; // Authorized
+        }
+
+        // No valid role - revert
+        revert NotAuthorized();
+    }
 
     /**
      * @notice Get contract version
+     * @dev V2.3.0: Added upgrade security with Timelock + Guardian pattern
      */
     function version() external pure returns (string memory) {
-        return "2.1.0-oracle-registry";
+        return "2.3.0-upgrade-security";
     }
 
     /**

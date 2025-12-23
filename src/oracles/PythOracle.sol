@@ -3,6 +3,7 @@ pragma solidity ^0.8.22;
 
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "../interfaces/oracles/IHybridOracle.sol";
 import "../interfaces/oracles/IPyth.sol";
@@ -19,7 +20,13 @@ import "../interfaces/oracles/IPyth.sol";
  * - Hybrid: Can work in both modes depending on use case
  * - All prices scaled to 18 decimals
  */
-contract PythOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgradeable, IHybridOracle {
+contract PythOracle is
+    OwnableUpgradeable,
+    PausableUpgradeable,
+    ReentrancyGuardUpgradeable,
+    UUPSUpgradeable,
+    IHybridOracle
+{
     // ========================================================================
     // STATE VARIABLES
     // ========================================================================
@@ -65,6 +72,8 @@ contract PythOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgradeable,
     error InsufficientFee();
     error PythCallFailed();
     error PriceFeedNotConfigured();
+    error RefundFailed();
+    error LengthMismatch();
 
     // ========================================================================
     // CONSTRUCTOR / INITIALIZER
@@ -91,6 +100,7 @@ contract PythOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgradeable,
 
         __Ownable_init(initialOwner);
         __Pausable_init();
+        __ReentrancyGuard_init();
         __UUPSUpgradeable_init();
 
         pythContract = _pythContract;
@@ -237,6 +247,7 @@ contract PythOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgradeable,
         external
         payable
         override
+        nonReentrant
         whenNotPaused
     {
         bytes32 priceId = priceFeedIds[feed];
@@ -260,7 +271,7 @@ contract PythOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgradeable,
             // Refund excess fee
             if (msg.value > fee) {
                 (bool success,) = msg.sender.call{ value: msg.value - fee }("");
-                require(success, "Refund failed");
+                if (!success) revert RefundFailed();
             }
         } catch {
             revert PythCallFailed();
@@ -279,6 +290,7 @@ contract PythOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgradeable,
         external
         payable
         override
+        nonReentrant
         whenNotPaused
         returns (int256 resultPrice, uint256 resultUpdatedAt)
     {
@@ -306,7 +318,7 @@ contract PythOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgradeable,
             // Refund excess
             if (msg.value > fee) {
                 (bool success,) = msg.sender.call{ value: msg.value - fee }("");
-                require(success, "Refund failed");
+                if (!success) revert RefundFailed();
             }
         }
 
@@ -327,7 +339,11 @@ contract PythOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgradeable,
      * @param updateData Pyth update data
      * @return fee Fee in wei
      */
-    function getUpdateFee(address, /* feed */ bytes calldata updateData)
+    function getUpdateFee(
+        address,
+        /* feed */
+        bytes calldata updateData
+    )
         external
         view
         override
@@ -408,7 +424,7 @@ contract PythOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgradeable,
         external
         onlyOwner
     {
-        require(tokens.length == priceIds.length, "Length mismatch");
+        if (tokens.length != priceIds.length) revert LengthMismatch();
 
         for (uint256 i = 0; i < tokens.length; i++) {
             if (tokens[i] == address(0)) revert InvalidAddress();

@@ -13,12 +13,26 @@ This directory contains Foundry scripts for deploying and interacting with the B
 
 ## Overview
 
-The Boolean Contracts system consists of four upgradeable core contracts:
+The Boolean Contracts system consists of the following upgradeable core contracts:
 
-1. **BlocksenseOracle** - Price oracle integration
-2. **SettlementEngine** - Position settlement logic
-3. **PositionManager** - Position lifecycle management
-4. **VaultManager** - Vault factory and management
+### Core Contracts
+1. **PositionManager** - Position lifecycle management (open/close/liquidate)
+2. **SettlementEngine** - Position settlement and P&L calculation
+3. **VaultManager** - Vault factory and management
+4. **VaultAdminProxy** - Admin proxy for vault batch operations and configuration
+5. **PriceFeedManager** - Oracle registry and price feed management
+
+### Oracle Contracts
+6. **BlocksenseOracle** - Blocksense oracle integration
+7. **ChainlinkOracle** - Chainlink oracle integration
+8. **PythOracle** - Pyth oracle integration (pull mode)
+
+### Vault Contract
+9. **AssetVaultUpgradeable** - Per-token vault with:
+   - LP liquidity management
+   - Risk controls (directional exposure, OI caps, leverage tiers)
+   - Funding rates
+   - Position fees
 
 ## Prerequisites
 
@@ -159,27 +173,84 @@ forge script script/DeployVaultManager.s.sol:DeployVaultManager \
 After deploying VaultManager, create vaults for specific project tokens:
 
 ```bash
-forge script script/CreateVault.s.sol:CreateVault \
+# Basic vault creation
+PROJECT_TOKEN=0x... forge script script/CreateVault.s.sol --sig "run()" \
+  --rpc-url $RPC_URL --broadcast -vvv
+
+# Vault with full configuration (risk controls)
+PROJECT_TOKEN=0x... forge script script/CreateVault.s.sol --sig "createVaultWithConfig()" \
+  --rpc-url $RPC_URL --broadcast -vvv
+
+# Vault with funding rate enabled
+PROJECT_TOKEN=0x... forge script script/CreateVault.s.sol --sig "createVaultWithFunding()" \
   --rpc-url $RPC_URL --broadcast -vvv
 ```
 
 **Required environment variables:**
 ```bash
 VAULT_MANAGER_ADDRESS=0x...
+VAULT_MANAGER_HELPER_ADDRESS=0x...
 PROJECT_TOKEN=0x...           # Project token address
-PROJECT_TOKEN_BASE=0x...      # Base oracle feed address
-PROJECT_TOKEN_QUOTE=0x...     # Quote oracle feed address
 ```
 
 **Optional parameters** (will use defaults from DeployHelper if not set):
 ```bash
-MAX_PAYOUT_BPS=9000          # Max payout: 90%
-PER_BET_UTIL_BPS=5000        # Per-bet utilization: 50%
-MAX_UTIL_BPS=8000            # Max utilization: 80%
-MIN_BET_AMOUNT=1000000000000000000    # 1 token
-MAX_BET_AMOUNT=100000000000000000000  # 100 tokens
+# Basic params
+MIN_BET_AMOUNT=1000000000000000       # 0.001 token
+MAX_BET_AMOUNT=1000000000000000000000 # 1000 tokens
 GRADUATION_THRESHOLD=10000000000000000000000  # 10,000 tokens
+
+# Risk controls
+MAX_DIRECTIONAL_EXPOSURE_BPS=5000     # 50% of TVL
+TIER1_MAX_LEVERAGE=100                # Launch phase
+TIER2_MAX_LEVERAGE=200                # Growth phase
+TIER3_MAX_LEVERAGE=500                # Mature phase
+
+# Funding rate
+FUNDING_ENABLED=true
 ```
+
+## Risk Control System
+
+The vault system implements multiple layers of risk controls:
+
+### Control Lever 1: Maximum Leverage Tiers
+
+Leverage limits scale with vault TVL:
+
+| TVL Range | Phase | Default Max Leverage |
+|-----------|-------|---------------------|
+| < 100K | Launch | 100x |
+| 100K - 500K | Growth | 200x |
+| >= 500K | Mature | 500x |
+
+### Control Lever 2: Directional Exposure Cap
+
+Net exposure (|Long - Short|) cannot exceed a percentage of TVL:
+- Default: 50% (5000 bps)
+- Example: TVL = 100K → Max net exposure = 50K
+
+### Control Lever 3: Total OI Cap
+
+Total Open Interest (Long + Short) is capped based on TVL tier:
+
+| TVL Tier | Multiplier |
+|----------|------------|
+| Tier 1 (Small) | 1.5x TVL |
+| Tier 2 (Medium) | 2.0x TVL |
+| Tier 3 (Large) | 2.5x TVL |
+| Tier 4 (Very Large) | 3.0x TVL |
+
+### Funding Rate System
+
+- Updates hourly based on OI imbalance
+- Majority side (longs/shorts) pays minority side
+- Rate scales with imbalance level:
+  - < 20% imbalance: 0.01%/hour
+  - 20-40%: 0.03%/hour
+  - 40-60%: 0.05%/hour
+  - 60-80%: 0.08%/hour
+  - > 80%: 0.10%/hour
 
 ## Interaction Scripts
 

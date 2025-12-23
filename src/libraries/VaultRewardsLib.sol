@@ -1,0 +1,209 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.22;
+
+/**
+ * @title VaultRewardsLib
+ * @notice Library for vault staker reward calculations
+ * @dev Separates reward calculation logic from AssetVault for contract size optimization
+ *      Used by AssetVaultUpgradeable for LP reward distribution
+ */
+library VaultRewardsLib {
+    // ========================================================================
+    // CONSTANTS
+    // ========================================================================
+
+    /// @notice Minimum stake period before eligible for rewards (1 day)
+    uint256 constant REWARD_MIN_STAKE_PERIOD = 1 days;
+
+    /// @notice Maximum days to process in a single calculation
+    uint256 constant MAX_DAYS_PER_CALCULATION = 365;
+
+    /// @notice Maximum LPs to process per finalize batch
+    uint256 constant MAX_LPS_PER_FINALIZE = 200;
+
+    // ========================================================================
+    // CUSTOM ERRORS
+    // ========================================================================
+
+    error DailySnapshotAlreadyProcessed();
+    error TooEarlyForSnapshot();
+    error NoRewardsToClaim();
+
+    // ========================================================================
+    // STRUCTS
+    // ========================================================================
+
+    struct SnapshotParams {
+        uint256 day;
+        uint256 totalLiquidity;
+        uint256 totalShares;
+        int256 netPnL;
+        uint256 totalPositionsSettled;
+        uint256 timestamp;
+    }
+
+    struct RewardCalculationParams {
+        uint256 userShares;
+        uint256 totalShares;
+        int256 netPnL;
+        uint256 stakedAt;
+        uint256 dayStartTimestamp;
+    }
+
+    struct LPRewardResult {
+        uint256 reward;
+        bool isEligible;
+    }
+
+    // ========================================================================
+    // CALCULATION FUNCTIONS
+    // ========================================================================
+
+    /**
+     * @notice Calculate reward for a single LP for a day
+     * @param params Reward calculation parameters
+     * @return result LP reward calculation result
+     */
+    function calculateLPReward(RewardCalculationParams memory params)
+        internal
+        pure
+        returns (LPRewardResult memory result)
+    {
+        // No rewards if no shares or negative PnL
+        if (params.userShares == 0 || params.netPnL <= 0 || params.totalShares == 0) {
+            return LPRewardResult({ reward: 0, isEligible: false });
+        }
+
+        // Check if user was staked for at least 1 day before this reward day
+        if (params.stakedAt + REWARD_MIN_STAKE_PERIOD > params.dayStartTimestamp) {
+            return LPRewardResult({ reward: 0, isEligible: false });
+        }
+
+        // Calculate user's share of profit for this day
+        uint256 userReward = (params.userShares * uint256(params.netPnL)) / params.totalShares;
+
+        return LPRewardResult({ reward: userReward, isEligible: true });
+    }
+
+    /**
+     * @notice Calculate the day number from timestamp
+     * @param timestamp Unix timestamp
+     * @return day Day number (timestamp / 1 days)
+     */
+    function getDayFromTimestamp(uint256 timestamp) internal pure returns (uint256) {
+        return timestamp / 1 days;
+    }
+
+    /**
+     * @notice Get the start timestamp of a day
+     * @param day Day number
+     * @return timestamp Start of day timestamp
+     */
+    function getDayStartTimestamp(uint256 day) internal pure returns (uint256) {
+        return day * 1 days;
+    }
+
+    /**
+     * @notice Check if snapshot can be taken for current day
+     * @param lastSnapshotDay Last snapshot day number
+     * @param currentTimestamp Current block timestamp
+     * @return canSnapshot True if snapshot can be taken
+     * @return today Current day number
+     */
+    function canTakeSnapshot(uint256 lastSnapshotDay, uint256 currentTimestamp)
+        internal
+        pure
+        returns (bool canSnapshot, uint256 today)
+    {
+        today = getDayFromTimestamp(currentTimestamp);
+        canSnapshot = today > lastSnapshotDay;
+        return (canSnapshot, today);
+    }
+
+    /**
+     * @notice Calculate batch processing indices
+     * @param totalItems Total number of items to process
+     * @param startIndex Current start index
+     * @param maxPerBatch Maximum items per batch
+     * @return endIndex End index for this batch
+     * @return isComplete True if this is the last batch
+     */
+    function calculateBatchIndices(uint256 totalItems, uint256 startIndex, uint256 maxPerBatch)
+        internal
+        pure
+        returns (uint256 endIndex, bool isComplete)
+    {
+        if (startIndex >= totalItems) {
+            return (totalItems, true);
+        }
+
+        endIndex = startIndex + maxPerBatch;
+        if (endIndex > totalItems) {
+            endIndex = totalItems;
+        }
+
+        isComplete = endIndex >= totalItems;
+        return (endIndex, isComplete);
+    }
+
+    /**
+     * @notice Cap rewards at available balance
+     * @param requestedReward Requested reward amount
+     * @param availableBalance Available vault balance
+     * @return actualReward Actual reward (capped if necessary)
+     * @return wasCapped True if reward was capped
+     */
+    function capRewardsAtBalance(uint256 requestedReward, uint256 availableBalance)
+        internal
+        pure
+        returns (uint256 actualReward, bool wasCapped)
+    {
+        if (requestedReward > availableBalance) {
+            return (availableBalance, true);
+        }
+        return (requestedReward, false);
+    }
+
+    /**
+     * @notice Check if LP is eligible for rewards
+     * @param stakedAt Timestamp when LP staked
+     * @param dayStartTimestamp Start of the reward day
+     * @return isEligible True if LP is eligible
+     */
+    function isEligibleForRewards(uint256 stakedAt, uint256 dayStartTimestamp)
+        internal
+        pure
+        returns (bool)
+    {
+        return stakedAt + REWARD_MIN_STAKE_PERIOD <= dayStartTimestamp;
+    }
+
+    /**
+     * @notice Calculate share of profit for an LP
+     * @param lpShares LP's share count
+     * @param totalShares Total shares in vault
+     * @param profit Total profit to distribute
+     * @return reward LP's reward amount
+     */
+    function calculateShareOfProfit(uint256 lpShares, uint256 totalShares, uint256 profit)
+        internal
+        pure
+        returns (uint256 reward)
+    {
+        if (totalShares == 0) return 0;
+        return (lpShares * profit) / totalShares;
+    }
+
+    /**
+     * @notice Get processing limits for LPs
+     * @return maxLPsPerBatch Maximum LPs per finalize batch
+     * @return maxDaysPerCalc Maximum days per calculation
+     */
+    function getProcessingLimits()
+        internal
+        pure
+        returns (uint256 maxLPsPerBatch, uint256 maxDaysPerCalc)
+    {
+        return (MAX_LPS_PER_FINALIZE, MAX_DAYS_PER_CALCULATION);
+    }
+}

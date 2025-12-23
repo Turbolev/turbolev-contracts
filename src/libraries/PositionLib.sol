@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.22;
 
+import { MathLib } from "./MathLib.sol";
+
 /**
  * @title PositionLib
  * @notice Library containing constants and helper functions for position management
- * @dev Migrated from position_constants.move and position_state_manager.move
+ * @dev Migrated from position_constants.move and position_state_manager.move.
+ *      Uses MathLib for high-precision P&L calculations.
  */
 library PositionLib {
     // ========================================================================
@@ -52,7 +55,6 @@ library PositionLib {
     // LEVERAGE & LIQUIDATION CONSTANTS
     // ========================================================================
 
-    uint256 public constant BASIS_POINTS = 10_000;
     uint256 public constant MIN_LEVERAGE = 1;
     uint256 public constant MAX_LEVERAGE = 100;
 
@@ -63,8 +65,10 @@ library PositionLib {
     // Flat Liquidation Fee (in basis points)
     uint256 public constant LIQUIDATION_FEE_BPS = 200; // Flat 2% for all leverage levels
 
-    // Minimum time a position must be held before closing (60 seconds = 1 minute)
-    uint256 public constant MIN_POSITION_HOLD_TIME = 60; // 60 seconds
+    // Minimum time a position must be held before closing
+    // 30s is sufficient to prevent flash loan attacks (block time ~12s)
+    // and allows oracle prices to update (Chainlink heartbeat ~20s)
+    uint256 public constant MIN_POSITION_HOLD_TIME = 30; // 30 seconds
 
     // Maximum profit is capped at 3× the collateral amount
     uint256 public constant MAX_PROFIT_CAP_MULTIPLIER = 3;
@@ -97,6 +101,10 @@ library PositionLib {
         uint256 minCloseTime; // Flash loan protection: earliest close time
         uint256 initialMargin; // Original collateral (before any add margin)
         uint256 addedMargin; // Total margin added after position open
+        // ========== FUNDING RATE FIELDS ==========
+        int256 entryFundingRateLong; // Cumulative funding rate for Longs at position open
+        int256 entryFundingRateShort; // Cumulative funding rate for Shorts at position open
+        uint256 lastFundingSettlement; // Timestamp of last funding settlement
     }
 
     // ========================================================================
@@ -135,7 +143,7 @@ library PositionLib {
         if (leverage < MIN_LEVERAGE || leverage > MAX_LEVERAGE) {
             revert InvalidLeverage();
         }
-        if (maintenanceMarginRatio >= BASIS_POINTS) {
+        if (maintenanceMarginRatio >= MathLib.BASIS_POINTS) {
             revert InvalidMaintenanceMarginRatio();
         }
         if (direction != BET_DIRECTION_LONG && direction != BET_DIRECTION_SHORT) {
@@ -144,7 +152,7 @@ library PositionLib {
 
         // Calculate liquidation threshold as % of collateral
         // If MMR = 20%, then liquidation at 80% loss
-        uint256 liquidationThreshold = BASIS_POINTS - maintenanceMarginRatio;
+        uint256 liquidationThreshold = MathLib.BASIS_POINTS - maintenanceMarginRatio;
 
         // Calculate price deviation percentage
         // priceDeviationBps = liquidationThreshold / leverage
@@ -154,7 +162,7 @@ library PositionLib {
             // LONG: liquidation when price decreases
 
             // Calculate price decrease with overflow check
-            uint256 priceDecrease = (openPrice * priceDeviationBps) / BASIS_POINTS;
+            uint256 priceDecrease = (openPrice * priceDeviationBps) / MathLib.BASIS_POINTS;
 
             if (priceDecrease >= openPrice) {
                 revert LiquidationPriceUnderflow();
@@ -172,7 +180,7 @@ library PositionLib {
             // SHORT: liquidation when price rises
 
             // Calculate price increase with overflow check
-            uint256 priceIncrease = (openPrice * priceDeviationBps) / BASIS_POINTS;
+            uint256 priceIncrease = (openPrice * priceDeviationBps) / MathLib.BASIS_POINTS;
 
             if (priceIncrease > type(uint256).max - openPrice) {
                 revert LiquidationPriceOverflow();
@@ -208,13 +216,9 @@ library PositionLib {
 
     /**
      * @notice Calculate liquidation fee (flat rate for all leverage levels)
-     * @param leverage Leverage multiplier (unused, kept for interface compatibility)
      * @return fee Fee in basis points (always 2%)
      */
-    function calculateLiquidationFee(uint8 leverage) internal pure returns (uint256) {
-        // Simplified to flat 2% fee regardless of leverage
-        // Parameter kept for backward compatibility
-        leverage; // Silence unused variable warning
+    function calculateLiquidationFee() internal pure returns (uint256) {
         return LIQUIDATION_FEE_BPS; // Always 2%
     }
 
@@ -227,10 +231,18 @@ library PositionLib {
      *      For LONG: positive if price goes up
      *      For SHORT: positive if price goes down
      *
+     * @dev Uses MathLib.priceChangeBpsHighPrecision for accurate calculations
+     *      with small price movements. Standard BPS (10000) can lose precision when:
+     *      - priceChange is small relative to openPrice
+     *      - amount is small (e.g., 1000 wei)
+     *
+     *      Example: $1 change on $50k price with standard BPS = 0 (lost!)
+     *               With high precision (1e18) = correctly calculated
+     *
      * @param position Position data
      * @param currentPrice Current market price
      * @return pnl Profit/Loss (positive = profit, negative = loss)
-     * @return pnlPercentage P&L as percentage of collateral in bps
+     * @return pnlPercentage P&L as percentage of collateral in standard bps (10000 = 100%)
      */
     function calculateUnrealizedPnL(Position memory position, uint256 currentPrice)
         internal
@@ -241,36 +253,89 @@ library PositionLib {
         if (currentPrice == 0) revert InvalidCurrentPrice();
         if (position.amount == 0) revert InvalidPositionAmount();
 
-        // Calculate price change percentage (in bps)
-        int256 priceChangeBps;
+        // Use high precision price change calculation
+        // Returns price change in BPS scaled by MathLib.PRECISION (1e18)
+        // This prevents precision loss for small price movements
+        int256 priceChangeBpsHighPrecision =
+            MathLib.priceChangeBpsHighPrecision(currentPrice, position.openPrice);
 
-        if (currentPrice > position.openPrice) {
-            // Price increased
-            uint256 priceIncrease = currentPrice - position.openPrice;
-
-            if (priceIncrease > type(uint256).max / BASIS_POINTS) {
-                revert PriceChangeTooLarge();
-            }
-
-            priceChangeBps = int256((priceIncrease * BASIS_POINTS) / position.openPrice);
-        } else if (currentPrice < position.openPrice) {
-            // Price decreased
-            uint256 priceDecrease = position.openPrice - currentPrice;
-
-            if (priceDecrease > type(uint256).max / BASIS_POINTS) {
-                revert PriceChangeTooLarge();
-            }
-
-            priceChangeBps = -int256((priceDecrease * BASIS_POINTS) / position.openPrice);
-        } else {
-            // No price change
+        // No price change
+        if (priceChangeBpsHighPrecision == 0) {
             return (0, 0);
         }
 
-        // Apply leverage
+        // Apply leverage (still in high precision)
         int256 leverageInt = int256(uint256(position.leverage));
 
         // Check if multiplication will overflow
+        if (priceChangeBpsHighPrecision > 0) {
+            if (uint256(priceChangeBpsHighPrecision) > type(uint256).max / uint256(leverageInt)) {
+                revert LeverageMultiplicationOverflow();
+            }
+        } else {
+            if (uint256(-priceChangeBpsHighPrecision) > type(uint256).max / uint256(leverageInt)) {
+                revert LeverageMultiplicationOverflow();
+            }
+        }
+
+        int256 leveragedPnLHighPrecision = priceChangeBpsHighPrecision * leverageInt;
+
+        // Reverse sign for SHORT positions
+        if (position.direction == BET_DIRECTION_SHORT) {
+            leveragedPnLHighPrecision = -leveragedPnLHighPrecision;
+        }
+
+        // Calculate absolute P&L using high precision
+        // This divides by both MathLib.BASIS_POINTS and PRECISION to get the actual value
+        pnl = MathLib.calculatePnLFromHighPrecision(position.amount, leveragedPnLHighPrecision);
+
+        // Convert back to standard BPS for return value compatibility
+        // pnlPercentage is in standard BPS (10000 = 100%)
+        pnlPercentage = MathLib.toStandardBps(leveragedPnLHighPrecision);
+
+        return (pnl, pnlPercentage);
+    }
+
+    /**
+     * @notice Calculate unrealized P&L with standard precision (legacy)
+     * @dev Kept for backward compatibility and gas-sensitive operations
+     *      where precision loss is acceptable (large positions, large price movements)
+     * @param position Position data
+     * @param currentPrice Current market price
+     * @return pnl Profit/Loss
+     * @return pnlPercentage P&L percentage in bps
+     */
+    function calculateUnrealizedPnLStandard(Position memory position, uint256 currentPrice)
+        internal
+        pure
+        returns (int256 pnl, int256 pnlPercentage)
+    {
+        if (position.openPrice == 0) revert InvalidOpenPrice();
+        if (currentPrice == 0) revert InvalidCurrentPrice();
+        if (position.amount == 0) revert InvalidPositionAmount();
+
+        // Calculate price change percentage (in bps) - standard precision
+        int256 priceChangeBps;
+
+        if (currentPrice > position.openPrice) {
+            uint256 priceIncrease = currentPrice - position.openPrice;
+            if (priceIncrease > type(uint256).max / MathLib.BASIS_POINTS) {
+                revert PriceChangeTooLarge();
+            }
+            priceChangeBps = int256((priceIncrease * MathLib.BASIS_POINTS) / position.openPrice);
+        } else if (currentPrice < position.openPrice) {
+            uint256 priceDecrease = position.openPrice - currentPrice;
+            if (priceDecrease > type(uint256).max / MathLib.BASIS_POINTS) {
+                revert PriceChangeTooLarge();
+            }
+            priceChangeBps = -int256((priceDecrease * MathLib.BASIS_POINTS) / position.openPrice);
+        } else {
+            return (0, 0);
+        }
+
+        int256 leverageInt = int256(uint256(position.leverage));
+
+        // Overflow checks
         if (priceChangeBps > 0) {
             if (uint256(priceChangeBps) > type(uint256).max / uint256(leverageInt)) {
                 revert LeverageMultiplicationOverflow();
@@ -283,12 +348,10 @@ library PositionLib {
 
         int256 leveragedPnLPercentage = priceChangeBps * leverageInt;
 
-        // Reverse sign for SHORT positions
         if (position.direction == BET_DIRECTION_SHORT) {
             leveragedPnLPercentage = -leveragedPnLPercentage;
         }
 
-        // Calculate absolute P&L
         int256 amountInt = int256(position.amount);
 
         if (leveragedPnLPercentage > 0) {
@@ -301,7 +364,7 @@ library PositionLib {
             }
         }
 
-        int256 absolutePnL = (amountInt * leveragedPnLPercentage) / int256(BASIS_POINTS);
+        int256 absolutePnL = (amountInt * leveragedPnLPercentage) / int256(MathLib.BASIS_POINTS);
 
         return (absolutePnL, leveragedPnLPercentage);
     }
