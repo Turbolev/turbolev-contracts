@@ -51,12 +51,18 @@ contract VaultAdminProxy is Initializable, UUPSUpgradeable {
     );
     event VaultFeeUpdated(address indexed vault, uint8 feeType, uint16 feeBps, uint256 timestamp);
     event VaultTreasuryUpdated(address indexed vault, address treasury, uint256 timestamp);
+    event VaultTreasuryUpdateFailed(address indexed vault, uint256 timestamp);
+    event BatchTreasuryUpdateCompleted(uint256 successCount, uint256 failCount, uint256 timestamp);
     event VaultTradingEnabledUpdated(address indexed vault, bool enabled, uint256 timestamp);
     event VaultGraduationThresholdUpdated(
         address indexed vault, uint256 threshold, uint256 timestamp
     );
     event VaultFundingConfigUpdated(address indexed vault, uint256 timestamp);
     event VaultFundingEnabledUpdated(address indexed vault, bool enabled, uint256 timestamp);
+    event VaultFundingEnabledUpdateFailed(address indexed vault, uint256 timestamp);
+    event BatchFundingEnabledUpdateCompleted(
+        uint256 successCount, uint256 failCount, uint256 timestamp
+    );
     event FeesWithdrawn(address indexed vault, uint256 amount, uint256 timestamp);
     event BatchFundingUpdated(uint256 vaultsUpdated, uint256 timestamp);
     event PriceFeedManagerUpdated(address indexed oldManager, address indexed newManager);
@@ -348,9 +354,15 @@ contract VaultAdminProxy is Initializable, UUPSUpgradeable {
     /**
      * @notice Set treasury address for all vaults
      * @param treasury Treasury address
+     * @dev Emits events for both successful and failed updates
+     *      VaultTreasuryUpdated for successful updates
+     *      VaultTreasuryUpdateFailed for failed updates
+     *      BatchTreasuryUpdateCompleted with summary counts
      */
     function setTreasuryForAllVaults(address treasury) external onlyVaultAdmin {
         address[] memory vaults = IVaultManager(vaultManager).getAllVaults();
+        uint256 successCount = 0;
+        uint256 failCount = 0;
 
         for (uint256 i = 0; i < vaults.length; i++) {
             IVaultManager.VaultInfo memory info =
@@ -359,11 +371,17 @@ contract VaultAdminProxy is Initializable, UUPSUpgradeable {
 
             try IVaultRouter(vaults[i]).setTreasury(treasury) {
                 emit VaultTreasuryUpdated(vaults[i], treasury, block.timestamp);
+                successCount++;
             } catch {
-                // Skip failed vaults
+                // Log failed vaults instead of silently skipping
+                emit VaultTreasuryUpdateFailed(vaults[i], block.timestamp);
+                failCount++;
                 continue;
             }
         }
+
+        // Emit summary event
+        emit BatchTreasuryUpdateCompleted(successCount, failCount, block.timestamp);
     }
 
     /**
@@ -403,9 +421,15 @@ contract VaultAdminProxy is Initializable, UUPSUpgradeable {
     /**
      * @notice Enable funding for all vaults
      * @param enabled True to enable funding
+     * @dev Emits events for both successful and failed updates
+     *      VaultFundingEnabledUpdated for successful updates
+     *      VaultFundingEnabledUpdateFailed for failed updates
+     *      BatchFundingEnabledUpdateCompleted with summary counts
      */
     function setFundingEnabledForAllVaults(bool enabled) external onlyVaultAdmin {
         address[] memory vaults = IVaultManager(vaultManager).getAllVaults();
+        uint256 successCount = 0;
+        uint256 failCount = 0;
 
         for (uint256 i = 0; i < vaults.length; i++) {
             IVaultManager.VaultInfo memory info =
@@ -414,11 +438,17 @@ contract VaultAdminProxy is Initializable, UUPSUpgradeable {
 
             try IVaultRouter(vaults[i]).setFundingEnabled(enabled) {
                 emit VaultFundingEnabledUpdated(vaults[i], enabled, block.timestamp);
+                successCount++;
             } catch {
-                // Skip failed vaults
+                // Log failed vaults instead of silently skipping
+                emit VaultFundingEnabledUpdateFailed(vaults[i], block.timestamp);
+                failCount++;
                 continue;
             }
         }
+
+        // Emit summary event
+        emit BatchFundingEnabledUpdateCompleted(successCount, failCount, block.timestamp);
     }
 
     // ========================================================================

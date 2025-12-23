@@ -18,12 +18,18 @@ interface IVaultAdminProxy {
     );
     event VaultFeeUpdated(address indexed vault, uint8 feeType, uint16 feeBps, uint256 timestamp);
     event VaultTreasuryUpdated(address indexed vault, address treasury, uint256 timestamp);
+    event VaultTreasuryUpdateFailed(address indexed vault, uint256 timestamp);
+    event BatchTreasuryUpdateCompleted(uint256 successCount, uint256 failCount, uint256 timestamp);
     event VaultTradingEnabledUpdated(address indexed vault, bool enabled, uint256 timestamp);
     event VaultGraduationThresholdUpdated(
         address indexed vault, uint256 threshold, uint256 timestamp
     );
     event VaultFundingConfigUpdated(address indexed vault, uint256 timestamp);
     event VaultFundingEnabledUpdated(address indexed vault, bool enabled, uint256 timestamp);
+    event VaultFundingEnabledUpdateFailed(address indexed vault, uint256 timestamp);
+    event BatchFundingEnabledUpdateCompleted(
+        uint256 successCount, uint256 failCount, uint256 timestamp
+    );
     event FeesWithdrawn(address indexed vault, uint256 amount, uint256 timestamp);
     event BatchFundingUpdated(uint256 vaultsUpdated, uint256 timestamp);
     event PriceFeedManagerUpdated(address indexed oldManager, address indexed newManager);
