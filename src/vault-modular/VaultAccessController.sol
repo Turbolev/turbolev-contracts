@@ -4,6 +4,7 @@ pragma solidity ^0.8.22;
 import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import "../interfaces/IVaultManager.sol";
 
 /**
@@ -29,7 +30,12 @@ import "../interfaces/IVaultManager.sol";
  * - Guardian count tracked with min/max limits (2-10)
  * - Unpause actions still require DEFAULT_ADMIN_ROLE (Timelock)
  */
-contract VaultAccessController is Initializable, AccessControlUpgradeable, UUPSUpgradeable {
+contract VaultAccessController is
+    Initializable,
+    AccessControlUpgradeable,
+    ReentrancyGuardUpgradeable,
+    UUPSUpgradeable
+{
     // ========================================================================
     // ROLE DEFINITIONS
     // ========================================================================
@@ -199,6 +205,7 @@ contract VaultAccessController is Initializable, AccessControlUpgradeable, UUPSU
         if (positionManager == address(0)) revert InvalidAddress();
 
         __AccessControl_init();
+        __ReentrancyGuard_init();
         __UUPSUpgradeable_init();
 
         // Store vaultManager reference
@@ -598,7 +605,7 @@ contract VaultAccessController is Initializable, AccessControlUpgradeable, UUPSU
      * @param vault Vault address to pause (must match initiated action)
      * @dev Must be called by different guardian than initiator
      */
-    function confirmPauseVault(address vault) external onlyRole(GUARDIAN_ROLE) {
+    function confirmPauseVault(address vault) external nonReentrant onlyRole(GUARDIAN_ROLE) {
         if (vaultManager == address(0)) revert VaultManagerNotSet();
         _confirmEmergencyAction(this.confirmPauseVault.selector, abi.encode(vault));
 
@@ -621,7 +628,11 @@ contract VaultAccessController is Initializable, AccessControlUpgradeable, UUPSU
      * @param vaults Array of vault addresses (must match initiated action)
      * @dev Must be called by different guardian than initiator
      */
-    function confirmBatchPause(address[] calldata vaults) external onlyRole(GUARDIAN_ROLE) {
+    function confirmBatchPause(address[] calldata vaults)
+        external
+        nonReentrant
+        onlyRole(GUARDIAN_ROLE)
+    {
         if (vaultManager == address(0)) revert VaultManagerNotSet();
         _confirmEmergencyAction(this.confirmBatchPause.selector, abi.encode(vaults));
 
@@ -714,7 +725,11 @@ contract VaultAccessController is Initializable, AccessControlUpgradeable, UUPSU
      * @param projectToken Project token address
      * @dev Only callable by DEFAULT_ADMIN_ROLE (Timelock) to prevent abuse
      */
-    function emergencyUnpauseVault(address projectToken) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function emergencyUnpauseVault(address projectToken)
+        external
+        nonReentrant
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
         if (vaultManager == address(0)) revert VaultManagerNotSet();
         IVaultManager(vaultManager).emergencyUnpauseVault(projectToken);
         emit EmergencyUnpause(projectToken, msg.sender);
@@ -725,7 +740,11 @@ contract VaultAccessController is Initializable, AccessControlUpgradeable, UUPSU
      * @param vault Vault address
      * @dev Only callable by DEFAULT_ADMIN_ROLE (Timelock) to prevent abuse
      */
-    function emergencyUnpauseVaultByAddress(address vault) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function emergencyUnpauseVaultByAddress(address vault)
+        external
+        nonReentrant
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
         if (vaultManager == address(0)) revert VaultManagerNotSet();
         IVaultManager(vaultManager).emergencyUnpauseVaultByAddress(vault);
         emit EmergencyUnpause(vault, msg.sender);
@@ -738,6 +757,7 @@ contract VaultAccessController is Initializable, AccessControlUpgradeable, UUPSU
      */
     function emergencyBatchUnpause(address[] calldata vaults)
         external
+        nonReentrant
         onlyRole(DEFAULT_ADMIN_ROLE)
     {
         if (vaultManager == address(0)) revert VaultManagerNotSet();

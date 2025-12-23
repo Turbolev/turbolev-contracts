@@ -3,6 +3,7 @@ pragma solidity ^0.8.22;
 
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "./interfaces/IPriceFeedManager.sol";
@@ -34,6 +35,7 @@ contract PriceFeedManager is
     Initializable,
     OwnableUpgradeable,
     PausableUpgradeable,
+    ReentrancyGuardUpgradeable,
     UUPSUpgradeable,
     IPriceFeedManager
 {
@@ -207,6 +209,7 @@ contract PriceFeedManager is
 
         __Ownable_init(initialOwner);
         __Pausable_init();
+        __ReentrancyGuard_init();
         __UUPSUpgradeable_init();
 
         _initCircuitBreaker();
@@ -433,7 +436,7 @@ contract PriceFeedManager is
         PriceFeedConfig calldata config,
         bytes calldata updateData,
         uint256 maxAge
-    ) external payable onlyOwner whenNotPaused {
+    ) external payable nonReentrant onlyOwner whenNotPaused {
         // ========== STEP 1: Validate config (same as setPriceFeedConfig) ==========
         if (projectToken == address(0)) revert InvalidAddress();
         if (config.primaryProviderId == bytes32(0)) revert NoPrimaryProvider();

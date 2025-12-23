@@ -3,6 +3,7 @@ pragma solidity ^0.8.22;
 
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "../interfaces/oracles/IHybridOracle.sol";
 import "../interfaces/oracles/IPyth.sol";
@@ -19,7 +20,13 @@ import "../interfaces/oracles/IPyth.sol";
  * - Hybrid: Can work in both modes depending on use case
  * - All prices scaled to 18 decimals
  */
-contract PythOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgradeable, IHybridOracle {
+contract PythOracle is
+    OwnableUpgradeable,
+    PausableUpgradeable,
+    ReentrancyGuardUpgradeable,
+    UUPSUpgradeable,
+    IHybridOracle
+{
     // ========================================================================
     // STATE VARIABLES
     // ========================================================================
@@ -93,6 +100,7 @@ contract PythOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgradeable,
 
         __Ownable_init(initialOwner);
         __Pausable_init();
+        __ReentrancyGuard_init();
         __UUPSUpgradeable_init();
 
         pythContract = _pythContract;
@@ -239,6 +247,7 @@ contract PythOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgradeable,
         external
         payable
         override
+        nonReentrant
         whenNotPaused
     {
         bytes32 priceId = priceFeedIds[feed];
@@ -281,6 +290,7 @@ contract PythOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgradeable,
         external
         payable
         override
+        nonReentrant
         whenNotPaused
         returns (int256 resultPrice, uint256 resultUpdatedAt)
     {

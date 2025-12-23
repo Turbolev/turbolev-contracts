@@ -3,6 +3,7 @@ pragma solidity ^0.8.22;
 
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import "./VaultAccessController.sol";
 import "../interfaces/IVaultManager.sol";
 import "../interfaces/IVaultRouter.sol";
@@ -20,7 +21,7 @@ import "../interfaces/IVaultRouter.sol";
  *
  * This contract replaces VaultManagerHelper for admin operations.
  */
-contract VaultAdminProxy is Initializable, UUPSUpgradeable {
+contract VaultAdminProxy is Initializable, UUPSUpgradeable, ReentrancyGuardUpgradeable {
     // ========================================================================
     // STATE VARIABLES
     // ========================================================================
@@ -108,6 +109,7 @@ contract VaultAdminProxy is Initializable, UUPSUpgradeable {
         if (_accessController == address(0)) revert InvalidAddress();
 
         __UUPSUpgradeable_init();
+        __ReentrancyGuard_init();
 
         vaultManager = _vaultManager;
         accessController = _accessController;
@@ -160,7 +162,12 @@ contract VaultAdminProxy is Initializable, UUPSUpgradeable {
      * @dev Called by keeper every hour to update funding rates
      * @return updatedCount Number of vaults successfully updated
      */
-    function batchUpdateHourlyFunding() external onlyVaultKeeper returns (uint256 updatedCount) {
+    function batchUpdateHourlyFunding()
+        external
+        nonReentrant
+        onlyVaultKeeper
+        returns (uint256 updatedCount)
+    {
         address[] memory vaults = IVaultManager(vaultManager).getAllVaults();
 
         for (uint256 i = 0; i < vaults.length; i++) {
@@ -188,6 +195,7 @@ contract VaultAdminProxy is Initializable, UUPSUpgradeable {
      */
     function batchUpdateHourlyFundingForVaults(address[] calldata vaults)
         external
+        nonReentrant
         onlyVaultKeeper
         returns (uint256 updatedCount)
     {
@@ -359,7 +367,7 @@ contract VaultAdminProxy is Initializable, UUPSUpgradeable {
      *      VaultTreasuryUpdateFailed for failed updates
      *      BatchTreasuryUpdateCompleted with summary counts
      */
-    function setTreasuryForAllVaults(address treasury) external onlyVaultAdmin {
+    function setTreasuryForAllVaults(address treasury) external nonReentrant onlyVaultAdmin {
         address[] memory vaults = IVaultManager(vaultManager).getAllVaults();
         uint256 successCount = 0;
         uint256 failCount = 0;
@@ -426,7 +434,7 @@ contract VaultAdminProxy is Initializable, UUPSUpgradeable {
      *      VaultFundingEnabledUpdateFailed for failed updates
      *      BatchFundingEnabledUpdateCompleted with summary counts
      */
-    function setFundingEnabledForAllVaults(bool enabled) external onlyVaultAdmin {
+    function setFundingEnabledForAllVaults(bool enabled) external nonReentrant onlyVaultAdmin {
         address[] memory vaults = IVaultManager(vaultManager).getAllVaults();
         uint256 successCount = 0;
         uint256 failCount = 0;

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.22;
 
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+
 /**
  * @title MultisigWallet
  * @notice Multi-signature wallet requiring M-of-N signatures to execute transactions
@@ -12,7 +14,7 @@ pragma solidity ^0.8.22;
  * - Support batch transactions
  * - Integration with Timelock for propose operations
  */
-contract MultisigWallet {
+contract MultisigWallet is ReentrancyGuard {
     // ========================================================================
     // STATE VARIABLES
     // ========================================================================
@@ -210,7 +212,13 @@ contract MultisigWallet {
      * @dev Must be called separately after enough confirmations (no auto-execute)
      *      The caller pays the gas cost, can estimate beforehand using canExecute()
      */
-    function executeTransaction(uint256 txId) public onlyOwner txExists(txId) notExecuted(txId) {
+    function executeTransaction(uint256 txId)
+        public
+        nonReentrant
+        onlyOwner
+        txExists(txId)
+        notExecuted(txId)
+    {
         Transaction storage txn = transactions[txId];
 
         if (txn.confirmationCount < threshold) revert TransactionNotConfirmed();

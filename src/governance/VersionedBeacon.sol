@@ -2,6 +2,7 @@
 pragma solidity ^0.8.22;
 
 import "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /**
  * @title VersionedBeacon
@@ -23,7 +24,7 @@ import "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
  * - Logic incompatibility (new features not handled by old code)
  * Solution: Use emergency upgrade to new hotfix version instead of rollback
  */
-contract VersionedBeacon is UpgradeableBeacon {
+contract VersionedBeacon is UpgradeableBeacon, ReentrancyGuard {
     // ========================================================================
     // STATE VARIABLES
     // ========================================================================
@@ -276,6 +277,7 @@ contract VersionedBeacon is UpgradeableBeacon {
      */
     function emergencyUpgrade(address newImplementation, bytes32 infoHash)
         external
+        nonReentrant
         onlyAdminOrGuardian
     {
         if (!emergencyMode) revert NotInEmergencyMode();
