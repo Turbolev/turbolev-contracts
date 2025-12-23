@@ -14,11 +14,12 @@ import "./MathLib.sol";
  * Risk Controls:
  * 1. Vault paused check
  * 2. Trading enabled check
- * 3. Minimum bet amount check
- * 4. Maximum bet amount check (fixed amount, no % of TVL)
- * 5. Maximum leverage check (includes utilization-based adjustment)
- * 6. Directional exposure check (50% of TVL default)
- * 7. Total OI cap check (TVL × risk multiplier)
+ * 3. Liquidity available check (prevents opening positions when totalLiquidity = 0)
+ * 4. Minimum bet amount check
+ * 5. Maximum bet amount check (fixed amount, no % of TVL)
+ * 6. Maximum leverage check (includes utilization-based adjustment)
+ * 7. Directional exposure check (50% of TVL default)
+ * 8. Total OI cap check (TVL × risk multiplier)
  */
 library VaultRiskLib {
     // ========================================================================
@@ -27,6 +28,7 @@ library VaultRiskLib {
 
     error VaultPaused();
     error TradingDisabled();
+    error NoLiquidityAvailable();
     error BelowMinimumBet();
     error ExceedsMaximumBet();
     error ExceedsMaxLeverage();
@@ -77,14 +79,15 @@ library VaultRiskLib {
 
     /**
      * @notice Comprehensive risk check for opening positions
-     * @dev Performs 7 checks in order, reverts with specific error if check fails:
+     * @dev Performs 8 checks in order, reverts with specific error if check fails:
      *      1. Vault paused check → VaultPaused()
      *      2. Trading enabled check → TradingDisabled()
-     *      3. Minimum bet amount check → BelowMinimumBet()
-     *      4. Maximum bet amount check → ExceedsMaximumBet()
-     *      5. Maximum leverage check (with utilization adjustment) → ExceedsMaxLeverage()
-     *      6. Directional exposure check → ExceedsDirectionalExposure()
-     *      7. Total OI cap check → ExceedsTotalOICap()
+     *      3. Liquidity available check → NoLiquidityAvailable()
+     *      4. Minimum bet amount check → BelowMinimumBet()
+     *      5. Maximum bet amount check → ExceedsMaximumBet()
+     *      6. Maximum leverage check (with utilization adjustment) → ExceedsMaxLeverage()
+     *      7. Directional exposure check → ExceedsDirectionalExposure()
+     *      8. Total OI cap check → ExceedsTotalOICap()
      * @param params Struct containing all risk parameters
      */
     function checkPositionRisk(RiskCheckParams memory params) external pure {
@@ -98,21 +101,28 @@ library VaultRiskLib {
             revert TradingDisabled();
         }
 
+        // 3. Check if vault has liquidity
+        // Prevents opening positions when LP has withdrawn all liquidity
+        // Even with leverage = 1x, trader could open huge position and wait in pending payout queue
+        if (params.totalLiquidity == 0) {
+            revert NoLiquidityAvailable();
+        }
+
         // Calculate collateral from position size and leverage
         uint256 collateral =
             params.leverage > 0 ? params.positionSize / params.leverage : params.positionSize;
 
-        // 3. Check min bet amount (based on collateral)
+        // 4. Check min bet amount (based on collateral)
         if (collateral < params.minBetAmount) {
             revert BelowMinimumBet();
         }
 
-        // 4. Check max bet amount (fixed amount, no % of TVL)
+        // 5. Check max bet amount (fixed amount, no % of TVL)
         if (collateral > params.maxBetAmount) {
             revert ExceedsMaximumBet();
         }
 
-        // 5. Check maximum leverage with utilization-based adjustment
+        // 6. Check maximum leverage with utilization-based adjustment
         // Build utilization config from params
         VaultConfigLib.UtilizationConfig memory utilizationConfig = VaultConfigLib.UtilizationConfig({
             tier1Bps: params.utilizationTier1Bps,
@@ -136,7 +146,7 @@ library VaultRiskLib {
             revert ExceedsMaxLeverage();
         }
 
-        // 6. Check directional exposure cap
+        // 7. Check directional exposure cap
         _checkDirectionalExposure(
             params.totalLiquidity,
             params.totalLongExposure,
@@ -146,7 +156,7 @@ library VaultRiskLib {
             params.maxDirectionalExposureBps
         );
 
-        // 7. Check total OI cap
+        // 8. Check total OI cap
         _checkTotalOICap(
             params.totalLiquidity,
             params.totalLongExposure,
