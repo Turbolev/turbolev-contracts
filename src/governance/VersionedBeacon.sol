@@ -18,8 +18,7 @@ import "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
  * - Owner (Timelock): Normal upgrades via governance
  * - Admin/Guardian: Emergency upgrades when vault is paused
  *
- * NEW-H-02 FIX: Removed rollbackTo() function
- * Reason: Rollback to previous version can break active positions due to:
+ * Note: Rollback functionality is not supported because:
  * - Storage layout incompatibility (new fields not understood by old code)
  * - Logic incompatibility (new features not handled by old code)
  * Solution: Use emergency upgrade to new hotfix version instead of rollback
@@ -269,7 +268,6 @@ contract VersionedBeacon is UpgradeableBeacon {
      *      - Caller must be admin or guardian
      *      - Vault should be paused before calling this
      *
-     * NEW-H-02 FIX: This replaces rollbackTo()
      * Instead of rolling back to an old version (which can break positions),
      * we upgrade to a new hotfix version that is forward-compatible.
      *

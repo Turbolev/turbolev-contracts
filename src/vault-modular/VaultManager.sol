@@ -20,7 +20,7 @@ import "../interfaces/IVaultRouter.sol";
  *
  * Key Features:
  * - Deploy modular vaults (VaultRouter with delegatecall modules)
- * - Tích hợp VaultAccessController for centralized access control
+ * - Integrate VaultAccessController for centralized access control
  * - Governance integration (Timelock + Multisig)
  * - UUPS upgradeable
  * - Backward compatible with legacy vault calls
@@ -372,13 +372,12 @@ contract VaultManager is
         uint64 positionId,
         uint256 collateral,
         int256 vaultPnL,
-        uint256 fee,
         uint256 positionSize,
         uint8 direction,
         address user
     ) external onlyPositionManager returns (uint256 closeFee) {
         return IVaultRouter(_getVault(_projectToken))
-            .updateVaultPnL(positionId, collateral, vaultPnL, fee, positionSize, direction, user);
+            .updateVaultPnL(positionId, collateral, vaultPnL, positionSize, direction, user);
     }
 
     // ========================================================================
@@ -600,7 +599,7 @@ contract VaultManager is
         ) {
             revert InvalidAddress();
         }
-        // Contract existence checks (L-V3-05 fix)
+        // Contract existence checks
         if (_coreModule.code.length == 0) revert NotAContract(_coreModule);
         if (_fundingModule.code.length == 0) revert NotAContract(_fundingModule);
         if (_rewardsModule.code.length == 0) revert NotAContract(_rewardsModule);

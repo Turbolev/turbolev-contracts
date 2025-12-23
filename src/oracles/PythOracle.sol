@@ -65,8 +65,8 @@ contract PythOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgradeable,
     error InsufficientFee();
     error PythCallFailed();
     error PriceFeedNotConfigured();
-    error RefundFailed(); // L-03 FIX: Custom error instead of string
-    error LengthMismatch(); // L-03 FIX: Custom error instead of string
+    error RefundFailed();
+    error LengthMismatch();
 
     // ========================================================================
     // CONSTRUCTOR / INITIALIZER
@@ -262,7 +262,6 @@ contract PythOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgradeable,
             // Refund excess fee
             if (msg.value > fee) {
                 (bool success,) = msg.sender.call{ value: msg.value - fee }("");
-                // L-03 FIX: Use custom error instead of string
                 if (!success) revert RefundFailed();
             }
         } catch {
@@ -309,7 +308,6 @@ contract PythOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgradeable,
             // Refund excess
             if (msg.value > fee) {
                 (bool success,) = msg.sender.call{ value: msg.value - fee }("");
-                // L-03 FIX: Use custom error instead of string
                 if (!success) revert RefundFailed();
             }
         }
@@ -416,7 +414,6 @@ contract PythOracle is OwnableUpgradeable, PausableUpgradeable, UUPSUpgradeable,
         external
         onlyOwner
     {
-        // L-03 FIX: Use custom error instead of string
         if (tokens.length != priceIds.length) revert LengthMismatch();
 
         for (uint256 i = 0; i < tokens.length; i++) {

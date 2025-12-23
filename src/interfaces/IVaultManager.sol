@@ -80,17 +80,15 @@ interface IVaultManager {
      * @param positionId Position ID (for tracking)
      * @param collateral Collateral amount
      * @param vaultPnL Vault P&L
-     * @param fee Fee collected
      * @param positionSize Position size
      * @param direction Position direction (1 = LONG, 2 = SHORT)
-     * @param user User address for event tracking (M-05 FIX: Replace tx.origin)
+     * @param user User address for event tracking
      */
     function updateVaultPnLWithLeverage(
         address _projectToken,
         uint64 positionId,
         uint256 collateral,
         int256 vaultPnL,
-        uint256 fee,
         uint256 positionSize,
         uint8 direction,
         address user

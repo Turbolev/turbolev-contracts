@@ -299,7 +299,7 @@ contract VaultPayoutLibTest is Test {
 
     function test_CalculateExposureChange_Long() public pure {
         (uint256 longChange, uint256 shortChange) =
-            VaultPayoutLib.calculateExposureChange(100 ether, 1, true);
+            VaultPayoutLib.calculateExposureChange(100 ether, 1);
 
         assertEq(longChange, 100 ether);
         assertEq(shortChange, 0);
@@ -307,7 +307,7 @@ contract VaultPayoutLibTest is Test {
 
     function test_CalculateExposureChange_Short() public pure {
         (uint256 longChange, uint256 shortChange) =
-            VaultPayoutLib.calculateExposureChange(100 ether, 2, true);
+            VaultPayoutLib.calculateExposureChange(100 ether, 2);
 
         assertEq(longChange, 0);
         assertEq(shortChange, 100 ether);
@@ -315,7 +315,7 @@ contract VaultPayoutLibTest is Test {
 
     function test_CalculateExposureChange_InvalidDirection() public pure {
         (uint256 longChange, uint256 shortChange) =
-            VaultPayoutLib.calculateExposureChange(100 ether, 0, true);
+            VaultPayoutLib.calculateExposureChange(100 ether, 0);
 
         assertEq(longChange, 0);
         assertEq(shortChange, 0);
@@ -367,7 +367,7 @@ contract VaultPayoutLibTest is Test {
         direction = uint8(bound(direction, 1, 2));
 
         (uint256 longChange, uint256 shortChange) =
-            VaultPayoutLib.calculateExposureChange(positionSize, direction, true);
+            VaultPayoutLib.calculateExposureChange(positionSize, direction);
 
         // One should be positionSize, other should be 0
         if (direction == 1) {

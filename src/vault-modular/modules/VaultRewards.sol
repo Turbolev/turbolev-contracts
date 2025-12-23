@@ -220,7 +220,7 @@ contract VaultRewards is VaultModuleBase {
     /**
      * @notice Claim pending rewards with slippage protection
      * @param minExpectedRewards Minimum rewards expected (reverts if actual < min)
-     * @dev H-05 FIX: Added slippage protection to prevent front-running attacks
+     * @dev Added slippage protection to prevent front-running attacks
      */
     function claimRewardsProtected(uint256 minExpectedRewards) external nonReentrant whenNotPaused {
         _claimRewardsInternal(minExpectedRewards);
@@ -229,7 +229,6 @@ contract VaultRewards is VaultModuleBase {
     /**
      * @notice Internal function to claim rewards with optional slippage protection
      * @param minExpectedRewards Minimum rewards expected (0 = no protection)
-     * @dev H-05 FIX: Centralized logic with slippage check
      */
     function _claimRewardsInternal(uint256 minExpectedRewards) internal {
         VaultStorageLib.CoreStorage storage core = _core();
@@ -251,7 +250,7 @@ contract VaultRewards is VaultModuleBase {
         }
         if (actualRewards == 0) revert InsufficientLiquidity();
 
-        // H-05 FIX: Slippage protection - revert if actual rewards less than minimum expected
+        // Slippage protection - revert if actual rewards less than minimum expected
         if (actualRewards < minExpectedRewards) {
             revert InsufficientRewards(actualRewards, minExpectedRewards);
         }

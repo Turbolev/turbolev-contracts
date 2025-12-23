@@ -205,11 +205,10 @@ library VaultPayoutLib {
      * @notice Calculate exposure change for directional tracking
      * @param positionSize Size of the position
      * @param direction Position direction (1 = LONG, 2 = SHORT)
-     * @param isOpening True if opening, false if closing
      * @return longChange Change in long exposure
      * @return shortChange Change in short exposure
      */
-    function calculateExposureChange(uint256 positionSize, uint8 direction, bool isOpening)
+    function calculateExposureChange(uint256 positionSize, uint8 direction)
         internal
         pure
         returns (uint256 longChange, uint256 shortChange)
@@ -224,8 +223,6 @@ library VaultPayoutLib {
             shortChange = positionSize;
         }
 
-        // If closing, these will be subtracted
-        // If opening, these will be added
         return (longChange, shortChange);
     }
 }

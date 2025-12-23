@@ -163,7 +163,6 @@ interface IVaultRouter {
         uint64 positionId,
         uint256 collateral,
         int256 vaultPnL,
-        uint256 fee,
         uint256 positionSize,
         uint8 direction,
         address user

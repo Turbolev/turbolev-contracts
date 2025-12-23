@@ -25,8 +25,8 @@ import "../interfaces/IVaultManager.sol";
  *
  * Emergency Actions (2-of-N Guardian Pattern):
  * - Pause actions require 2 different guardians to initiate and confirm
- * - Confirmation window is configurable (30min - 24hr, default 1hr) (L-V4-01 FIX)
- * - Guardian count tracked with min/max limits (2-10) (L-V4-02 FIX)
+ * - Confirmation window is configurable (30min - 24hr, default 1hr)
+ * - Guardian count tracked with min/max limits (2-10)
  * - Unpause actions still require DEFAULT_ADMIN_ROLE (Timelock)
  */
 contract VaultAccessController is Initializable, AccessControlUpgradeable, UUPSUpgradeable {
@@ -56,7 +56,7 @@ contract VaultAccessController is Initializable, AccessControlUpgradeable, UUPSU
     bytes32 public constant GUARDIAN_ROLE = keccak256("GUARDIAN_ROLE");
 
     // ========================================================================
-    // GUARDIAN CONFIGURATION CONSTANTS (L-V4-01, L-V4-02 FIX)
+    // GUARDIAN CONFIGURATION CONSTANTS
     // ========================================================================
 
     /// @notice Minimum confirmation window for guardian actions (30 minutes)
@@ -105,15 +105,13 @@ contract VaultAccessController is Initializable, AccessControlUpgradeable, UUPSU
     uint256 public emergencyInitiatedAt;
 
     // ========================================================================
-    // GUARDIAN CONFIGURATION STATE (L-V4-01, L-V4-02 FIX)
+    // GUARDIAN CONFIGURATION STATE
     // ========================================================================
 
     /// @notice Configurable confirmation window for 2-of-N guardian actions
-    /// @dev L-V4-01 FIX: Made configurable instead of constant
     uint256 public emergencyConfirmationWindow;
 
     /// @notice Current number of guardians
-    /// @dev L-V4-02 FIX: Track guardian count for min/max enforcement
     uint256 public guardianCount;
 
     // ========================================================================
@@ -167,7 +165,7 @@ contract VaultAccessController is Initializable, AccessControlUpgradeable, UUPSU
     error EmergencyActionAlreadyPending();
     error EmergencyActionMismatch();
 
-    // Guardian Configuration Errors (L-V4-01, L-V4-02 FIX)
+    // Guardian Configuration Errors
     error InvalidConfirmationWindow();
     error TooManyGuardians();
     error TooFewGuardians();
@@ -206,7 +204,6 @@ contract VaultAccessController is Initializable, AccessControlUpgradeable, UUPSU
         // Store vaultManager reference
         vaultManager = _vaultManager;
 
-        // L-V4-01 FIX: Initialize configurable confirmation window
         emergencyConfirmationWindow = DEFAULT_CONFIRMATION_WINDOW;
 
         // Setup roles
@@ -472,24 +469,21 @@ contract VaultAccessController is Initializable, AccessControlUpgradeable, UUPSU
     }
 
     // ========================================================================
-    // GUARDIAN MANAGEMENT (L-V4-02 FIX: Added count tracking with min/max)
+    // GUARDIAN MANAGEMENT
     // ========================================================================
 
     /**
      * @notice Add a guardian for 2-of-N emergency actions
      * @param guardian Guardian address to add
-     * @dev Only callable by DEFAULT_ADMIN_ROLE
-     *      L-V4-02 FIX: Enforces MAX_GUARDIANS limit and tracks count
+     * @dev Only callable by DEFAULT_ADMIN_ROLE. Enforces MAX_GUARDIANS limit.
      */
     function addGuardian(address guardian) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (guardian == address(0)) revert InvalidAddress();
 
-        // L-V4-02 FIX: Check if already a guardian
         if (hasRole(GUARDIAN_ROLE, guardian)) {
             revert GuardianAlreadyExists();
         }
 
-        // L-V4-02 FIX: Check max limit
         if (guardianCount >= MAX_GUARDIANS) {
             revert TooManyGuardians();
         }
@@ -503,16 +497,13 @@ contract VaultAccessController is Initializable, AccessControlUpgradeable, UUPSU
     /**
      * @notice Remove a guardian
      * @param guardian Guardian address to remove
-     * @dev Only callable by DEFAULT_ADMIN_ROLE
-     *      L-V4-02 FIX: Enforces MIN_GUARDIANS limit and tracks count
+     * @dev Only callable by DEFAULT_ADMIN_ROLE. Enforces MIN_GUARDIANS limit.
      */
     function removeGuardian(address guardian) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        // L-V4-02 FIX: Check if actually a guardian
         if (!hasRole(GUARDIAN_ROLE, guardian)) {
             revert NotAGuardian();
         }
 
-        // L-V4-02 FIX: Check min limit (must keep at least MIN_GUARDIANS for 2-of-N)
         if (guardianCount <= MIN_GUARDIANS) {
             revert TooFewGuardians();
         }
@@ -535,7 +526,6 @@ contract VaultAccessController is Initializable, AccessControlUpgradeable, UUPSU
     /**
      * @notice Get current guardian count
      * @return count Number of guardians
-     * @dev L-V4-02 FIX: Added for transparency
      */
     function getGuardianCount() external view returns (uint256 count) {
         return guardianCount;
@@ -546,7 +536,6 @@ contract VaultAccessController is Initializable, AccessControlUpgradeable, UUPSU
      * @return minGuardians Minimum guardians required
      * @return maxGuardians Maximum guardians allowed
      * @return currentCount Current guardian count
-     * @dev L-V4-02 FIX: Added for transparency
      */
     function getGuardianConfig()
         external
@@ -557,14 +546,13 @@ contract VaultAccessController is Initializable, AccessControlUpgradeable, UUPSU
     }
 
     // ========================================================================
-    // CONFIRMATION WINDOW CONFIGURATION (L-V4-01 FIX)
+    // CONFIRMATION WINDOW CONFIGURATION
     // ========================================================================
 
     /**
      * @notice Set confirmation window for 2-of-N guardian actions
      * @param newWindow New confirmation window in seconds
-     * @dev Only callable by DEFAULT_ADMIN_ROLE
-     *      L-V4-01 FIX: Made configurable with min/max bounds
+     * @dev Only callable by DEFAULT_ADMIN_ROLE. Configurable with min/max bounds.
      */
     function setConfirmationWindow(uint256 newWindow) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (newWindow < MIN_CONFIRMATION_WINDOW || newWindow > MAX_CONFIRMATION_WINDOW) {
@@ -582,7 +570,6 @@ contract VaultAccessController is Initializable, AccessControlUpgradeable, UUPSU
      * @return minWindow Minimum allowed window
      * @return maxWindow Maximum allowed window
      * @return currentWindow Current confirmation window
-     * @dev L-V4-01 FIX: Added for transparency
      */
     function getConfirmationWindowConfig()
         external
@@ -666,7 +653,6 @@ contract VaultAccessController is Initializable, AccessControlUpgradeable, UUPSU
         view
         returns (bytes32 actionHash, address initiator, uint256 initiatedAt, uint256 expiresAt)
     {
-        // L-V4-01 FIX: Use configurable window instead of constant
         return (
             pendingEmergencyHash,
             emergencyInitiator,
@@ -680,7 +666,6 @@ contract VaultAccessController is Initializable, AccessControlUpgradeable, UUPSU
     // ========================================================================
 
     function _initiateEmergencyAction(bytes4 selector, bytes memory data) internal {
-        // L-V4-01 FIX: Use configurable window instead of constant
         // Check if there's already a pending non-expired action
         if (
             pendingEmergencyHash != bytes32(0)
@@ -700,7 +685,6 @@ contract VaultAccessController is Initializable, AccessControlUpgradeable, UUPSU
     function _confirmEmergencyAction(bytes4 selector, bytes memory data) internal {
         if (pendingEmergencyHash == bytes32(0)) revert NoPendingEmergencyAction();
 
-        // L-V4-01 FIX: Use configurable window instead of constant
         if (block.timestamp > emergencyInitiatedAt + emergencyConfirmationWindow) {
             _clearPendingAction();
             revert EmergencyActionExpired();

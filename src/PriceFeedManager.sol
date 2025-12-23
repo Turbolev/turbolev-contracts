@@ -62,7 +62,7 @@ contract PriceFeedManager is
     bytes32 public constant PYTH_PROVIDER = keccak256("PYTH");
 
     // ========================================================================
-    // CIRCUIT BREAKER STATE (L-10 FIX)
+    // CIRCUIT BREAKER STATE
     // ========================================================================
 
     /// @notice Circuit breaker configuration for extreme price movements
@@ -135,7 +135,7 @@ contract PriceFeedManager is
         address indexed projectToken, bytes32 indexed providerId, uint256 updateFee
     );
 
-    // Circuit Breaker Events (L-10 FIX)
+    // Circuit Breaker Events
     event CircuitBreakerTriggered(
         address indexed projectToken,
         uint256 lastPrice,
@@ -149,7 +149,7 @@ contract PriceFeedManager is
     event CircuitBreakerBypassUpdated(address indexed projectToken, bool bypassed);
     event LastPriceRecordUpdated(address indexed projectToken, uint256 price, uint256 timestamp);
 
-    // Initial Price Setup Events (NEW-H-01 FIX)
+    // Initial Price Setup Events
     event InitialPriceSet(
         address indexed projectToken, uint256 price, uint256 publishTime, bytes32 indexed providerId
     );
@@ -175,11 +175,11 @@ contract PriceFeedManager is
     error ProviderInUse(bytes32 providerId);
     error ArrayLengthMismatch();
 
-    // Circuit Breaker Errors (L-10 FIX)
+    // Circuit Breaker Errors
     error CircuitBreakerTripped(uint256 deviationBps, uint256 maxAllowedBps);
     error InvalidCircuitBreakerConfig();
 
-    // Initial Price Setup Errors (NEW-H-01 FIX)
+    // Initial Price Setup Errors
     error InitialPriceNotSet(address projectToken);
     error InitialPriceFetchFailed(address projectToken, bytes32 providerId);
     error RefundFailed();
@@ -209,7 +209,6 @@ contract PriceFeedManager is
         __Pausable_init();
         __UUPSUpgradeable_init();
 
-        // L-10 FIX: Initialize circuit breaker with default values
         _initCircuitBreaker();
     }
 
@@ -425,7 +424,7 @@ contract PriceFeedManager is
      * @param config Complete price feed configuration
      * @param updateData Price update data for pull oracles (empty bytes for push oracles)
      * @param maxAge Maximum acceptable price age in seconds
-     * @dev NEW-H-01 FIX: This ensures circuit breaker has a valid baseline price from the start
+     * @dev This ensures circuit breaker has a valid baseline price from the start
      * @dev For pull oracles (e.g., Pyth), caller must send ETH for update fee and provide updateData
      * @dev For push oracles (e.g., Chainlink), updateData can be empty and no ETH needed
      */
@@ -700,7 +699,7 @@ contract PriceFeedManager is
             revert InvalidOraclePrice();
         }
 
-        // L-10 FIX: Check circuit breaker before returning price
+        // Check circuit breaker before returning price
         if (!_checkCircuitBreaker(projectToken, fetchedPrice)) {
             LastPriceRecord memory lastRecord = lastPriceRecords[projectToken];
             uint256 deviationBps = _calculateDeviationBps(lastRecord.price, fetchedPrice);
@@ -781,7 +780,7 @@ contract PriceFeedManager is
             revert InvalidOraclePrice();
         }
 
-        // L-10 FIX: Check circuit breaker before returning price
+        // Check circuit breaker before returning price
         // This protects against extreme price movements that could be manipulation
         if (!_checkCircuitBreaker(projectToken, fetchedPrice)) {
             // Get the last recorded price for error context
@@ -1000,7 +999,7 @@ contract PriceFeedManager is
     }
 
     // ========================================================================
-    // CIRCUIT BREAKER FUNCTIONS (L-10 FIX)
+    // CIRCUIT BREAKER FUNCTIONS
     // ========================================================================
 
     /**
@@ -1067,7 +1066,7 @@ contract PriceFeedManager is
 
         LastPriceRecord memory lastRecord = lastPriceRecords[projectToken];
 
-        // NEW-H-01 FIX: First price MUST be set via setPriceFeedConfigWithInit
+        // First price MUST be set via setPriceFeedConfigWithInit
         // This prevents circuit breaker bypass by manipulating the first price
         if (lastRecord.price == 0 || lastRecord.timestamp == 0) {
             revert InitialPriceNotSet(projectToken);

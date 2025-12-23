@@ -84,7 +84,7 @@ contract VaultFunding is VaultModuleBase {
             return (funding.cumulativeFundingRateLong, funding.cumulativeFundingRateShort, 0, true);
         }
 
-        // H-04 FIX: Cap hours to limit manipulation impact
+        // Cap hours to limit manipulation impact
         bool wasCapped = false;
         if (hoursElapsed > VaultConfigLib.MAX_CATCHUP_HOURS) {
             wasCapped = true;
@@ -128,7 +128,7 @@ contract VaultFunding is VaultModuleBase {
             block.timestamp
         );
 
-        // H-04 FIX: Emit event if hours were capped
+        // Emit event if hours were capped
         if (wasCapped) {
             emit FundingUpdateCapped(
                 currentHour - funding.lastFundingUpdateHour,

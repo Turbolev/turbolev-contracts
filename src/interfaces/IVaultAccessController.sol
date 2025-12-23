@@ -86,7 +86,7 @@ interface IVaultAccessController {
     function hasRole(bytes32 role, address account) external view returns (bool hasRoleResult);
 
     // ========================================================================
-    // GUARDIAN FUNCTIONS (L-V4-02 FIX)
+    // GUARDIAN FUNCTIONS
     // ========================================================================
 
     /**
@@ -114,7 +114,7 @@ interface IVaultAccessController {
         returns (uint256 minGuardians, uint256 maxGuardians, uint256 currentCount);
 
     // ========================================================================
-    // CONFIRMATION WINDOW FUNCTIONS (L-V4-01 FIX)
+    // CONFIRMATION WINDOW FUNCTIONS
     // ========================================================================
 
     /**

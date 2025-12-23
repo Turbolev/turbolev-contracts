@@ -6,8 +6,8 @@ import "./MathLib.sol";
 /**
  * @title FundingRateLib
  * @notice Library for funding rate calculations in perpetual trading
- * @dev Implements hourly funding rate with tiered imbalance-based rates
- *      C-03 FIX: Uses MathLib.mulDivSigned() to prevent overflow in funding calculations
+ * @dev Implements hourly funding rate with tiered imbalance-based rates.
+ *      Uses MathLib.mulDivSigned() to prevent overflow in funding calculations.
  *
  * Funding Rate Mechanism:
  * - Calculated every HOUR (not 8-hour traditional)
@@ -214,7 +214,7 @@ library FundingRateLib {
      * @param direction Position direction (1 = LONG, 2 = SHORT)
      * @return fundingOwed Funding amount (positive = owes, negative = receives)
      * @dev Funding = (currentRate - entryRate) * positionSize / FUNDING_PRECISION
-     *      C-03 FIX: Uses MathLib.mulDivSigned() to prevent overflow when
+     *      Uses MathLib.mulDivSigned() to prevent overflow when
      *      rateDiff * positionSize exceeds int256 max before division
      * @dev DEPRECATED: Use calculatePositionFundingZeroSum for proper zero-sum funding
      */
@@ -238,7 +238,7 @@ library FundingRateLib {
             revert InvalidDirection();
         }
 
-        // C-03 FIX: Use MathLib.mulDivSigned() for safe multiplication
+        // Use MathLib.mulDivSigned() for safe multiplication
         // This prevents overflow when rateDiff * positionSize exceeds int256 max
         // before the division by FUNDING_PRECISION
         // Old code (vulnerable to overflow):

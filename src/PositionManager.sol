@@ -77,7 +77,7 @@ contract PositionManager is
     /// @notice Maximum allowed min position hold time (1 hour)
     uint256 private constant MAX_MIN_POSITION_HOLD_TIME = 3600;
 
-    /// @notice H-01 FIX: Maximum allowed price age for oracle validation (1 hour)
+    /// @notice Maximum allowed price age for oracle validation (1 hour)
     /// @dev Push oracles may have stale prices, so we allow up to 1 hour
     uint256 private constant MAX_ALLOWED_PRICE_AGE = 1 hours;
 
@@ -119,7 +119,7 @@ contract PositionManager is
     mapping(uint64 => bool) public isPendingClose;
 
     // ========================================================================
-    // TOKEN DECIMALS VALIDATION (9.3 Missing Validation Fix)
+    // TOKEN DECIMALS VALIDATION
     // ========================================================================
 
     /// @notice Minimum supported token decimals
@@ -360,7 +360,7 @@ contract PositionManager is
                 || vaultManager == address(0) || priceFeedManager == address(0)
         ) revert InvalidAddress();
 
-        // 9.3 FIX: Validate token decimals compatibility (6-18 decimals supported)
+        // Validate token decimals compatibility (6-18 decimals supported)
         // Uses caching to avoid repeated external calls
         _validateAndCacheTokenDecimals(projectToken);
 
@@ -376,7 +376,6 @@ contract PositionManager is
         IERC20(projectToken).safeTransferFrom(msg.sender, address(this), amount);
 
         // Get price from PriceFeedManager
-        // H-01 FIX: Use _calculateMaxAge to cap price staleness
         if (priceFeedManager == address(0)) revert InvalidAddress();
         uint256 maxAge = _calculateMaxAge(deadline);
 
@@ -522,7 +521,6 @@ contract PositionManager is
         // Try to get close price from Blocksense Oracle via SettlementEngine
         if (settlementEngine == address(0)) revert InvalidAddress();
 
-        // H-01 FIX: Use _calculateMaxAge to cap price staleness
         uint256 maxAge = _calculateMaxAge(deadline);
 
         // Try to get price - if stale, move to pending instead of reverting
@@ -630,7 +628,6 @@ contract PositionManager is
         // Get current price from PriceFeedManager to verify position is not liquidated
         uint256 currentPrice;
         if (priceFeedManager != address(0)) {
-            // H-01 FIX: Use _calculateMaxAge to cap price staleness
             uint256 maxAge = _calculateMaxAge(deadline);
             (currentPrice,) = IPriceFeedManager(priceFeedManager).getPrice(pos.projectToken, maxAge);
 
@@ -728,7 +725,6 @@ contract PositionManager is
         bool isLiquidation,
         PositionClosedBy closedBy
     ) external nonReentrant onlyPositionKeeper {
-        // M-04 FIX: Add deadline check for keeper operations
         if (block.timestamp > deadline) revert DeadlineExpired();
 
         PositionLib.Position storage pos = positions[positionId];
@@ -743,7 +739,6 @@ contract PositionManager is
 
         // Get close price from PriceFeedManager
         if (priceFeedManager == address(0)) revert InvalidAddress();
-        // H-01 FIX: Use _calculateMaxAge to cap price staleness
         uint256 maxAge = _calculateMaxAge(deadline);
         (uint256 closePrice, uint256 pricePublishTime) =
             IPriceFeedManager(priceFeedManager).getPrice(pos.projectToken, maxAge);
@@ -1001,7 +996,7 @@ contract PositionManager is
 
     /**
      * @notice Calculate max age for price validation with cap
-     * @dev H-01 FIX: Prevents accepting very stale prices by capping maxAge
+     * @dev Prevents accepting very stale prices by capping maxAge
      * @param deadline The deadline timestamp from user
      * @return maxAge The capped max age for price validation
      */
@@ -1079,14 +1074,13 @@ contract PositionManager is
         if (vaultManager != address(0)) {
             closeFee = IVaultManager(vaultManager)
                 .updateVaultPnLWithLeverage(
-                    pos.projectToken, // Project token
-                    positionId, // Position ID for tracking
+                    pos.projectToken,
+                    positionId,
                     pos.amount,
                     vaultPnL,
-                    fee,
                     pos.positionSize,
-                    pos.direction, // Pass position direction
-                    pos.user // M-05 FIX: Pass user address instead of tx.origin
+                    pos.direction,
+                    pos.user
                 );
         }
 

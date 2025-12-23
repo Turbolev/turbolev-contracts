@@ -12,7 +12,7 @@ interface IPositionManager {
      * @param collateralAmount Amount of collateral
      * @param leverage Leverage multiplier
      * @param direction LONG (1) or SHORT (2)
-     * @param maxAcceptablePrice Maximum acceptable open price (0 = no limit) - GAP-03 FIX
+     * @param maxAcceptablePrice Maximum acceptable open price (0 = no limit)
      * @return positionId Position ID
      */
     function openPosition(
@@ -26,7 +26,7 @@ interface IPositionManager {
     /**
      * @notice Close position (user initiated)
      * @param positionId Position ID
-     * @param deadline Deadline timestamp (MEDIUM-02 FIX)
+     * @param deadline Deadline timestamp
      */
     function closePosition(uint64 positionId, uint256 deadline) external;
 

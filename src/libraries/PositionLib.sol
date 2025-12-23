@@ -6,8 +6,8 @@ import { MathLib } from "./MathLib.sol";
 /**
  * @title PositionLib
  * @notice Library containing constants and helper functions for position management
- * @dev Migrated from position_constants.move and position_state_manager.move
- * @dev H-02 FIX: Uses MathLib for high-precision P&L calculations
+ * @dev Migrated from position_constants.move and position_state_manager.move.
+ *      Uses MathLib for high-precision P&L calculations.
  */
 library PositionLib {
     // ========================================================================
@@ -65,9 +65,8 @@ library PositionLib {
     // Flat Liquidation Fee (in basis points)
     uint256 public constant LIQUIDATION_FEE_BPS = 200; // Flat 2% for all leverage levels
 
-    // H-05 FIX: Minimum time a position must be held before closing
-    // Reduced from 60s to 30s to allow users to correct mistakes faster
-    // 30s is still sufficient to prevent flash loan attacks (block time ~12s)
+    // Minimum time a position must be held before closing
+    // 30s is sufficient to prevent flash loan attacks (block time ~12s)
     // and allows oracle prices to update (Chainlink heartbeat ~20s)
     uint256 public constant MIN_POSITION_HOLD_TIME = 30; // 30 seconds
 
@@ -218,8 +217,6 @@ library PositionLib {
     /**
      * @notice Calculate liquidation fee (flat rate for all leverage levels)
      * @return fee Fee in basis points (always 2%)
-     * @dev 8.5 FIX: Removed unused leverage parameter. Previous version kept it for backward
-     *      compatibility but it was never used in the calculation.
      */
     function calculateLiquidationFee() internal pure returns (uint256) {
         return LIQUIDATION_FEE_BPS; // Always 2%
@@ -234,7 +231,7 @@ library PositionLib {
      *      For LONG: positive if price goes up
      *      For SHORT: positive if price goes down
      *
-     * @dev H-02 FIX: Uses MathLib.priceChangeBpsHighPrecision for accurate calculations
+     * @dev Uses MathLib.priceChangeBpsHighPrecision for accurate calculations
      *      with small price movements. Standard BPS (10000) can lose precision when:
      *      - priceChange is small relative to openPrice
      *      - amount is small (e.g., 1000 wei)
@@ -256,7 +253,7 @@ library PositionLib {
         if (currentPrice == 0) revert InvalidCurrentPrice();
         if (position.amount == 0) revert InvalidPositionAmount();
 
-        // H-02 FIX: Use high precision price change calculation
+        // Use high precision price change calculation
         // Returns price change in BPS scaled by MathLib.PRECISION (1e18)
         // This prevents precision loss for small price movements
         int256 priceChangeBpsHighPrecision =
@@ -288,7 +285,7 @@ library PositionLib {
             leveragedPnLHighPrecision = -leveragedPnLHighPrecision;
         }
 
-        // H-02 FIX: Calculate absolute P&L using high precision
+        // Calculate absolute P&L using high precision
         // This divides by both MathLib.BASIS_POINTS and PRECISION to get the actual value
         pnl = MathLib.calculatePnLFromHighPrecision(position.amount, leveragedPnLHighPrecision);
 

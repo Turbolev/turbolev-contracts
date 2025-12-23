@@ -219,7 +219,7 @@ contract VaultCore is VaultModuleBase {
         core.vaultInfo.createdAt = block.timestamp;
         core.vaultInfo.graduationThreshold = _graduationThreshold;
         core.vaultInfo.isGraduated = false;
-        core.vaultInfo.tradingEnabled = false;
+        core.vaultInfo.tradingEnabled = true;
 
         // Initialize vault params
         core.vaultParams = VaultStorageLib.VaultParams({
@@ -509,11 +509,11 @@ contract VaultCore is VaultModuleBase {
 
         VaultStorageLib.CoreStorage storage core = _core();
 
-        // Defense-in-depth: Position must have collateral (valid position)
+        // Position must have collateral (valid position)
         uint256 collateral = core.betCollateral[positionId];
         if (collateral == 0) revert InvalidPositionId();
 
-        // Defense-in-depth: If pending payout exists, user must match
+        // If pending payout exists, user must match
         address expectedUser = core.pendingPayoutUsers[positionId];
         if (expectedUser != address(0) && expectedUser != user) {
             revert UserMismatch();
@@ -578,7 +578,6 @@ contract VaultCore is VaultModuleBase {
         uint64 positionId,
         uint256 collateral,
         int256 vaultPnL,
-        uint256, /* fee - unused */
         uint256 positionSize,
         uint8 direction,
         address user

@@ -3,27 +3,27 @@ pragma solidity ^0.8.22;
 
 /**
  * @title MultisigWallet
- * @notice Multi-signature wallet yêu cầu M-of-N signatures để thực thi transactions
- * @dev Thiết kế đơn giản nhưng hiệu quả, tương tự Gnosis Safe
+ * @notice Multi-signature wallet requiring M-of-N signatures to execute transactions
+ * @dev Simple but effective design, similar to Gnosis Safe
  *
- * Chức năng:
- * - Yêu cầu số lượng chữ ký tối thiểu (threshold) để execute transaction
- * - Hỗ trợ thêm/xóa owners
- * - Hỗ trợ batch transactions
- * - Tích hợp với Timelock để tạo propose operations
+ * Features:
+ * - Requires minimum number of signatures (threshold) to execute transaction
+ * - Support adding/removing owners
+ * - Support batch transactions
+ * - Integration with Timelock for propose operations
  */
 contract MultisigWallet {
     // ========================================================================
     // STATE VARIABLES
     // ========================================================================
 
-    /// @notice Danh sách owners
+    /// @notice List of owners
     address[] public owners;
 
-    /// @notice Mapping để check owner nhanh
+    /// @notice Mapping for quick owner check
     mapping(address => bool) public isOwner;
 
-    /// @notice Số lượng signatures cần thiết
+    /// @notice Number of required signatures
     uint256 public threshold;
 
     /// @notice Transaction counter
@@ -107,8 +107,8 @@ contract MultisigWallet {
 
     /**
      * @notice Constructor
-     * @param _owners Danh sách owner addresses
-     * @param _threshold Số lượng signatures cần thiết (M-of-N)
+     * @param _owners List of owner addresses
+     * @param _threshold Number of required signatures (M-of-N)
      */
     constructor(address[] memory _owners, uint256 _threshold) {
         if (_owners.length == 0) revert InvalidOwner();
@@ -141,7 +141,7 @@ contract MultisigWallet {
     // ========================================================================
 
     /**
-     * @notice Submit một transaction mới
+     * @notice Submit a new transaction
      * @param to Target address
      * @param value ETH value
      * @param data Call data
@@ -169,9 +169,9 @@ contract MultisigWallet {
     }
 
     /**
-     * @notice Confirm một transaction
+     * @notice Confirm a transaction
      * @param txId Transaction ID
-     * @dev Không auto-execute, phải gọi executeTransaction() riêng (giống Gnosis Safe pattern)
+     * @dev Does not auto-execute, must call executeTransaction() separately (Gnosis Safe pattern)
      */
     function confirmTransaction(uint256 txId)
         public
@@ -185,7 +185,7 @@ contract MultisigWallet {
 
         emit TransactionConfirmed(txId, msg.sender);
 
-        // Emit event khi đủ threshold để notify off-chain systems
+        // Emit event when threshold reached to notify off-chain systems
         if (transactions[txId].confirmationCount == threshold) {
             emit TransactionReady(txId);
         }
@@ -205,10 +205,10 @@ contract MultisigWallet {
     }
 
     /**
-     * @notice Execute một transaction đã được confirm đủ
+     * @notice Execute a transaction that has enough confirmations
      * @param txId Transaction ID
-     * @dev Phải gọi riêng sau khi đủ confirmations (không auto-execute)
-     *      Người gọi execute sẽ chịu gas cost, có thể estimate trước bằng canExecute()
+     * @dev Must be called separately after enough confirmations (no auto-execute)
+     *      The caller pays the gas cost, can estimate beforehand using canExecute()
      */
     function executeTransaction(uint256 txId) public onlyOwner txExists(txId) notExecuted(txId) {
         Transaction storage txn = transactions[txId];
@@ -233,9 +233,9 @@ contract MultisigWallet {
     // ========================================================================
 
     /**
-     * @notice Thêm owner mới
-     * @param owner Address của owner mới
-     * @dev Chỉ có thể gọi qua multisig transaction
+     * @notice Add new owner
+     * @param owner Address of new owner
+     * @dev Can only be called via multisig transaction
      */
     function addOwner(address owner) external {
         if (msg.sender != address(this)) revert NotOwner();
@@ -248,9 +248,9 @@ contract MultisigWallet {
     }
 
     /**
-     * @notice Xóa owner
-     * @param owner Address của owner cần xóa
-     * @dev Chỉ có thể gọi qua multisig transaction
+     * @notice Remove owner
+     * @param owner Address of owner to remove
+     * @dev Can only be called via multisig transaction
      */
     function removeOwner(address owner) external {
         if (msg.sender != address(this)) revert NotOwner();
@@ -277,9 +277,9 @@ contract MultisigWallet {
     }
 
     /**
-     * @notice Thay đổi threshold
-     * @param _threshold Threshold mới
-     * @dev Chỉ có thể gọi qua multisig transaction
+     * @notice Change threshold
+     * @param _threshold New threshold
+     * @dev Can only be called via multisig transaction
      */
     function changeThreshold(uint256 _threshold) external {
         if (msg.sender != address(this)) revert NotOwner();
@@ -298,7 +298,7 @@ contract MultisigWallet {
     // ========================================================================
 
     /**
-     * @notice Submit và confirm nhiều transactions cùng lúc
+     * @notice Submit and confirm multiple transactions at once
      * @param destinations Target addresses
      * @param values ETH values
      * @param dataArray Call data array
@@ -327,9 +327,9 @@ contract MultisigWallet {
     // ========================================================================
 
     /**
-     * @notice Kiểm tra xem transaction có thể execute được không
+     * @notice Check if transaction can be executed
      * @param txId Transaction ID
-     * @return True nếu đủ confirmations và chưa executed
+     * @return True if enough confirmations and not yet executed
      */
     function canExecute(uint256 txId) external view returns (bool) {
         if (txId >= transactionCount) return false;
@@ -338,21 +338,21 @@ contract MultisigWallet {
     }
 
     /**
-     * @notice Lấy số lượng owners
+     * @notice Get number of owners
      */
     function getOwnerCount() external view returns (uint256) {
         return owners.length;
     }
 
     /**
-     * @notice Lấy danh sách owners
+     * @notice Get list of owners
      */
     function getOwners() external view returns (address[] memory) {
         return owners;
     }
 
     /**
-     * @notice Lấy số lượng confirmations của một transaction
+     * @notice Get confirmation count for a transaction
      * @param txId Transaction ID
      */
     function getConfirmationCount(uint256 txId) external view returns (uint256) {
@@ -360,7 +360,7 @@ contract MultisigWallet {
     }
 
     /**
-     * @notice Kiểm tra xem transaction đã được confirm bởi owner chưa
+     * @notice Check if transaction is confirmed by owner
      * @param txId Transaction ID
      * @param owner Owner address
      */
@@ -369,7 +369,7 @@ contract MultisigWallet {
     }
 
     /**
-     * @notice Lấy thông tin transaction
+     * @notice Get transaction info
      * @param txId Transaction ID
      */
     function getTransaction(uint256 txId)

@@ -102,16 +102,14 @@ interface IAssetVault {
      * @param positionId Position ID (for tracking)
      * @param collateral Collateral amount
      * @param vaultPnL Vault P&L
-     * @param fee Fee collected
      * @param positionSize Position size
      * @param direction Position direction (1 = LONG, 2 = SHORT)
-     * @param user User address for event tracking (M-05 FIX: Replace tx.origin)
+     * @param user User address for event tracking
      */
     function updateVaultPnL(
         uint64 positionId,
         uint256 collateral,
         int256 vaultPnL,
-        uint256 fee,
         uint256 positionSize,
         uint8 direction,
         address user
@@ -324,7 +322,7 @@ interface IAssetVault {
     /**
      * @notice Claim pending rewards with slippage protection
      * @param minExpectedRewards Minimum rewards expected (reverts if actual < min)
-     * @dev H-05 FIX: Added slippage protection to prevent front-running attacks
+     * @dev Added slippage protection to prevent front-running attacks
      */
     function claimRewardsProtected(uint256 minExpectedRewards) external;
 
@@ -784,20 +782,18 @@ interface IAssetVault {
     function queueStartIndex() external view returns (uint256);
 
     // ========================================================================
-    // EXPLICIT ARRAY LENGTH GETTERS (M-08 FIX: Avoid silent failures in VaultViewer)
+    // EXPLICIT ARRAY LENGTH GETTERS
     // ========================================================================
 
     /**
      * @notice Get total number of active LPs in the vault
      * @return length Number of LPs in the vaultLPs array
-     * @dev M-08 FIX: Explicit getter to avoid try-catch iteration in VaultViewer
      */
     function getVaultLPsLength() external view returns (uint256 length);
 
     /**
      * @notice Get total length of pending payout queue
      * @return length Total length of pendingPayoutQueue array
-     * @dev M-08 FIX: Explicit getter to avoid try-catch iteration in VaultViewer
      */
     function getPendingPayoutQueueLength() external view returns (uint256 length);
 }

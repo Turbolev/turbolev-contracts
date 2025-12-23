@@ -648,7 +648,7 @@ contract VaultViewerModular {
 
         grossAmount = (shares * info.totalLiquidity) / info.totalShares;
 
-        (uint16 stakingFee, uint16 earlyWithdrawalFee, uint256 minLockPeriod) = v.getFeeConfig();
+        (, uint16 earlyWithdrawalFee, uint256 minLockPeriod) = v.getFeeConfig();
 
         uint256 lockEndTime = lpPos.stakedAt + minLockPeriod;
         isEarlyWithdrawal = block.timestamp < lockEndTime;

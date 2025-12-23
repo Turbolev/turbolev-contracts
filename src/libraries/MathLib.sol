@@ -355,7 +355,7 @@ library MathLib {
     }
 
     // ========================================================================
-    // MULDIV OPERATIONS (C-03 FIX: Prevent overflow in funding calculations)
+    // MULDIV OPERATIONS
     // ========================================================================
 
     /**
@@ -440,7 +440,7 @@ library MathLib {
      * @param b Second multiplicand (signed, typically position size cast to int256)
      * @param denominator Divisor (signed, must be positive)
      * @return result (a * b) / denominator without intermediate overflow
-     * @dev C-03 FIX: Prevents overflow in funding rate calculations
+     * @dev Prevents overflow in funding rate calculations.
      *      Handles sign separately, uses mulDiv for magnitude
      *
      * Example usage in FundingRateLib:

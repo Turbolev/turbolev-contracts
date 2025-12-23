@@ -33,7 +33,7 @@ contract SettlementEngine is
     UUPSUpgradeable
 {
     // ========================================================================
-    // CONSTANTS (L-01 FIX: Replace magic numbers)
+    // CONSTANTS
     // ========================================================================
 
     /// @notice Default house edge in bps (2%)
@@ -188,7 +188,7 @@ contract SettlementEngine is
         __Pausable_init();
         __UUPSUpgradeable_init();
 
-        // Default config (L-01 FIX: Using constants instead of magic numbers)
+        // Default config
         houseEdgeBps = DEFAULT_HOUSE_EDGE_BPS;
         winMultiplierBps = DEFAULT_WIN_MULTIPLIER_BPS;
         minBetAmount = DEFAULT_MIN_BET_AMOUNT;
