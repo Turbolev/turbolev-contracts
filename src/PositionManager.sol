@@ -107,6 +107,8 @@ contract PositionManager is
         uint256 requestTime;
         uint256 deadline;
         uint256 maxAcceptablePrice;
+        uint256 closePrice; // Giá oracle tại thời điểm request close
+        uint256 pricePublishTime; // Thời điểm publish giá từ oracle
     }
 
     /// @notice Mapping from positionId to pending close request
@@ -205,6 +207,8 @@ contract PositionManager is
         uint256 requestTime,
         uint256 deadline,
         uint256 maxAcceptablePrice,
+        uint256 closePrice,
+        uint256 pricePublishTime,
         PendingCloseReason reason,
         PositionClosedBy closedBy
     );
@@ -559,39 +563,49 @@ contract PositionManager is
             }
         }
 
-        if (priceSuccess) {
-            if (closePrice == 0) revert InvalidPrice();
+        // If price fetch failed, revert (user must retry when oracle has fresh price)
+        if (!priceSuccess || closePrice == 0) {
+            revert PriceStale();
+        }
 
-            // Check maxAcceptablePrice if specified
-            if (maxAcceptablePrice > 0) {
-                if (pos.direction == PositionLib.BET_DIRECTION_LONG) {
-                    // LONG: User wants to sell, so limit min price
-                    if (closePrice < maxAcceptablePrice) {
-                        revert SlippageExceeded();
-                    }
-                } else {
-                    // SHORT: User wants to buy back, so limit max price
-                    if (closePrice > maxAcceptablePrice) {
-                        revert SlippageExceeded();
-                    }
+        // Check maxAcceptablePrice if specified - if not acceptable, move to pending close
+        if (maxAcceptablePrice > 0) {
+            bool priceAcceptable = true;
+            if (pos.direction == PositionLib.BET_DIRECTION_LONG) {
+                // LONG: User wants to sell, so limit min price
+                if (closePrice < maxAcceptablePrice) {
+                    priceAcceptable = false;
+                }
+            } else {
+                // SHORT: User wants to buy back, so limit max price
+                if (closePrice > maxAcceptablePrice) {
+                    priceAcceptable = false;
                 }
             }
 
-            // Check liquidation
-            if (PositionLib.isLiquidated(pos, closePrice)) {
-                revert PositionAlreadyLiquidated();
+            if (!priceAcceptable) {
+                // Move to pending close with saved price instead of reverting
+                _addPendingCloseRequest(
+                    positionId,
+                    deadline,
+                    maxAcceptablePrice,
+                    closePrice,
+                    pricePublishTime,
+                    PendingCloseReason.PRICE_NOT_ACCEPTABLE
+                );
+                return;
             }
-
-            // Process settlement immediately
-            _processSettlement(
-                positionId, closePrice, false, pricePublishTime, PositionClosedBy.USER_REQUESTED
-            );
-        } else {
-            // Price is stale or unavailable - move to pending close
-            _addPendingCloseRequest(
-                positionId, deadline, maxAcceptablePrice, PendingCloseReason.PRICE_STALE
-            );
         }
+
+        // Check liquidation
+        if (PositionLib.isLiquidated(pos, closePrice)) {
+            revert PositionAlreadyLiquidated();
+        }
+
+        // Process settlement immediately
+        _processSettlement(
+            positionId, closePrice, false, pricePublishTime, PositionClosedBy.USER_REQUESTED
+        );
     }
 
     /**
@@ -770,12 +784,16 @@ contract PositionManager is
      * @param positionId Position ID
      * @param deadline Original deadline
      * @param maxAcceptablePrice Original max acceptable price
+     * @param closePrice Oracle price at request time
+     * @param pricePublishTime Oracle price publish time
      * @param reason Reason for pending
      */
     function _addPendingCloseRequest(
         uint64 positionId,
         uint256 deadline,
         uint256 maxAcceptablePrice,
+        uint256 closePrice,
+        uint256 pricePublishTime,
         PendingCloseReason reason
     ) internal {
         PositionLib.Position storage pos = positions[positionId];
@@ -790,7 +808,9 @@ contract PositionManager is
                 positionId: positionId,
                 requestTime: block.timestamp,
                 deadline: deadline,
-                maxAcceptablePrice: maxAcceptablePrice
+                maxAcceptablePrice: maxAcceptablePrice,
+                closePrice: closePrice,
+                pricePublishTime: pricePublishTime
             });
 
             pendingClosePositionIds.push(positionId);
@@ -802,6 +822,8 @@ contract PositionManager is
                 block.timestamp,
                 deadline,
                 maxAcceptablePrice,
+                closePrice,
+                pricePublishTime,
                 reason,
                 PositionClosedBy.PENDING_CLOSE_REQUESTED
             );
@@ -833,23 +855,22 @@ contract PositionManager is
     /**
      * @notice Admin function to process pending close positions
      * @param maxPositions Maximum number of positions to process in this batch
-     * @param maxAge Maximum age of price data
-     * @param priceUpdateData Price update data for pull oracles (Pyth)
      * @dev Should be called by backend cron task
+     * @dev Uses saved price from PendingCloseRequest instead of fetching new price
      */
-    function processPendingClosePositions(
-        uint256 maxPositions,
-        uint256 maxAge,
-        bytes calldata priceUpdateData
-    ) external payable nonReentrant onlyPositionKeeper {
+    function processPendingClosePositions(uint256 maxPositions)
+        external
+        nonReentrant
+        onlyPositionKeeper
+    {
         uint256 processed = 0;
         uint256 i = 0;
 
         while (i < pendingClosePositionIds.length && processed < maxPositions) {
             uint64 positionId = pendingClosePositionIds[i];
 
-            // Process single pending close
-            bool success = _processSinglePendingClose(positionId, maxAge, priceUpdateData);
+            // Process single pending close using saved price
+            bool success = _processSinglePendingClose(positionId);
 
             if (success) {
                 // Don't increment i since we removed an element
@@ -864,15 +885,10 @@ contract PositionManager is
     /**
      * @notice Process a single pending close position
      * @param positionId Position ID to process
-     * @param maxAge Maximum age of price data
-     * @param priceUpdateData Price update data for pull oracles (Pyth)
      * @return success True if position was successfully closed
+     * @dev Uses saved price from PendingCloseRequest
      */
-    function _processSinglePendingClose(
-        uint64 positionId,
-        uint256 maxAge,
-        bytes calldata priceUpdateData
-    ) internal returns (bool success) {
+    function _processSinglePendingClose(uint64 positionId) internal returns (bool success) {
         PendingCloseRequest memory request = pendingCloseRequests[positionId];
         PositionLib.Position storage pos = positions[positionId];
 
@@ -890,80 +906,40 @@ contract PositionManager is
             return false;
         }
 
-        // Try to get price and close position
+        // Close position using saved price from request
         (bool closed, PendingCloseReason reason) =
-            _tryClosePendingPosition(positionId, request, pos, maxAge, priceUpdateData);
+            _tryClosePendingPosition(positionId, request, pos);
 
         emit PendingCloseProcessed(positionId, closed, reason);
         return closed;
     }
 
     /**
-     * @notice Try to close a pending position with current price
+     * @notice Try to close a pending position using saved price from request
      * @param positionId Position ID
-     * @param request Pending close request data
+     * @param request Pending close request data (contains saved price)
      * @param pos Position storage reference
-     * @param maxAge Maximum age of price data
-     * @param priceUpdateData Price update data for pull oracles (Pyth)
      * @return success True if successfully closed
      * @return reason Reason code for success/failure
+     * @dev Uses closePrice and pricePublishTime saved in PendingCloseRequest
      */
     function _tryClosePendingPosition(
         uint64 positionId,
         PendingCloseRequest memory request,
-        PositionLib.Position storage pos,
-        uint256 maxAge,
-        bytes calldata priceUpdateData
+        PositionLib.Position storage pos
     ) internal returns (bool success, PendingCloseReason reason) {
-        // Try to get settlement price
-        if (priceFeedManager == address(0)) {
-            return (false, PendingCloseReason.SETTLEMENT_ENGINE_NOT_SET);
-        }
-
-        uint256 closePrice;
-        uint256 pricePublishTime;
-
-        // Try with price update data first (for pull oracles like Pyth)
-        if (priceUpdateData.length > 0) {
-            try IPriceFeedManager(priceFeedManager).getPriceWithUpdate{ value: msg.value }(
-                pos.projectToken, maxAge, priceUpdateData
-            ) returns (
-                uint256 _price, uint256 _publishTime
-            ) {
-                closePrice = _price;
-                pricePublishTime = _publishTime;
-            } catch {
-                return (false, PendingCloseReason.PRICE_STALE);
-            }
-        } else {
-            // Fallback to cached/push oracle price
-            try IPriceFeedManager(priceFeedManager).getPrice(pos.projectToken, maxAge) returns (
-                uint256 _price, uint256 _publishTime
-            ) {
-                closePrice = _price;
-                pricePublishTime = _publishTime;
-            } catch {
-                return (false, PendingCloseReason.PRICE_STALE);
-            }
-        }
-
-        // Validate price
-        if (closePrice == 0) {
+        // Validate saved price from request
+        if (request.closePrice == 0) {
             return (false, PendingCloseReason.INVALID_PRICE);
         }
 
-        // Check if price is acceptable
-        if (!_isPriceAcceptable(closePrice, request.maxAcceptablePrice, pos.direction)) {
-            return (false, PendingCloseReason.PRICE_NOT_ACCEPTABLE);
-        }
-
-        // Close position (liquidation or normal)
-        bool isLiquidation = PositionLib.isLiquidated(pos, closePrice);
+        // Close position using saved price (liquidation or normal)
+        bool isLiquidation = PositionLib.isLiquidated(pos, request.closePrice);
         _processSettlement(
             positionId,
-            closePrice,
+            request.closePrice,
             isLiquidation,
-            pricePublishTime,
+            request.pricePublishTime,
             PositionClosedBy.PENDING_CLOSE_REQUESTED
         );
         _removePendingCloseRequest(positionId);

@@ -370,68 +370,36 @@ contract PendingCloseWithPriceDataTest is Test {
     // TEST: processPendingClosePositions with priceUpdateData
     // ========================================================================
 
-    function test_ProcessPendingClose_WithEmptyPriceUpdateData() public {
-        // Should work with empty priceUpdateData (uses getPrice)
+    function test_ProcessPendingClose_WithEmptyQueue() public {
+        // Should work with empty queue (no positions to process)
         vm.prank(keeper);
-        positionManager.processPendingClosePositions(10, 3600, "");
+        positionManager.processPendingClosePositions(10);
 
         // No positions to process, but should not revert
-    }
-
-    function test_ProcessPendingClose_WithPriceUpdateData() public {
-        bytes memory priceUpdateData = abi.encode("mock_price_update");
-
-        vm.prank(keeper);
-        positionManager.processPendingClosePositions{ value: 0 }(10, 3600, priceUpdateData);
-
-        // No positions to process, but should not revert
-    }
-
-    function test_ProcessPendingClose_IsPayable() public {
-        bytes memory priceUpdateData = abi.encode("mock_price_update");
-
-        // Should accept ETH for oracle fee
-        vm.prank(keeper);
-        positionManager.processPendingClosePositions{ value: 0.1 ether }(10, 3600, priceUpdateData);
     }
 
     function test_ProcessPendingClose_NonKeeperCannotCall() public {
-        bytes memory priceUpdateData = abi.encode("mock_price_update");
-
         vm.prank(user1);
         vm.expectRevert(PositionManager.NotPositionKeeper.selector);
-        positionManager.processPendingClosePositions(10, 3600, priceUpdateData);
+        positionManager.processPendingClosePositions(10);
     }
 
     function test_ProcessPendingClose_GasEstimate_EmptyQueue() public {
-        bytes memory priceUpdateData = abi.encode("mock_price_update");
-
         vm.prank(keeper);
         uint256 gasBefore = gasleft();
-        positionManager.processPendingClosePositions(10, 3600, priceUpdateData);
+        positionManager.processPendingClosePositions(10);
         uint256 gasUsed = gasBefore - gasleft();
 
-        console.log("Gas used for empty queue with priceUpdateData:", gasUsed);
+        console.log("Gas used for empty queue:", gasUsed);
         assertTrue(gasUsed < 50_000, "Processing empty queue should use minimal gas");
-    }
-
-    function test_ProcessPendingClose_WithDifferentMaxAge() public {
-        // Test with various maxAge values
-        vm.startPrank(keeper);
-
-        positionManager.processPendingClosePositions(10, 60, ""); // 1 minute
-        positionManager.processPendingClosePositions(10, 3600, ""); // 1 hour
-        positionManager.processPendingClosePositions(10, 86_400, ""); // 1 day
-
-        vm.stopPrank();
     }
 
     function test_ProcessPendingClose_WithDifferentMaxPositions() public {
         vm.startPrank(keeper);
 
-        positionManager.processPendingClosePositions(1, 3600, "");
-        positionManager.processPendingClosePositions(10, 3600, "");
-        positionManager.processPendingClosePositions(100, 3600, "");
+        positionManager.processPendingClosePositions(1);
+        positionManager.processPendingClosePositions(10);
+        positionManager.processPendingClosePositions(100);
 
         vm.stopPrank();
     }
@@ -440,13 +408,12 @@ contract PendingCloseWithPriceDataTest is Test {
     // TEST: Signature verification
     // ========================================================================
 
-    function test_FunctionSignature_HasThreeParameters() public view {
+    function test_FunctionSignature_HasOneParameter() public view {
         // Verify the function exists with new signature
         bytes4 selector = positionManager.processPendingClosePositions.selector;
 
-        // The selector should be for (uint256, uint256, bytes)
-        bytes4 expectedSelector =
-            bytes4(keccak256("processPendingClosePositions(uint256,uint256,bytes)"));
+        // The selector should be for (uint256) - uses saved price from struct
+        bytes4 expectedSelector = bytes4(keccak256("processPendingClosePositions(uint256)"));
         assertEq(selector, expectedSelector, "Function signature should match");
     }
 }
