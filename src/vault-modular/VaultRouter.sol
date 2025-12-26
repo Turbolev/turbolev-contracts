@@ -7,6 +7,8 @@ import "./libraries/VaultStorageLib.sol";
 import "./VaultAccessController.sol";
 import "../libraries/VaultRiskLib.sol";
 import "../libraries/VaultConfigLib.sol";
+import "../libraries/FundingRateLib.sol";
+import "../libraries/VaultRewardsLib.sol";
 
 /**
  * @title VaultRouter
@@ -500,6 +502,7 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
 
     /**
      * @notice Calculate position funding
+     * @dev Reads directly from storage instead of delegatecall to avoid staticcall bug
      */
     function calculatePositionFunding(
         int256 entryRateLong,
@@ -507,34 +510,53 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
         uint256 positionSize,
         uint8 direction
     ) external view returns (int256) {
-        bytes memory result = _staticDelegateToFunding(
-            abi.encodeWithSignature(
-                "calculatePositionFunding(int256,int256,uint256,uint8)",
-                entryRateLong,
-                entryRateShort,
-                positionSize,
-                direction
-            )
+        VaultStorageLib.FundingStorage storage funding = VaultStorageLib.getFundingStorage();
+
+        if (!funding.fundingEnabled) return 0;
+
+        return FundingRateLib.calculatePositionFundingZeroSum(
+            entryRateLong,
+            entryRateShort,
+            funding.cumulativeFundingRateLong,
+            funding.cumulativeFundingRateShort,
+            positionSize,
+            direction,
+            funding.totalLongExposure,
+            funding.totalShortExposure
         );
-        return abi.decode(result, (int256));
     }
 
     /**
      * @notice Get current hourly funding rate
+     * @dev Reads directly from storage instead of delegatecall to avoid staticcall bug
      */
     function getCurrentHourlyFundingRate()
         external
         view
         returns (uint256 rateBps, bool longsPayShorts, uint256 imbalanceBps, bool hasCounterparty)
     {
-        bytes memory result = _staticDelegateToFunding(
-            abi.encodeWithSignature("getCurrentHourlyFundingRate()")
+        VaultStorageLib.FundingStorage storage funding = VaultStorageLib.getFundingStorage();
+
+        // Return 0 if funding is disabled
+        if (!funding.fundingEnabled) {
+            return (0, false, 0, false);
+        }
+
+        (imbalanceBps, longsPayShorts, hasCounterparty) = FundingRateLib.calculateImbalance(
+            funding.totalLongExposure, funding.totalShortExposure
         );
-        return abi.decode(result, (uint256, bool, uint256, bool));
+
+        // Only return rate if there's a counterparty (funding only applies when both sides exist)
+        if (!hasCounterparty) {
+            return (0, longsPayShorts, imbalanceBps, false);
+        }
+
+        rateBps = FundingRateLib.getHourlyRate(imbalanceBps, funding.fundingConfig);
     }
 
     /**
      * @notice Check funding liquidation
+     * @dev Reads directly from storage instead of delegatecall to avoid staticcall bug
      */
     function checkFundingLiquidation(
         uint256 collateral,
@@ -544,18 +566,28 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
         uint8 direction,
         uint256 maintenanceMarginRatio
     ) external view returns (bool isLiquidatable, int256 fundingOwed, uint256 effectiveCollateral) {
-        bytes memory result = _staticDelegateToFunding(
-            abi.encodeWithSignature(
-                "checkFundingLiquidation(uint256,int256,int256,uint256,uint8,uint256)",
-                collateral,
-                entryRateLong,
-                entryRateShort,
-                positionSize,
-                direction,
-                maintenanceMarginRatio
-            )
+        VaultStorageLib.FundingStorage storage funding = VaultStorageLib.getFundingStorage();
+
+        if (!funding.fundingEnabled) return (false, 0, collateral);
+
+        fundingOwed = FundingRateLib.calculatePositionFundingZeroSum(
+            entryRateLong,
+            entryRateShort,
+            funding.cumulativeFundingRateLong,
+            funding.cumulativeFundingRateShort,
+            positionSize,
+            direction,
+            funding.totalLongExposure,
+            funding.totalShortExposure
         );
-        return abi.decode(result, (bool, int256, uint256));
+
+        bool isNegative;
+        (effectiveCollateral, isNegative) =
+            FundingRateLib.calculateEffectiveCollateral(collateral, fundingOwed);
+        if (isNegative) return (true, fundingOwed, 0);
+
+        isLiquidatable =
+            FundingRateLib.checkFundingLiquidation(collateral, fundingOwed, maintenanceMarginRatio);
     }
 
     /**
@@ -591,9 +623,14 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
      * @notice Get funding config
      */
     function getFundingConfig() external view returns (uint16, uint16, uint16, uint16, uint16) {
-        bytes memory result =
-            _staticDelegateToFunding(abi.encodeWithSignature("getFundingConfig()"));
-        return abi.decode(result, (uint16, uint16, uint16, uint16, uint16));
+        VaultStorageLib.FundingStorage storage funding = VaultStorageLib.getFundingStorage();
+        return (
+            funding.fundingConfig.tier1RateBps,
+            funding.fundingConfig.tier2RateBps,
+            funding.fundingConfig.tier3RateBps,
+            funding.fundingConfig.tier4RateBps,
+            funding.fundingConfig.tier5RateBps
+        );
     }
 
     // ========================================================================
@@ -642,12 +679,39 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
 
     /**
      * @notice Calculate pending rewards
+     * @dev Reads directly from storage instead of delegatecall to avoid staticcall bug
      */
-    function calculatePendingRewards(address user) external view returns (uint256) {
-        bytes memory result = _staticDelegateToRewards(
-            abi.encodeWithSignature("calculatePendingRewards(address)", user)
-        );
-        return abi.decode(result, (uint256));
+    function calculatePendingRewards(address user) external view returns (uint256 pendingRewards) {
+        VaultStorageLib.CoreStorage storage core = VaultStorageLib.getCoreStorage();
+        VaultStorageLib.RewardsStorage storage rewards = VaultStorageLib.getRewardsStorage();
+
+        VaultStorageLib.LPPosition storage lpPos = core.lpPositions[user];
+        if (lpPos.shares == 0) return 0;
+
+        // Start with already claimable rewards
+        pendingRewards = rewards.claimableRewards[user];
+
+        // Add potential rewards from current day if positive
+        if (rewards.dailyNetPnL > 0 && core.vaultInfo.totalShares > 0) {
+            uint256 today = VaultRewardsLib.getDayFromTimestamp(block.timestamp);
+            uint256 dayStartTimestamp = VaultRewardsLib.getDayStartTimestamp(today);
+
+            VaultRewardsLib.LPRewardResult memory rewardResult = VaultRewardsLib.calculateLPReward(
+                VaultRewardsLib.RewardCalculationParams({
+                    userShares: lpPos.shares,
+                    totalShares: core.vaultInfo.totalShares,
+                    netPnL: rewards.dailyNetPnL,
+                    stakedAt: lpPos.stakedAt,
+                    dayStartTimestamp: dayStartTimestamp
+                })
+            );
+
+            if (rewardResult.isEligible) {
+                pendingRewards += rewardResult.reward;
+            }
+        }
+
+        return pendingRewards;
     }
 
     // ========================================================================
