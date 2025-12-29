@@ -22,10 +22,13 @@ import "../src/vault-modular/modules/VaultRewards.sol";
 
 // Governance
 import "../src/governance/MultisigWallet.sol";
-import "../src/governance/VersionedBeacon.sol";
 import "../src/vault-modular/VaultAdminProxy.sol";
 import "@openzeppelin/contracts/governance/TimelockController.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+
+// Registry
+import "../src/registry/ModuleRegistry.sol";
+import "../src/registry/VaultRegistry.sol";
 
 /**
  * @title DeployAllModular
@@ -47,7 +50,12 @@ contract DeployAllModular is DeployHelper {
     // Governance
     address public deployedMultisig;
     address public deployedTimelock;
-    address public deployedBeacon;
+
+    // Registry
+    address public moduleRegistryImpl;
+    address public moduleRegistry;
+    address public vaultRegistryImpl;
+    address public vaultRegistryAddress;
 
     // Config
     uint256 public constant DEFAULT_TIMELOCK_DELAY = 1 days;
@@ -80,13 +88,16 @@ contract DeployAllModular is DeployHelper {
         // Phase 5: Deploy VaultManager
         _deployVaultManager();
 
-        // Phase 6: Deploy Core Contracts
+        // Phase 6: Deploy Registries
+        _deployRegistries();
+
+        // Phase 7: Deploy Core Contracts
         _deployCoreContracts();
 
-        // Phase 7: Setup Connections
+        // Phase 8: Setup Connections
         _setupConnections();
 
-        // Phase 8: Verify Deployment
+        // Phase 9: Verify Deployment
         _verifyDeployment();
 
         console.log("\n===========================================");
@@ -176,10 +187,6 @@ contract DeployAllModular is DeployHelper {
 
         vaultRewardsModule = address(new VaultRewards());
         console.log("VaultRewards Module deployed:", vaultRewardsModule);
-
-        // VersionedBeacon
-        deployedBeacon = address(new VersionedBeacon(vaultRouterImpl, deployedTimelock, deployer));
-        console.log("VersionedBeacon deployed:", deployedBeacon);
     }
 
     // ========================================================================
@@ -228,6 +235,64 @@ contract DeployAllModular is DeployHelper {
 
         vaultManager = payable(address(new ERC1967Proxy(vaultManagerImpl, vaultManagerInitData)));
         console.log("VaultManager deployed:", vaultManager);
+    }
+
+    // ========================================================================
+    // REGISTRY DEPLOYMENT
+    // ========================================================================
+
+    function _deployRegistries() internal {
+        console.log("\n--- Phase 6: Deploying Registries ---");
+
+        // ModuleRegistry
+        moduleRegistryImpl = address(new ModuleRegistry());
+        bytes memory moduleRegistryInitData =
+            abi.encodeWithSelector(ModuleRegistry.initialize.selector, vaultAccessController);
+        moduleRegistry = address(new ERC1967Proxy(moduleRegistryImpl, moduleRegistryInitData));
+        console.log("ModuleRegistry deployed:", moduleRegistry);
+
+        // VaultRegistry
+        vaultRegistryImpl = address(new VaultRegistry());
+        bytes memory vaultRegistryInitData = abi.encodeWithSelector(
+            VaultRegistry.initialize.selector, vaultAccessController, moduleRegistry
+        );
+        vaultRegistryAddress = address(new ERC1967Proxy(vaultRegistryImpl, vaultRegistryInitData));
+        console.log("VaultRegistry deployed:", vaultRegistryAddress);
+
+        // Register initial module versions
+        _registerInitialModuleVersions();
+    }
+
+    function _registerInitialModuleVersions() internal {
+        console.log("\n--- Registering Initial Module Versions ---");
+
+        ModuleRegistry registry = ModuleRegistry(moduleRegistry);
+
+        // Register Router V1
+        registry.registerModule(
+            registry.MODULE_ROUTER(),
+            "1.0.0",
+            vaultRouterImpl,
+            bytes32(0), // No commit hash for initial deployment
+            true // Set as latest
+        );
+        console.log("[OK] Registered VaultRouter v1.0.0");
+
+        // Register Core V1
+        registry.registerModule(registry.MODULE_CORE(), "1.0.0", vaultCoreModule, bytes32(0), true);
+        console.log("[OK] Registered VaultCore v1.0.0");
+
+        // Register Funding V1
+        registry.registerModule(
+            registry.MODULE_FUNDING(), "1.0.0", vaultFundingModule, bytes32(0), true
+        );
+        console.log("[OK] Registered VaultFunding v1.0.0");
+
+        // Register Rewards V1
+        registry.registerModule(
+            registry.MODULE_REWARDS(), "1.0.0", vaultRewardsModule, bytes32(0), true
+        );
+        console.log("[OK] Registered VaultRewards v1.0.0");
     }
 
     // ========================================================================
@@ -291,6 +356,12 @@ contract DeployAllModular is DeployHelper {
             );
         console.log("[OK] VaultAccessController configured");
 
+        // Configure VaultManager with registries
+        VaultManager(vaultManager).setModuleRegistry(moduleRegistry);
+        VaultManager(vaultManager).setVaultRegistry(vaultRegistryAddress);
+        VaultManager(vaultManager).setModuleVersions("1.0.0", "1.0.0", "1.0.0", "1.0.0");
+        console.log("[OK] VaultManager registries configured");
+
         // Setup PriceFeedManager with oracle providers
         _setupPriceFeedManager();
     }
@@ -326,7 +397,7 @@ contract DeployAllModular is DeployHelper {
     // ========================================================================
 
     function _verifyDeployment() internal view {
-        console.log("\n--- Phase 8: Verifying Deployment ---");
+        console.log("\n--- Phase 9: Verifying Deployment ---");
 
         require(blocksenseOracle != address(0), "BlocksenseOracle not deployed");
         require(chainlinkOracle != address(0), "ChainlinkOracle not deployed");
@@ -335,6 +406,8 @@ contract DeployAllModular is DeployHelper {
         require(vaultManager != address(0), "VaultManager not deployed");
         require(priceFeedManager != address(0), "PriceFeedManager not deployed");
         require(vaultAccessController != address(0), "VaultAccessController not deployed");
+        require(moduleRegistry != address(0), "ModuleRegistry not deployed");
+        require(vaultRegistryAddress != address(0), "VaultRegistry not deployed");
 
         console.log("[OK] All contracts deployed and verified");
     }
@@ -349,8 +422,10 @@ contract DeployAllModular is DeployHelper {
         console.log("\n--- Governance ---");
         console.log("MultisigWallet:", deployedMultisig);
         console.log("TimelockController:", deployedTimelock);
-        console.log("VersionedBeacon:", deployedBeacon);
         console.log("VaultAccessController:", vaultAccessController);
+        console.log("\n--- Registries ---");
+        console.log("ModuleRegistry:", moduleRegistry);
+        console.log("VaultRegistry:", vaultRegistryAddress);
         console.log("\n--- Oracles ---");
         console.log("BlocksenseOracle:", blocksenseOracle);
         console.log("ChainlinkOracle:", chainlinkOracle);

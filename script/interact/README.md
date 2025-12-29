@@ -352,50 +352,7 @@ forge script script/interact/InteractMultisigWallet.s.sol:InteractMultisigWallet
   --rpc-url $RPC_URL --broadcast
 ```
 
-### 8. InteractVersionedBeacon
-
-Quản lý VersionedBeacon (vault upgrade management):
-
-```bash
-export VAULT_BEACON_ADDRESS=0x...
-
-# View beacon info
-forge script script/interact/InteractVersionedBeacon.s.sol:InteractVersionedBeacon \
-  --sig "viewInfo()" \
-  --rpc-url $RPC_URL
-
-# View current version details
-forge script script/interact/InteractVersionedBeacon.s.sol:InteractVersionedBeacon \
-  --sig "viewCurrentVersionInfo()" \
-  --rpc-url $RPC_URL
-
-# View all versions
-forge script script/interact/InteractVersionedBeacon.s.sol:InteractVersionedBeacon \
-  --sig "viewAllVersions()" \
-  --rpc-url $RPC_URL
-
-# View version history (from version 1 to 5)
-forge script script/interact/InteractVersionedBeacon.s.sol:InteractVersionedBeacon \
-  --sig "viewVersionHistory(uint256,uint256)" 1 5 \
-  --rpc-url $RPC_URL
-
-# Check specific version
-forge script script/interact/InteractVersionedBeacon.s.sol:InteractVersionedBeacon \
-  --sig "checkVersion(uint256)" 1 \
-  --rpc-url $RPC_URL
-
-# Upgrade to new version (owner only - should be Timelock)
-forge script script/interact/InteractVersionedBeacon.s.sol:InteractVersionedBeacon \
-  --sig "upgradeToVersion(address,bytes32)" 0xNewImpl 0x0 \
-  --rpc-url $RPC_URL --broadcast
-
-# Rollback to previous version (owner only)
-forge script script/interact/InteractVersionedBeacon.s.sol:InteractVersionedBeacon \
-  --sig "rollbackTo(uint256)" 1 \
-  --rpc-url $RPC_URL --broadcast
-```
-
-### 9. InteractVaultGovernor
+### 8. InteractVaultGovernor
 
 Quản lý VaultGovernor (vault-specific governance):
 
@@ -469,8 +426,11 @@ VAULT_VIEWER_MODULAR_ADDRESS=0x...
 # Governance contracts
 MULTISIG_WALLET_ADDRESS=0x...
 TIMELOCK_ADDRESS=0x...
-VAULT_BEACON_ADDRESS=0x...
 VAULT_GOVERNOR_ADDRESS=0x...
+
+# Registry contracts
+MODULE_REGISTRY_ADDRESS=0x...
+VAULT_REGISTRY_ADDRESS=0x...
 ```
 
 ## Lưu ý

@@ -10,6 +10,7 @@ interface IVaultAccessController {
     // ROLE CONSTANTS
     // ========================================================================
 
+    function DEFAULT_ADMIN_ROLE() external view returns (bytes32);
     function VAULT_ADMIN_ROLE() external view returns (bytes32);
     function POSITION_MANAGER_ROLE() external view returns (bytes32);
     function VAULT_KEEPER_ROLE() external view returns (bytes32);

@@ -13,6 +13,7 @@ import "../../src/interfaces/IVaultAccessController.sol";
 contract MockVaultAccessController is IVaultAccessController {
     mapping(address => bool) public positionKeepers;
 
+    bytes32 public constant DEFAULT_ADMIN_ROLE = 0x00;
     bytes32 public constant VAULT_ADMIN_ROLE = keccak256("VAULT_ADMIN_ROLE");
     bytes32 public constant POSITION_MANAGER_ROLE = keccak256("POSITION_MANAGER_ROLE");
     bytes32 public constant VAULT_KEEPER_ROLE = keccak256("VAULT_KEEPER_ROLE");

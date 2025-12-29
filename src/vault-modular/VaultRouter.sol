@@ -1160,43 +1160,8 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
         return _delegate(router.rewardsModule, data);
     }
 
-    function _staticDelegateToCore(bytes memory data) internal view returns (bytes memory) {
-        VaultStorageLib.RouterStorage storage router = VaultStorageLib.getRouterStorage();
-        return _staticDelegate(router.coreModule, data);
-    }
-
-    function _staticDelegateToFunding(bytes memory data) internal view returns (bytes memory) {
-        VaultStorageLib.RouterStorage storage router = VaultStorageLib.getRouterStorage();
-        return _staticDelegate(router.fundingModule, data);
-    }
-
-    function _staticDelegateToRewards(bytes memory data) internal view returns (bytes memory) {
-        VaultStorageLib.RouterStorage storage router = VaultStorageLib.getRouterStorage();
-        return _staticDelegate(router.rewardsModule, data);
-    }
-
     function _delegate(address module, bytes memory data) internal returns (bytes memory) {
         (bool success, bytes memory result) = module.delegatecall(data);
-        if (!success) {
-            // Bubble up the revert reason
-            if (result.length > 0) {
-                assembly {
-                    let returndata_size := mload(result)
-                    revert(add(32, result), returndata_size)
-                }
-            } else {
-                revert DelegateCallFailed();
-            }
-        }
-        return result;
-    }
-
-    function _staticDelegate(address module, bytes memory data)
-        internal
-        view
-        returns (bytes memory)
-    {
-        (bool success, bytes memory result) = module.staticcall(data);
         if (!success) {
             // Bubble up the revert reason
             if (result.length > 0) {
