@@ -35,7 +35,7 @@ contract VaultManagerModularTest is BaseTestModular {
 
     function test_VaultManagerVersion() public view {
         string memory version = vaultManager.version();
-        assertEq(version, "3.0.0-modular");
+        assertEq(version, "3.1.0-modular");
     }
 
     // ========================================================================
@@ -348,7 +348,7 @@ contract VaultManagerModularTest is BaseTestModular {
         vaultManager.upgradeToAndCall(address(newImpl), "");
 
         // Verify version still works (upgrade succeeded)
-        assertEq(vaultManager.version(), "3.0.0-modular");
+        assertEq(vaultManager.version(), "3.1.0-modular");
     }
 
     function test_Upgrade_ViaEmergencyRole_WhenPaused() public {
@@ -365,7 +365,7 @@ contract VaultManagerModularTest is BaseTestModular {
         vaultManager.upgradeToAndCall(address(newImpl), "");
 
         // Verify version still works (upgrade succeeded)
-        assertEq(vaultManager.version(), "3.0.0-modular");
+        assertEq(vaultManager.version(), "3.1.0-modular");
     }
 
     function test_Upgrade_RevertViaEmergencyRole_WhenNotPaused() public {
