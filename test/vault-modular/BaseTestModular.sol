@@ -4,7 +4,6 @@ pragma solidity ^0.8.22;
 import "forge-std/Test.sol";
 import "forge-std/console.sol";
 
-import "../../src/PositionManager.sol";
 import "../../src/SettlementEngine.sol";
 import "../../src/oracles/BlocksenseOracle.sol";
 import "../../src/oracles/ChainlinkOracle.sol";
@@ -20,6 +19,11 @@ import "../../src/vault-modular/modules/VaultFunding.sol";
 import "../../src/vault-modular/modules/VaultRewards.sol";
 import "../../src/vault-modular/libraries/VaultStorageLib.sol";
 import "../../src/interfaces/IVaultRouter.sol";
+
+// Modular Position imports
+import "../../src/position-modular/PositionRouter.sol";
+import "../../src/position-modular/modules/PositionCore.sol";
+import "../../src/position-modular/modules/PositionPendingClose.sol";
 
 import "../../src/interfaces/ICLFeedRegistryAdapter.sol";
 import "../../src/interfaces/ICLAggregatorAdapter.sol";
@@ -275,7 +279,7 @@ contract MockERC20 {
 
 contract BaseTestModular is Test {
     // Core contracts
-    PositionManager public positionManager;
+    PositionRouter public positionManager;
     ModularVM.VaultManager public vaultManager;
     SettlementEngine public settlementEngine;
     BlocksenseOracle public blocksenseOracle;
@@ -288,6 +292,11 @@ contract BaseTestModular is Test {
     VaultCore public vaultCoreModule;
     VaultFunding public vaultFundingModule;
     VaultRewards public vaultRewardsModule;
+
+    // Modular Position contracts
+    PositionRouter public positionRouterImpl;
+    PositionCore public positionCoreModule;
+    PositionPendingClose public positionPendingCloseModule;
 
     // Deployed vault (proxy)
     VaultRouter public vault;
@@ -408,17 +417,33 @@ contract BaseTestModular is Test {
         // Deploy Modular Vault components first (to get vaultAccessController)
         _deployModularVault();
 
-        // Deploy PositionManager (upgradeable via ERC1967Proxy)
-        // NOTE: Must be after vaultAccessController is deployed
-        PositionManager positionImpl = new PositionManager();
-        bytes memory positionInitData = abi.encodeWithSelector(
-            PositionManager.initialize.selector, owner, address(vaultAccessController)
-        );
-        ERC1967Proxy positionProxy = new ERC1967Proxy(address(positionImpl), positionInitData);
-        positionManager = PositionManager(payable(address(positionProxy)));
+        // Deploy Modular Position components
+        _deployModularPosition();
 
         // Now setup all addresses after PositionManager is deployed
         _setupModularVaultAddresses();
+    }
+
+    function _deployModularPosition() internal {
+        // Deploy modules (logic contracts)
+        positionCoreModule = new PositionCore();
+        positionPendingCloseModule = new PositionPendingClose();
+
+        // Deploy PositionRouter implementation
+        positionRouterImpl = new PositionRouter();
+
+        // Deploy PositionRouter proxy with initialization
+        bytes memory positionInitData = abi.encodeWithSelector(
+            PositionRouter.initialize.selector,
+            address(vaultAccessController), // accessController
+            address(settlementEngine), // settlementEngine
+            address(vaultManager), // vaultManager
+            address(priceFeedManager), // priceFeedManager
+            address(positionCoreModule), // coreModule
+            address(positionPendingCloseModule) // pendingCloseModule
+        );
+        ERC1967Proxy positionProxy = new ERC1967Proxy(address(positionRouterImpl), positionInitData);
+        positionManager = PositionRouter(payable(address(positionProxy)));
     }
 
     function _deployModularVault() internal {
@@ -457,7 +482,7 @@ contract BaseTestModular is Test {
     }
 
     function _setupModularVaultAddresses() internal {
-        // This is called after PositionManager is deployed
+        // This is called after PositionRouter is deployed
         // Initialize VaultAccessController with all addresses
         vaultAccessController.initialize(
             mockTimelockController, // admin
@@ -474,10 +499,8 @@ contract BaseTestModular is Test {
         // Set addresses
         vm.startPrank(owner);
 
-        positionManager.setVaultManager(address(vaultManager));
-        positionManager.setSettlementEngine(address(settlementEngine));
-        positionManager.setPriceFeedManager(address(priceFeedManager));
-
+        // PositionRouter is already configured via initialize
+        // Update VaultManager with PositionRouter address
         vaultManager.setPositionManager(address(positionManager));
 
         settlementEngine.setPositionManager(address(positionManager));

@@ -2,6 +2,7 @@
 pragma solidity ^0.8.22;
 
 import "../vault-modular/BaseTestModular.sol";
+import "../../src/libraries/PositionLib.sol";
 
 /**
  * @title IntegrationTestModular
@@ -171,10 +172,10 @@ contract IntegrationTestModular is BaseTestModular {
         );
         vm.stopPrank();
 
-        (,, uint8 direction,,,, address positionUser,,,,,,,,,,,,,,,,) = positionManager.positions(1);
+        PositionLib.Position memory pos = positionManager.getPosition(1);
 
-        assertEq(positionUser, trader1, "Position should belong to trader1");
-        assertEq(direction, 1, "Direction should be LONG");
+        assertEq(pos.user, trader1, "Position should belong to trader1");
+        assertEq(pos.direction, 1, "Direction should be LONG");
     }
 
     function test_Trader_OpenShortPosition() public {
@@ -194,9 +195,9 @@ contract IntegrationTestModular is BaseTestModular {
         );
         vm.stopPrank();
 
-        (,, uint8 direction,,,,,,,,,,,,,,,,,,,,) = positionManager.positions(1);
+        PositionLib.Position memory pos = positionManager.getPosition(1);
 
-        assertEq(direction, 2, "Direction should be SHORT");
+        assertEq(pos.direction, 2, "Direction should be SHORT");
     }
 
     function test_Trader_ClosePosition() public {
@@ -237,9 +238,9 @@ contract IntegrationTestModular is BaseTestModular {
         positionManager.addMargin(1, 5 ether, type(uint256).max, block.timestamp + 1 hours);
         vm.stopPrank();
 
-        (,,,,,,,,, uint256 collateral,,,,,,,,,,,,,) = positionManager.positions(1);
+        PositionLib.Position memory pos = positionManager.getPosition(1);
 
-        assertEq(collateral, 15 ether, "Collateral should be increased");
+        assertEq(pos.amount, 15 ether, "Collateral should be increased");
     }
 
     function test_Trader_MultiplePositions() public {
@@ -335,10 +336,11 @@ contract IntegrationTestModular is BaseTestModular {
     }
 
     function test_Admin_PausePositionManager() public {
-        vm.prank(owner);
+        // PositionRouter uses role-based access via VaultAccessController
+        vm.prank(mockTimelockController);
         positionManager.pause();
 
-        assertTrue(positionManager.paused(), "PositionManager should be paused");
+        assertTrue(positionManager.paused(), "PositionRouter should be paused");
     }
 
     function test_Admin_SetVaultTradingEnabled() public {

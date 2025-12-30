@@ -2,6 +2,7 @@
 pragma solidity ^0.8.22;
 
 import "../vault-modular/BaseTestModular.sol";
+import "../../src/libraries/PositionLib.sol";
 
 /**
  * @title PositionManagerTest
@@ -48,11 +49,10 @@ contract PositionManagerTest is BaseTestModular {
 
         // Verify position was opened
         uint64 positionId = 1;
-        (,,,,,, address _user, address _projectToken,,,,,,,,,,,,,,,) =
-            positionManager.positions(positionId);
+        PositionLib.Position memory pos = positionManager.getPosition(positionId);
 
-        assertEq(_projectToken, address(projectToken), "Project token should match");
-        assertEq(_user, user1, "User should match");
+        assertEq(pos.projectToken, address(projectToken), "Project token should match");
+        assertEq(pos.user, user1, "User should match");
     }
 
     function test_OpenPosition_Short() public {
@@ -263,10 +263,10 @@ contract PositionManagerTest is BaseTestModular {
         vm.stopPrank();
 
         // Get position details
-        (, uint8 _leverage,,,,,,,, uint256 _collateral,,,,,,,,,,,,,) = positionManager.positions(1);
+        PositionLib.Position memory pos = positionManager.getPosition(1);
 
-        assertEq(_collateral, collateral, "Collateral should match");
-        assertEq(_leverage, leverage, "Leverage should match");
+        assertEq(pos.amount, collateral, "Collateral should match");
+        assertEq(pos.leverage, leverage, "Leverage should match");
     }
 
     // ========================================================================
