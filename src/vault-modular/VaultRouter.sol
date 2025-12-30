@@ -514,15 +514,13 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
 
         if (!funding.fundingEnabled) return 0;
 
-        return FundingRateLib.calculatePositionFundingZeroSum(
+        return FundingRateLib.calculatePositionFunding(
             entryRateLong,
             entryRateShort,
             funding.cumulativeFundingRateLong,
             funding.cumulativeFundingRateShort,
             positionSize,
-            direction,
-            funding.totalLongExposure,
-            funding.totalShortExposure
+            direction
         );
     }
 
@@ -570,15 +568,13 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
 
         if (!funding.fundingEnabled) return (false, 0, collateral);
 
-        fundingOwed = FundingRateLib.calculatePositionFundingZeroSum(
+        fundingOwed = FundingRateLib.calculatePositionFunding(
             entryRateLong,
             entryRateShort,
             funding.cumulativeFundingRateLong,
             funding.cumulativeFundingRateShort,
             positionSize,
-            direction,
-            funding.totalLongExposure,
-            funding.totalShortExposure
+            direction
         );
 
         bool isNegative;

@@ -170,7 +170,9 @@ contract PositionManager is
         int256 pnl,
         uint256 closeTimestamp,
         uint256 pricePublishTime,
-        PositionClosedBy closedBy
+        PositionClosedBy closedBy,
+        uint256 totalFee,
+        int256 fundingOwed
     );
 
     event BetLiquidated(
@@ -1027,26 +1029,28 @@ contract PositionManager is
         PositionLib.Position storage pos = positions[positionId];
 
         // Call SettlementEngine to process settlement directly
-        if (settlementEngine == address(0)) revert InvalidAddress();
+        if (settlementEngine == address(0) || vaultManager == address(0)) revert InvalidAddress();
+        address vaultAddress = IVaultManager(vaultManager).getVault(pos.projectToken);
+        if (vaultAddress == address(0)) revert InvalidAddress();
 
         // Process settlement and get result - direct call (no more low-level call)
-        (bool won, uint256 payout, uint256 fee, int256 pnl, int256 vaultPnL, uint8 finalState,) =
-            ISettlementEngine(settlementEngine).processSettlement(pos, closePrice, isLiquidation);
+        // settlementFee: liquidation fee or house edge (already deducted from payout)
+        (
+            bool won,
+            uint256 payout,
+            uint256 settlementFee,
+            int256 pnl,
+            int256 vaultPnL,
+            uint8 finalState,
+        ) = ISettlementEngine(settlementEngine).processSettlement(pos, closePrice, isLiquidation);
 
         // Calculate funding adjustment
         int256 fundingOwed = 0;
-        if (vaultManager != address(0)) {
-            address vaultAddress = IVaultManager(vaultManager).getVault(pos.projectToken);
-            if (vaultAddress != address(0)) {
-                fundingOwed = IAssetVault(vaultAddress)
-                    .calculatePositionFunding(
-                        pos.entryFundingRateLong,
-                        pos.entryFundingRateShort,
-                        pos.positionSize,
-                        pos.direction
-                    );
-            }
-        }
+
+        fundingOwed = IAssetVault(vaultAddress)
+            .calculatePositionFunding(
+                pos.entryFundingRateLong, pos.entryFundingRateShort, pos.positionSize, pos.direction
+            );
 
         // Adjust payout by funding
         // If fundingOwed > 0: position owes funding, reduce payout
@@ -1077,18 +1081,16 @@ contract PositionManager is
 
         // Update vault P&L and get close fee (includes funding adjustment)
         uint256 closeFee = 0;
-        if (vaultManager != address(0)) {
-            closeFee = IVaultManager(vaultManager)
-                .updateVaultPnLWithLeverage(
-                    pos.projectToken,
-                    positionId,
-                    pos.amount,
-                    vaultPnL,
-                    pos.positionSize,
-                    pos.direction,
-                    pos.user
-                );
-        }
+        closeFee = IVaultManager(vaultManager)
+            .updateVaultPnLWithLeverage(
+                pos.projectToken,
+                positionId,
+                pos.amount,
+                vaultPnL,
+                pos.positionSize,
+                pos.direction,
+                pos.user
+            );
 
         // Deduct close fee from payout (fee is collected by vault)
         if (closeFee > 0 && adjustedPayout > closeFee) {
@@ -1099,7 +1101,7 @@ contract PositionManager is
         }
 
         // Execute payout if user has any payout (v1: always project token)
-        if (adjustedPayout > 0 && vaultManager != address(0)) {
+        if (adjustedPayout > 0) {
             IVaultManager(vaultManager)
                 .executePayout(
                     pos.projectToken, // Project token
@@ -1124,7 +1126,9 @@ contract PositionManager is
             pnl,
             block.timestamp,
             pricePublishTime,
-            closedBy
+            closedBy,
+            settlementFee + closeFee, // totalFee = settlement fee + close fee
+            fundingOwed
         );
     }
 

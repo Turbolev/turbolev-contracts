@@ -430,7 +430,7 @@ contract VaultViewerModular {
         // Get cumulative rates from vault
         (int256 cumulativeLongRate, int256 cumulativeShortRate) = v.getCumulativeFundingRates();
 
-        // Calculate funding owed using library
+        // Calculate funding owed using library (zero-sum is baked into cumulative rates)
         fundingOwed = FundingRateLib.calculatePositionFunding(
             entryRateLong,
             entryRateShort,
