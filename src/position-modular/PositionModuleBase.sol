@@ -152,17 +152,6 @@ abstract contract PositionModuleBase {
     }
 
     /**
-     * @notice Get pending close storage
-     */
-    function _pendingClose()
-        internal
-        pure
-        returns (PositionStorageLib.PendingCloseStorage storage)
-    {
-        return PositionStorageLib.getPendingCloseStorage();
-    }
-
-    /**
      * @notice Get router storage
      */
     function _router() internal pure returns (PositionStorageLib.RouterStorage storage) {

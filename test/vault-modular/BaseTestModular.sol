@@ -23,7 +23,6 @@ import "../../src/interfaces/IVaultRouter.sol";
 // Modular Position imports
 import "../../src/position-modular/PositionRouter.sol";
 import "../../src/position-modular/modules/PositionCore.sol";
-import "../../src/position-modular/modules/PositionPendingClose.sol";
 
 import "../../src/interfaces/ICLFeedRegistryAdapter.sol";
 import "../../src/interfaces/ICLAggregatorAdapter.sol";
@@ -296,7 +295,6 @@ contract BaseTestModular is Test {
     // Modular Position contracts
     PositionRouter public positionRouterImpl;
     PositionCore public positionCoreModule;
-    PositionPendingClose public positionPendingCloseModule;
 
     // Deployed vault (proxy)
     VaultRouter public vault;
@@ -316,8 +314,8 @@ contract BaseTestModular is Test {
     address public priceUpdater;
     address public backend;
     address public keeper;
-    address public mockMultisigWallet;
     address public mockTimelockController;
+    address public mockEmergencyGuardian;
 
     // Test vault address (for convenience)
     address public testVault;
@@ -344,7 +342,7 @@ contract BaseTestModular is Test {
         backend = makeAddr("backend");
         keeper = makeAddr("keeper");
         mockTimelockController = makeAddr("mockTimelockController");
-        mockMultisigWallet = makeAddr("mockMultisigWallet");
+        mockEmergencyGuardian = makeAddr("mockEmergencyGuardian");
 
         // Deploy mock tokens
         projectToken = new MockERC20("Project Token", "PROJ");
@@ -427,7 +425,6 @@ contract BaseTestModular is Test {
     function _deployModularPosition() internal {
         // Deploy modules (logic contracts)
         positionCoreModule = new PositionCore();
-        positionPendingCloseModule = new PositionPendingClose();
 
         // Deploy PositionRouter implementation
         positionRouterImpl = new PositionRouter();
@@ -439,8 +436,7 @@ contract BaseTestModular is Test {
             address(settlementEngine), // settlementEngine
             address(vaultManager), // vaultManager
             address(priceFeedManager), // priceFeedManager
-            address(positionCoreModule), // coreModule
-            address(positionPendingCloseModule) // pendingCloseModule
+            address(positionCoreModule) // coreModule
         );
         ERC1967Proxy positionProxy = new ERC1967Proxy(address(positionRouterImpl), positionInitData);
         positionManager = PositionRouter(payable(address(positionProxy)));
@@ -472,9 +468,7 @@ contract BaseTestModular is Test {
             address(vaultRouterImpl),
             address(vaultCoreModule),
             address(vaultFundingModule),
-            address(vaultRewardsModule),
-            mockTimelockController,
-            mockMultisigWallet
+            address(vaultRewardsModule)
         );
         ERC1967Proxy vaultManagerProxy =
             new ERC1967Proxy(address(vaultManagerImpl), vaultManagerInitData);
@@ -488,12 +482,14 @@ contract BaseTestModular is Test {
             mockTimelockController, // admin
             address(vaultManager),
             address(positionManager),
-            mockMultisigWallet
+            address(0) // no multisig in tests
         );
 
-        // Grant POSITION_KEEPER_ROLE to admin for testing
+        // Grant roles for testing
         vm.startPrank(mockTimelockController);
         vaultAccessController.grantRole(vaultAccessController.POSITION_KEEPER_ROLE(), admin);
+        vaultAccessController.grantRole(vaultAccessController.EMERGENCY_ROLE(), mockEmergencyGuardian);
+        vaultAccessController.grantRole(vaultAccessController.GUARDIAN_ROLE(), mockEmergencyGuardian);
         vm.stopPrank();
 
         // Set addresses

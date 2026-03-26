@@ -134,7 +134,7 @@ contract IntegrationTestModular is BaseTestModular {
             address(projectToken), 10 ether, 5, 1, type(uint256).max, block.timestamp + 1 hours, ""
         );
         vm.warp(block.timestamp + 61 seconds);
-        positionManager.closePosition(1, block.timestamp + 1 hours, 0, "");
+        positionManager.closePosition(1, block.timestamp + 1 hours, "");
         vm.stopPrank();
 
         // Wait some time for rewards to accumulate
@@ -216,7 +216,7 @@ contract IntegrationTestModular is BaseTestModular {
         uint256 balanceBefore = projectToken.balanceOf(trader1);
 
         // Close position
-        positionManager.closePosition(1, block.timestamp + 1 hours, 0, "");
+        positionManager.closePosition(1, block.timestamp + 1 hours, "");
 
         uint256 balanceAfter = projectToken.balanceOf(trader1);
         vm.stopPrank();
@@ -318,7 +318,7 @@ contract IntegrationTestModular is BaseTestModular {
         _enableTrading();
 
         // pauseVault requires onlyMultisig modifier
-        vm.prank(mockMultisigWallet);
+        vm.prank(mockEmergencyGuardian);
         vaultManager.pauseVault(address(projectToken));
 
         // Vault should be paused
@@ -329,7 +329,7 @@ contract IntegrationTestModular is BaseTestModular {
         _enableTrading();
 
         // pauseVault/unpauseVault requires onlyMultisig modifier
-        vm.startPrank(mockMultisigWallet);
+        vm.startPrank(mockEmergencyGuardian);
         vaultManager.pauseVault(address(projectToken));
         vaultManager.unpauseVault(address(projectToken));
         vm.stopPrank();
@@ -376,7 +376,7 @@ contract IntegrationTestModular is BaseTestModular {
         vm.warp(block.timestamp + 61 seconds);
 
         // 5. Trader closes position
-        positionManager.closePosition(1, block.timestamp + 1 hours, 0, "");
+        positionManager.closePosition(1, block.timestamp + 1 hours, "");
         vm.stopPrank();
 
         // 6. LP removes liquidity
@@ -414,10 +414,10 @@ contract IntegrationTestModular is BaseTestModular {
 
         // Both close
         vm.prank(trader1);
-        positionManager.closePosition(1, block.timestamp + 1 hours, 0, "");
+        positionManager.closePosition(1, block.timestamp + 1 hours, "");
 
         vm.prank(trader2);
-        positionManager.closePosition(2, block.timestamp + 1 hours, 0, "");
+        positionManager.closePosition(2, block.timestamp + 1 hours, "");
 
         VaultStorageLib.VaultInfo memory info = vault.vaultInfo();
         assertEq(info.totalPositionsSettled, 2, "Both positions should be settled");
@@ -448,7 +448,7 @@ contract IntegrationTestModular is BaseTestModular {
         vm.warp(block.timestamp + 61 seconds);
 
         vm.prank(trader1);
-        positionManager.closePosition(1, block.timestamp + 1 hours, 0, "");
+        positionManager.closePosition(1, block.timestamp + 1 hours, "");
 
         // LPs check their positions
         VaultStorageLib.LPPosition memory lp1Pos = vault.getLPPosition(lp1);
@@ -489,7 +489,7 @@ contract IntegrationTestModular is BaseTestModular {
         // Close all positions
         vm.startPrank(trader1);
         for (uint64 i = 1; i <= numPositions; i++) {
-            positionManager.closePosition(i, block.timestamp + 1 hours, 0, "");
+            positionManager.closePosition(i, block.timestamp + 1 hours, "");
         }
         vm.stopPrank();
 

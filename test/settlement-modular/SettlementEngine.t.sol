@@ -178,9 +178,11 @@ contract SettlementEngineTest is BaseTestModular {
     }
 
     function test_PauseEmergency_ByGuardian() public {
-        // Add guardian
-        vm.prank(mockTimelockController);
-        vaultAccessController.addGuardian(admin);
+        // Grant GUARDIAN_ROLE to admin for this test
+        bytes32 guardianRole = vaultAccessController.GUARDIAN_ROLE();
+        vm.startPrank(mockTimelockController);
+        vaultAccessController.grantRole(guardianRole, admin);
+        vm.stopPrank();
 
         // Guardian can emergency pause
         vm.prank(admin);
@@ -219,7 +221,7 @@ contract SettlementEngineTest is BaseTestModular {
         uint256 balanceBefore = projectToken.balanceOf(user1);
 
         // Close position (triggers settlement)
-        positionManager.closePosition(1, block.timestamp + 1 hours, 0, "");
+        positionManager.closePosition(1, block.timestamp + 1 hours, "");
 
         uint256 balanceAfter = projectToken.balanceOf(user1);
 
@@ -244,7 +246,7 @@ contract SettlementEngineTest is BaseTestModular {
 
         vm.warp(block.timestamp + 61 seconds);
 
-        positionManager.closePosition(1, block.timestamp + 1 hours, 0, "");
+        positionManager.closePosition(1, block.timestamp + 1 hours, "");
         vm.stopPrank();
 
         VaultStorageLib.VaultInfo memory infoAfter = vault.vaultInfo();
@@ -272,7 +274,7 @@ contract SettlementEngineTest is BaseTestModular {
 
         vm.warp(block.timestamp + 61 seconds);
 
-        positionManager.closePosition(1, block.timestamp + 1 hours, 0, "");
+        positionManager.closePosition(1, block.timestamp + 1 hours, "");
         vm.stopPrank();
 
         VaultStorageLib.VaultInfo memory infoAfter = vault.vaultInfo();
@@ -310,7 +312,7 @@ contract SettlementEngineTest is BaseTestModular {
         // Close all positions
         vm.startPrank(user1);
         for (uint64 i = 1; i <= 3; i++) {
-            positionManager.closePosition(i, block.timestamp + 1 hours, 0, "");
+            positionManager.closePosition(i, block.timestamp + 1 hours, "");
         }
         vm.stopPrank();
 
@@ -339,10 +341,10 @@ contract SettlementEngineTest is BaseTestModular {
 
         // Both users close
         vm.prank(user1);
-        positionManager.closePosition(1, block.timestamp + 1 hours, 0, "");
+        positionManager.closePosition(1, block.timestamp + 1 hours, "");
 
         vm.prank(user2);
-        positionManager.closePosition(2, block.timestamp + 1 hours, 0, "");
+        positionManager.closePosition(2, block.timestamp + 1 hours, "");
 
         VaultStorageLib.VaultInfo memory info = vault.vaultInfo();
         assertEq(info.totalPositionsSettled, 2, "Both positions should be settled");
@@ -367,7 +369,7 @@ contract SettlementEngineTest is BaseTestModular {
 
         vm.warp(block.timestamp + 61 seconds);
 
-        positionManager.closePosition(1, block.timestamp + 1 hours, 0, "");
+        positionManager.closePosition(1, block.timestamp + 1 hours, "");
         vm.stopPrank();
     }
 
@@ -386,7 +388,7 @@ contract SettlementEngineTest is BaseTestModular {
 
         vm.warp(block.timestamp + 61 seconds);
 
-        positionManager.closePosition(1, block.timestamp + 1 hours, 0, "");
+        positionManager.closePosition(1, block.timestamp + 1 hours, "");
         vm.stopPrank();
     }
 
@@ -409,7 +411,7 @@ contract SettlementEngineTest is BaseTestModular {
 
         vm.warp(block.timestamp + 61 seconds);
 
-        positionManager.closePosition(1, block.timestamp + 1 hours, 0, "");
+        positionManager.closePosition(1, block.timestamp + 1 hours, "");
         vm.stopPrank();
     }
 
@@ -428,7 +430,7 @@ contract SettlementEngineTest is BaseTestModular {
 
         vm.warp(block.timestamp + 61 seconds);
 
-        positionManager.closePosition(1, block.timestamp + 1 hours, 0, "");
+        positionManager.closePosition(1, block.timestamp + 1 hours, "");
         vm.stopPrank();
     }
 
@@ -454,7 +456,7 @@ contract SettlementEngineTest is BaseTestModular {
 
         vm.warp(block.timestamp + 61 seconds);
 
-        positionManager.closePosition(1, block.timestamp + 1 hours, 0, "");
+        positionManager.closePosition(1, block.timestamp + 1 hours, "");
         vm.stopPrank();
 
         VaultStorageLib.VaultInfo memory info = vault.vaultInfo();

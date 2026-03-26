@@ -185,7 +185,7 @@ contract FeePoolAndRewardsTest is BaseTestModular {
 
         // Close position
         vm.prank(trader1);
-        positionManager.closePosition(positionId, 3600, 0, bytes(""));
+        positionManager.closePosition(positionId, 3600, bytes(""));
 
         // Calculate expected close fee
         uint256 expectedCloseFee = (TRADE_AMOUNT * DEFAULT_CLOSE_POSITION_FEE_BPS) / 10_000;
@@ -413,13 +413,13 @@ contract FeePoolAndRewardsTest is BaseTestModular {
 
         // All traders close positions
         vm.prank(trader1);
-        positionManager.closePosition(pos1, 3600, 0, bytes(""));
+        positionManager.closePosition(pos1, 3600, bytes(""));
 
         vm.prank(trader2);
-        positionManager.closePosition(pos2, 3600, 0, bytes(""));
+        positionManager.closePosition(pos2, 3600, bytes(""));
 
         vm.prank(trader3);
-        positionManager.closePosition(pos3, 3600, 0, bytes(""));
+        positionManager.closePosition(pos3, 3600, bytes(""));
 
         uint256 feePoolAfterClose = vault.feePool();
         uint256 totalFeesCollected = feePoolAfterClose - feePoolBefore;
@@ -485,7 +485,7 @@ contract FeePoolAndRewardsTest is BaseTestModular {
 
         // Close position (trader loses)
         vm.prank(trader1);
-        positionManager.closePosition(positionId, 3600, 0, bytes(""));
+        positionManager.closePosition(positionId, 3600, bytes(""));
 
         VaultStorageLib.VaultInfo memory infoAfter = vault.vaultInfo();
 
@@ -532,7 +532,7 @@ contract FeePoolAndRewardsTest is BaseTestModular {
         vm.warp(block.timestamp + 61);
 
         vm.prank(trader1);
-        positionManager.closePosition(pos1, 3600, 0, bytes(""));
+        positionManager.closePosition(pos1, 3600, bytes(""));
 
         // Check dailyNetPnL
         int256 dailyPnL = vault.dailyNetPnL();
@@ -587,7 +587,7 @@ contract FeePoolAndRewardsTest is BaseTestModular {
         vm.warp(block.timestamp + 61);
 
         vm.prank(trader1);
-        positionManager.closePosition(pos1, 3600, 0, bytes(""));
+        positionManager.closePosition(pos1, 3600, bytes(""));
 
         // Move to next day and finalize
         vm.warp(block.timestamp + 1 days);
@@ -656,7 +656,7 @@ contract FeePoolAndRewardsTest is BaseTestModular {
         vm.warp(block.timestamp + 61);
 
         vm.prank(trader1);
-        positionManager.closePosition(pos1, 3600, 0, bytes(""));
+        positionManager.closePosition(pos1, 3600, bytes(""));
 
         // Move to next day and finalize rewards to distribute PnL
         vm.warp(block.timestamp + 1 days);
@@ -803,13 +803,13 @@ contract FeePoolAndRewardsTest is BaseTestModular {
 
         // Close all positions
         vm.prank(trader1);
-        positionManager.closePosition(positions[0], 3600, 0, bytes(""));
+        positionManager.closePosition(positions[0], 3600, bytes(""));
 
         vm.prank(trader2);
-        positionManager.closePosition(positions[1], 3600, 0, bytes(""));
+        positionManager.closePosition(positions[1], 3600, bytes(""));
 
         vm.prank(trader3);
-        positionManager.closePosition(positions[2], 3600, 0, bytes(""));
+        positionManager.closePosition(positions[2], 3600, bytes(""));
 
         uint256 feePoolAfterTrades = vault.feePool();
         VaultStorageLib.VaultInfo memory afterTrades = vault.vaultInfo();

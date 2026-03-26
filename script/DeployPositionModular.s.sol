@@ -6,7 +6,6 @@ import "./DeployHelper.s.sol";
 
 import "../src/position-modular/PositionRouter.sol";
 import "../src/position-modular/modules/PositionCore.sol";
-import "../src/position-modular/modules/PositionPendingClose.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 /**
@@ -14,13 +13,11 @@ import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
  * @notice Deploy or upgrade Position modular system (PositionRouter + modules)
  * @dev Architecture:
  *      - PositionRouter: Entry point proxy (UUPS upgradeable)
- *      - PositionCore: Core logic module (open/close/addMargin)
- *      - PositionPendingClose: Pending close module
+ *      - PositionCore: Core logic module (open/close/addMargin/liquidate)
  */
 contract DeployPositionModular is DeployHelper {
     // Module addresses
     address public positionCoreModule;
-    address public positionPendingCloseModule;
     address public positionRouterImplementation;
 
     function run() public {
@@ -45,10 +42,6 @@ contract DeployPositionModular is DeployHelper {
         // Deploy PositionCore module
         positionCoreModule = address(new PositionCore());
         console.log("PositionCore module deployed:", positionCoreModule);
-
-        // Deploy PositionPendingClose module
-        positionPendingCloseModule = address(new PositionPendingClose());
-        console.log("PositionPendingClose module deployed:", positionPendingCloseModule);
 
         // Deploy PositionRouter implementation
         positionRouterImplementation = address(new PositionRouter());
@@ -92,8 +85,7 @@ contract DeployPositionModular is DeployHelper {
             settlementEngine, // settlementEngine
             vaultManager, // vaultManager
             priceFeedManager, // priceFeedManager
-            positionCoreModule, // coreModule
-            positionPendingCloseModule // pendingCloseModule
+            positionCoreModule // coreModule
         );
 
         // Deploy proxy (from deployer if different)
@@ -141,10 +133,6 @@ contract DeployPositionModular is DeployHelper {
         router.updateModule(router.MODULE_CORE(), positionCoreModule);
         console.log("Updated PositionCore module");
 
-        // Update PendingClose module
-        router.updateModule(router.MODULE_PENDING_CLOSE(), positionPendingCloseModule);
-        console.log("Updated PositionPendingClose module");
-
         // Reconnect dependencies if needed
         _reconnectContracts();
     }
@@ -184,11 +172,9 @@ contract DeployPositionModular is DeployHelper {
         _logDeployment("PositionRouter Proxy", positionManager);
         _logDeployment("PositionRouter Implementation", positionRouterImplementation);
         _logDeployment("PositionCore Module", positionCoreModule);
-        _logDeployment("PositionPendingClose Module", positionPendingCloseModule);
 
         console.log("\n--- Module Configuration ---");
         console.log("MODULE_CORE ID: POSITION_MODULE_CORE");
-        console.log("MODULE_PENDING_CLOSE ID: POSITION_MODULE_PENDING_CLOSE");
     }
 }
 

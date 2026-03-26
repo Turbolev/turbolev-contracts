@@ -88,18 +88,6 @@ contract PositionCore is PositionModuleBase {
         uint256 timestamp
     );
 
-    event PositionPendingClose(
-        uint64 indexed positionId,
-        address indexed user,
-        uint256 requestTime,
-        uint256 deadline,
-        uint256 maxAcceptablePrice,
-        uint256 closePrice,
-        uint256 pricePublishTime,
-        PositionStorageLib.PendingCloseReason reason,
-        PositionStorageLib.PositionClosedBy closedBy
-    );
-
     event FundingSettled(
         uint64 indexed positionId,
         address indexed user,
@@ -298,12 +286,11 @@ contract PositionCore is PositionModuleBase {
     }
 
     /**
-     * @notice Close position
+     * @notice Close position at current mark price (no slippage protection)
      */
     function closePosition(
         uint64 positionId,
         uint256 deadline,
-        uint256 maxAcceptablePrice,
         bytes calldata priceUpdateData
     ) external payable nonReentrant whenNotPaused {
         PositionStorageLib.CoreStorage storage core = PositionStorageLib.getCoreStorage();
@@ -319,7 +306,7 @@ contract PositionCore is PositionModuleBase {
         uint256 maxAge = _calculateMaxAge(deadline);
         if (core.priceFeedManager == address(0)) revert InvalidAddress();
 
-        // Try to get price
+        // Get current mark price
         bool priceSuccess = false;
         uint256 closePrice;
         uint256 pricePublishTime;
@@ -349,34 +336,12 @@ contract PositionCore is PositionModuleBase {
             revert PriceStale();
         }
 
-        // Check maxAcceptablePrice
-        if (maxAcceptablePrice > 0) {
-            bool priceAcceptable = true;
-            if (pos.direction == PositionLib.BET_DIRECTION_LONG) {
-                if (closePrice < maxAcceptablePrice) priceAcceptable = false;
-            } else {
-                if (closePrice > maxAcceptablePrice) priceAcceptable = false;
-            }
-
-            if (!priceAcceptable) {
-                _addPendingCloseRequest(
-                    positionId,
-                    deadline,
-                    maxAcceptablePrice,
-                    closePrice,
-                    pricePublishTime,
-                    PositionStorageLib.PendingCloseReason.PRICE_NOT_ACCEPTABLE
-                );
-                return;
-            }
-        }
-
         // Check liquidation
         if (PositionLib.isLiquidated(pos, closePrice)) {
             revert PositionAlreadyLiquidated();
         }
 
-        // Process settlement
+        // Settle at current mark price
         _processSettlement(
             positionId,
             closePrice,
@@ -629,56 +594,6 @@ contract PositionCore is PositionModuleBase {
             settlementFee + closeFee,
             fundingOwed
         );
-    }
-
-    // ========================================================================
-    // PENDING CLOSE HELPER
-    // ========================================================================
-
-    /**
-     * @notice Add position to pending close queue
-     */
-    function _addPendingCloseRequest(
-        uint64 positionId,
-        uint256 deadline,
-        uint256 maxAcceptablePrice,
-        uint256 closePrice,
-        uint256 pricePublishTime,
-        PositionStorageLib.PendingCloseReason reason
-    ) internal {
-        PositionStorageLib.CoreStorage storage core = PositionStorageLib.getCoreStorage();
-        PositionStorageLib.PendingCloseStorage storage pending =
-            PositionStorageLib.getPendingCloseStorage();
-        PositionLib.Position storage pos = core.positions[positionId];
-
-        pos.state = PositionLib.POSITION_STATE_PENDING_CLOSE;
-        pos.lastModifiedTimestamp = block.timestamp;
-
-        if (!pending.isPendingClose[positionId]) {
-            pending.pendingCloseRequests[positionId] = PositionStorageLib.PendingCloseRequest({
-                positionId: positionId,
-                requestTime: block.timestamp,
-                deadline: deadline,
-                maxAcceptablePrice: maxAcceptablePrice,
-                closePrice: closePrice,
-                pricePublishTime: pricePublishTime
-            });
-
-            pending.pendingClosePositionIds.push(positionId);
-            pending.isPendingClose[positionId] = true;
-
-            emit PositionPendingClose(
-                positionId,
-                pos.user,
-                block.timestamp,
-                deadline,
-                maxAcceptablePrice,
-                closePrice,
-                pricePublishTime,
-                reason,
-                PositionStorageLib.PositionClosedBy.PENDING_CLOSE_REQUESTED
-            );
-        }
     }
 
     // ========================================================================

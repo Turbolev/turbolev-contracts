@@ -31,8 +31,6 @@ contract InteractVaultManagerModular is DeployHelper {
         console.log("Owner:", vmgr.owner());
         console.log("PositionManager:", vmgr.positionManager());
         console.log("AccessController:", vmgr.accessController());
-        console.log("TimelockController:", vmgr.timelockController());
-        console.log("MultisigWallet:", vmgr.multisigWallet());
         console.log("VaultRouter Impl:", vmgr.vaultRouterImpl());
         console.log("Core Module:", vmgr.coreModule());
         console.log("Funding Module:", vmgr.fundingModule());

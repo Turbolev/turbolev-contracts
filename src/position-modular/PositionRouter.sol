@@ -58,8 +58,6 @@ contract PositionRouter is Initializable, UUPSUpgradeable {
     // ========================================================================
 
     bytes4 public constant MODULE_CORE = bytes4(keccak256("POSITION_MODULE_CORE"));
-    bytes4 public constant MODULE_PENDING_CLOSE =
-        bytes4(keccak256("POSITION_MODULE_PENDING_CLOSE"));
 
     // ========================================================================
     // CONSTRUCTOR / INITIALIZER
@@ -77,27 +75,23 @@ contract PositionRouter is Initializable, UUPSUpgradeable {
      * @param _vaultManager VaultManager address
      * @param _priceFeedManager PriceFeedManager address
      * @param _coreModule PositionCore module address
-     * @param _pendingCloseModule PositionPendingClose module address
      */
     function initialize(
         address _accessController,
         address _settlementEngine,
         address _vaultManager,
         address _priceFeedManager,
-        address _coreModule,
-        address _pendingCloseModule
+        address _coreModule
     ) external initializer {
         __UUPSUpgradeable_init();
 
         // Validate addresses
         if (_accessController == address(0)) revert InvalidAddress();
         if (_coreModule == address(0)) revert InvalidModule();
-        if (_pendingCloseModule == address(0)) revert InvalidModule();
 
         // Set router storage
         PositionStorageLib.RouterStorage storage router = PositionStorageLib.getRouterStorage();
         router.coreModule = _coreModule;
-        router.pendingCloseModule = _pendingCloseModule;
         router.initialized = true;
 
         // Initialize core module via delegatecall
@@ -159,20 +153,18 @@ contract PositionRouter is Initializable, UUPSUpgradeable {
     }
 
     /**
-     * @notice Close position
+     * @notice Close position at current mark price
      */
     function closePosition(
         uint64 positionId,
         uint256 deadline,
-        uint256 maxAcceptablePrice,
         bytes calldata priceUpdateData
     ) external payable {
         _delegateToCore(
             abi.encodeWithSignature(
-                "closePosition(uint64,uint256,uint256,bytes)",
+                "closePosition(uint64,uint256,bytes)",
                 positionId,
                 deadline,
-                maxAcceptablePrice,
                 priceUpdateData
             )
         );
@@ -216,26 +208,6 @@ contract PositionRouter is Initializable, UUPSUpgradeable {
                 uint8(closedBy)
             )
         );
-    }
-
-    // ========================================================================
-    // MODULE ROUTING - PENDING CLOSE
-    // ========================================================================
-
-    /**
-     * @notice Process pending close positions
-     */
-    function processPendingClosePositions(uint256 maxPositions) external {
-        _delegateToPendingClose(
-            abi.encodeWithSignature("processPendingClosePositions(uint256)", maxPositions)
-        );
-    }
-
-    /**
-     * @notice Cancel pending close request
-     */
-    function cancelPendingClose(uint64 positionId) external {
-        _delegateToPendingClose(abi.encodeWithSignature("cancelPendingClose(uint64)", positionId));
     }
 
     // ========================================================================
@@ -559,115 +531,6 @@ contract PositionRouter is Initializable, UUPSUpgradeable {
     }
 
     // ========================================================================
-    // PENDING CLOSE VIEW FUNCTIONS
-    // ========================================================================
-
-    /**
-     * @notice Get all pending close position IDs
-     */
-    function getPendingClosePositionIds() external view returns (uint64[] memory) {
-        return PositionStorageLib.getPendingCloseStorage().pendingClosePositionIds;
-    }
-
-    /**
-     * @notice Get pending close request details
-     */
-    function getPendingCloseRequest(uint64 positionId)
-        external
-        view
-        returns (PositionStorageLib.PendingCloseRequest memory)
-    {
-        PositionStorageLib.PendingCloseStorage storage pending =
-            PositionStorageLib.getPendingCloseStorage();
-        if (!pending.isPendingClose[positionId]) revert NoPendingCloseRequest();
-        return pending.pendingCloseRequests[positionId];
-    }
-
-    /**
-     * @notice Get count of pending close positions
-     */
-    function getPendingCloseCount() external view returns (uint256) {
-        return PositionStorageLib.getPendingCloseStorage().pendingClosePositionIds.length;
-    }
-
-    /**
-     * @notice Check if position has a pending close request
-     */
-    function hasPendingCloseRequest(uint64 positionId) external view returns (bool) {
-        return PositionStorageLib.getPendingCloseStorage().isPendingClose[positionId];
-    }
-
-    /**
-     * @notice Get pending close requests (alias for mapping)
-     */
-    function pendingCloseRequests(uint64 positionId)
-        external
-        view
-        returns (PositionStorageLib.PendingCloseRequest memory)
-    {
-        return PositionStorageLib.getPendingCloseStorage().pendingCloseRequests[positionId];
-    }
-
-    /**
-     * @notice Check if position is pending close (alias)
-     */
-    function isPendingClose(uint64 positionId) external view returns (bool) {
-        return PositionStorageLib.getPendingCloseStorage().isPendingClose[positionId];
-    }
-
-    /**
-     * @notice Get pending close position IDs (alias)
-     */
-    function pendingClosePositionIds(uint256 index) external view returns (uint64) {
-        return PositionStorageLib.getPendingCloseStorage().pendingClosePositionIds[index];
-    }
-
-    /**
-     * @notice Get batch of pending close positions with full details
-     */
-    function getPendingClosePositionsBatch(uint256 offset, uint256 limit)
-        external
-        view
-        returns (
-            uint64[] memory positionIds,
-            PositionStorageLib.PendingCloseRequest[] memory requests,
-            PositionLib.Position[] memory positionsData
-        )
-    {
-        PositionStorageLib.PendingCloseStorage storage pending =
-            PositionStorageLib.getPendingCloseStorage();
-        PositionStorageLib.CoreStorage storage core = PositionStorageLib.getCoreStorage();
-
-        uint256 total = pending.pendingClosePositionIds.length;
-        if (offset >= total) {
-            return (
-                new uint64[](0),
-                new PositionStorageLib.PendingCloseRequest[](0),
-                new PositionLib.Position[](0)
-            );
-        }
-
-        uint256 end = offset + limit;
-        if (end > total) {
-            end = total;
-        }
-
-        uint256 resultLength = end - offset;
-        positionIds = new uint64[](resultLength);
-        requests = new PositionStorageLib.PendingCloseRequest[](resultLength);
-        positionsData = new PositionLib.Position[](resultLength);
-
-        for (uint256 i = 0; i < resultLength; i++) {
-            uint64 posId = pending.pendingClosePositionIds[offset + i];
-            positionIds[i] = posId;
-            requests[i] = pending.pendingCloseRequests[posId];
-            positionsData[i] = core.positions[posId];
-        }
-
-        return (positionIds, requests, positionsData);
-    }
-
-    // ========================================================================
     // STATE GETTERS (for compatibility)
     // ========================================================================
 
@@ -745,7 +608,6 @@ contract PositionRouter is Initializable, UUPSUpgradeable {
         PositionStorageLib.RouterStorage storage router = PositionStorageLib.getRouterStorage();
 
         if (moduleId == MODULE_CORE) return router.coreModule;
-        if (moduleId == MODULE_PENDING_CLOSE) return router.pendingCloseModule;
 
         return address(0);
     }
@@ -771,9 +633,6 @@ contract PositionRouter is Initializable, UUPSUpgradeable {
         if (moduleId == MODULE_CORE) {
             oldModule = router.coreModule;
             router.coreModule = newModule;
-        } else if (moduleId == MODULE_PENDING_CLOSE) {
-            oldModule = router.pendingCloseModule;
-            router.pendingCloseModule = newModule;
         } else {
             revert InvalidModule();
         }
@@ -788,11 +647,6 @@ contract PositionRouter is Initializable, UUPSUpgradeable {
     function _delegateToCore(bytes memory data) internal returns (bytes memory) {
         PositionStorageLib.RouterStorage storage router = PositionStorageLib.getRouterStorage();
         return _delegate(router.coreModule, data);
-    }
-
-    function _delegateToPendingClose(bytes memory data) internal returns (bytes memory) {
-        PositionStorageLib.RouterStorage storage router = PositionStorageLib.getRouterStorage();
-        return _delegate(router.pendingCloseModule, data);
     }
 
     function _delegate(address module, bytes memory data) internal returns (bytes memory) {
@@ -853,6 +707,5 @@ contract PositionRouter is Initializable, UUPSUpgradeable {
     // ========================================================================
 
     error PositionNotFound();
-    error NoPendingCloseRequest();
 }
 

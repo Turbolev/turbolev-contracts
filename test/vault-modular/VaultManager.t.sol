@@ -29,8 +29,6 @@ contract VaultManagerModularTest is BaseTestModular {
     function test_VaultManagerInitialized() public view {
         assertEq(vaultManager.positionManager(), address(positionManager));
         assertEq(vaultManager.accessController(), address(vaultAccessController));
-        assertEq(vaultManager.multisigWallet(), mockMultisigWallet);
-        assertEq(vaultManager.timelockController(), mockTimelockController);
     }
 
     function test_VaultManagerVersion() public view {
@@ -198,24 +196,24 @@ contract VaultManagerModularTest is BaseTestModular {
     // ========================================================================
 
     function test_PauseVault() public {
-        vm.prank(mockMultisigWallet);
+        vm.prank(mockEmergencyGuardian);
         vaultManager.pauseVault(address(projectToken));
 
         assertTrue(vault.paused());
     }
 
     function test_UnpauseVault() public {
-        vm.prank(mockMultisigWallet);
+        vm.prank(mockEmergencyGuardian);
         vaultManager.pauseVault(address(projectToken));
 
-        vm.prank(mockMultisigWallet);
+        vm.prank(mockEmergencyGuardian);
         vaultManager.unpauseVault(address(projectToken));
 
         assertFalse(vault.paused());
     }
 
     function test_PauseVaultByAddress() public {
-        vm.prank(mockMultisigWallet);
+        vm.prank(mockEmergencyGuardian);
         vaultManager.pauseVaultByAddress(address(vault));
 
         assertTrue(vault.paused());
@@ -232,7 +230,7 @@ contract VaultManagerModularTest is BaseTestModular {
         vaults[0] = address(vault);
         vaults[1] = vault2;
 
-        vm.prank(mockMultisigWallet);
+        vm.prank(mockEmergencyGuardian);
         vaultManager.batchPauseVaults(vaults);
 
         assertTrue(vault.paused());
@@ -240,7 +238,7 @@ contract VaultManagerModularTest is BaseTestModular {
     }
 
     function test_EmergencyPauseAll() public {
-        vm.prank(mockMultisigWallet);
+        vm.prank(mockEmergencyGuardian);
         vaultManager.emergencyPauseAll();
 
         assertTrue(vault.paused());
@@ -248,10 +246,10 @@ contract VaultManagerModularTest is BaseTestModular {
     }
 
     function test_EmergencyUnpauseAll() public {
-        vm.prank(mockMultisigWallet);
+        vm.prank(mockEmergencyGuardian);
         vaultManager.emergencyPauseAll();
 
-        vm.prank(mockMultisigWallet);
+        vm.prank(mockEmergencyGuardian);
         vaultManager.emergencyUnpauseAll();
 
         assertFalse(vault.paused());
@@ -361,7 +359,7 @@ contract VaultManagerModularTest is BaseTestModular {
         assertTrue(vaultManager.paused());
 
         // Now upgrade via EMERGENCY_ROLE (Multisig) - should succeed because paused
-        vm.prank(mockMultisigWallet);
+        vm.prank(mockEmergencyGuardian);
         vaultManager.upgradeToAndCall(address(newImpl), "");
 
         // Verify version still works (upgrade succeeded)
@@ -376,7 +374,7 @@ contract VaultManagerModularTest is BaseTestModular {
         assertFalse(vaultManager.paused());
 
         // Try to upgrade via EMERGENCY_ROLE (Multisig) - should fail because not paused
-        vm.prank(mockMultisigWallet);
+        vm.prank(mockEmergencyGuardian);
         vm.expectRevert(ModularVM.VaultManager.MustPauseBeforeEmergencyUpgrade.selector);
         vaultManager.upgradeToAndCall(address(newImpl), "");
     }
@@ -402,11 +400,11 @@ contract VaultManagerModularTest is BaseTestModular {
         // Expect EmergencyUpgrade event
         vm.expectEmit(true, true, false, true);
         emit ModularVM.VaultManager.EmergencyUpgrade(
-            address(newImpl), mockMultisigWallet, block.timestamp
+            address(newImpl), mockEmergencyGuardian, block.timestamp
         );
 
         // Upgrade via EMERGENCY_ROLE
-        vm.prank(mockMultisigWallet);
+        vm.prank(mockEmergencyGuardian);
         vaultManager.upgradeToAndCall(address(newImpl), "");
     }
 }

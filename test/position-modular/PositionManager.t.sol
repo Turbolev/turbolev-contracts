@@ -180,7 +180,7 @@ contract PositionManagerTest is BaseTestModular {
         vm.warp(block.timestamp + 61 seconds);
 
         // Close position
-        positionManager.closePosition(positionId, block.timestamp + 1 hours, 0, "");
+        positionManager.closePosition(positionId, block.timestamp + 1 hours, "");
         vm.stopPrank();
     }
 
@@ -198,7 +198,7 @@ contract PositionManagerTest is BaseTestModular {
         // User2 tries to close - should fail
         vm.startPrank(user2);
         vm.expectRevert();
-        positionManager.closePosition(1, block.timestamp + 1 hours, 0, "");
+        positionManager.closePosition(1, block.timestamp + 1 hours, "");
         vm.stopPrank();
     }
 

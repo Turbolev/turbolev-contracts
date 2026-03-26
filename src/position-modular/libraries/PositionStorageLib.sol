@@ -25,9 +25,6 @@ library PositionStorageLib {
     /// @dev Namespace for core position storage
     string internal constant NAMESPACE_CORE = "boolean.position.core";
 
-    /// @dev Namespace for pending close storage
-    string internal constant NAMESPACE_PENDING_CLOSE = "boolean.position.pending_close";
-
     /// @dev Namespace for router storage
     string internal constant NAMESPACE_ROUTER = "boolean.position.router";
 
@@ -46,37 +43,15 @@ library PositionStorageLib {
     }
 
     // ========================================================================
-    // PENDING CLOSE STRUCTS
+    // ENUMS
     // ========================================================================
-
-    /// @notice Pending close reason enum
-    enum PendingCloseReason {
-        NONE, // 0 - Default/not set
-        PRICE_STALE, // 1 - Oracle price is stale
-        PRICE_NOT_ACCEPTABLE, // 2 - Price doesn't meet maxAcceptablePrice
-        INVALID_PRICE, // 3 - Price is invalid (zero or negative)
-        SETTLEMENT_ENGINE_NOT_SET, // 4 - Settlement engine address not set
-        CANCELLED_BY_ADMIN, // 5 - Admin cancelled the pending close
-        ORACLE_ERROR // 6 - Oracle call failed
-    }
 
     enum PositionClosedBy {
         USER_REQUESTED, // 0 - User requested close
         LIQUIDATION, // 1 - Position liquidated
         TAKE_PROFIT, // 2 - Take profit requested
         STOP_LOSS, // 3 - Stop loss requested
-        MAX_PROFIT_REACHED, // 4 - Max profit reached
-        PENDING_CLOSE_REQUESTED // 5 - Pending close requested
-    }
-
-    /// @notice Pending close request data
-    struct PendingCloseRequest {
-        uint64 positionId;
-        uint256 requestTime;
-        uint256 deadline;
-        uint256 maxAcceptablePrice;
-        uint256 closePrice;
-        uint256 pricePublishTime;
+        MAX_PROFIT_REACHED // 4 - Max profit reached
     }
 
     // ========================================================================
@@ -106,19 +81,10 @@ library PositionStorageLib {
         bool paused;
     }
 
-    /// @custom:storage-location erc7201:boolean.position.pending_close
-    struct PendingCloseStorage {
-        // Pending close requests
-        mapping(uint64 => PendingCloseRequest) pendingCloseRequests;
-        uint64[] pendingClosePositionIds;
-        mapping(uint64 => bool) isPendingClose;
-    }
-
     /// @custom:storage-location erc7201:boolean.position.router
     struct RouterStorage {
         // Module addresses
         address coreModule;
-        address pendingCloseModule;
         // Initialization flag
         bool initialized;
     }
@@ -133,17 +99,6 @@ library PositionStorageLib {
      */
     function getCoreStorage() internal pure returns (CoreStorage storage $) {
         bytes32 slot = calculateEIP7201Slot(NAMESPACE_CORE);
-        assembly {
-            $.slot := slot
-        }
-    }
-
-    /**
-     * @notice Get pending close storage
-     * @return $ PendingCloseStorage struct pointer
-     */
-    function getPendingCloseStorage() internal pure returns (PendingCloseStorage storage $) {
-        bytes32 slot = calculateEIP7201Slot(NAMESPACE_PENDING_CLOSE);
         assembly {
             $.slot := slot
         }
@@ -188,20 +143,18 @@ library PositionStorageLib {
      * @notice Get all namespace strings
      * @return namespaces Array of all registered namespace strings
      */
-    function getAllNamespaces() internal pure returns (string[3] memory namespaces) {
+    function getAllNamespaces() internal pure returns (string[2] memory namespaces) {
         namespaces[0] = NAMESPACE_CORE;
-        namespaces[1] = NAMESPACE_PENDING_CLOSE;
-        namespaces[2] = NAMESPACE_ROUTER;
+        namespaces[1] = NAMESPACE_ROUTER;
     }
 
     /**
      * @notice Get all calculated storage slots
      * @return slots Array of all EIP-7201 calculated slots
      */
-    function getAllSlots() internal pure returns (bytes32[3] memory slots) {
+    function getAllSlots() internal pure returns (bytes32[2] memory slots) {
         slots[0] = calculateEIP7201Slot(NAMESPACE_CORE);
-        slots[1] = calculateEIP7201Slot(NAMESPACE_PENDING_CLOSE);
-        slots[2] = calculateEIP7201Slot(NAMESPACE_ROUTER);
+        slots[1] = calculateEIP7201Slot(NAMESPACE_ROUTER);
     }
 
     /**
@@ -209,9 +162,9 @@ library PositionStorageLib {
      * @return unique True if all slots are unique
      */
     function verifyAllSlotsUnique() internal pure returns (bool unique) {
-        bytes32[3] memory slots = getAllSlots();
-        for (uint256 i = 0; i < 3; i++) {
-            for (uint256 j = i + 1; j < 3; j++) {
+        bytes32[2] memory slots = getAllSlots();
+        for (uint256 i = 0; i < 2; i++) {
+            for (uint256 j = i + 1; j < 2; j++) {
                 if (slots[i] == slots[j]) {
                     return false;
                 }
