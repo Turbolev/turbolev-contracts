@@ -7,7 +7,6 @@ import "./DeployHelper.s.sol";
 import "../src/oracles/BlocksenseOracle.sol";
 import "../src/oracles/ChainlinkOracle.sol";
 import "../src/SettlementEngine.sol";
-import "../src/PositionManager.sol";
 import "../src/PriceFeedManager.sol";
 import "../src/interfaces/IPriceFeedManager.sol";
 import "../src/interfaces/oracles/IBaseOracle.sol";
@@ -20,12 +19,20 @@ import "../src/vault-modular/modules/VaultCore.sol";
 import "../src/vault-modular/modules/VaultFunding.sol";
 import "../src/vault-modular/modules/VaultRewards.sol";
 
+// Modular Position imports
+import "../src/position-modular/PositionRouter.sol";
+import "../src/position-modular/modules/PositionCore.sol";
+import "../src/position-modular/modules/PositionPendingClose.sol";
+
 // Governance
 import "../src/governance/MultisigWallet.sol";
-import "../src/governance/VersionedBeacon.sol";
 import "../src/vault-modular/VaultAdminProxy.sol";
 import "@openzeppelin/contracts/governance/TimelockController.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+
+// Registry
+import "../src/registry/ModuleRegistry.sol";
+import "../src/registry/VaultRegistry.sol";
 
 /**
  * @title DeployAllModular
@@ -37,17 +44,26 @@ contract DeployAllModular is DeployHelper {
     address public blocksenseOracleImpl;
     address public chainlinkOracleImpl;
     address public settlementEngineImpl;
-    address public positionManagerImpl;
     address public vaultManagerImpl;
     address public priceFeedManagerImpl;
     address public accessControllerImpl;
+
+    // Modular Position components
+    address public positionRouterImpl;
+    address public positionCoreModule;
+    address public positionPendingCloseModule;
 
     // Modular vault components (inherited from DeployHelper)
 
     // Governance
     address public deployedMultisig;
     address public deployedTimelock;
-    address public deployedBeacon;
+
+    // Registry
+    address public moduleRegistryImpl;
+    address public moduleRegistry;
+    address public vaultRegistryImpl;
+    address public vaultRegistryAddress;
 
     // Config
     uint256 public constant DEFAULT_TIMELOCK_DELAY = 1 days;
@@ -74,19 +90,25 @@ contract DeployAllModular is DeployHelper {
         // Phase 3: Deploy Vault Modules
         _deployVaultModules();
 
-        // Phase 4: Deploy VaultAccessController
+        // Phase 4: Deploy Position Modules
+        _deployPositionModules();
+
+        // Phase 5: Deploy VaultAccessController
         _deployVaultAccessController();
 
-        // Phase 5: Deploy VaultManager
+        // Phase 6: Deploy VaultManager
         _deployVaultManager();
 
-        // Phase 6: Deploy Core Contracts
+        // Phase 7: Deploy Registries
+        _deployRegistries();
+
+        // Phase 8: Deploy Core Contracts (Settlement, Position Router)
         _deployCoreContracts();
 
-        // Phase 7: Setup Connections
+        // Phase 9: Setup Connections
         _setupConnections();
 
-        // Phase 8: Verify Deployment
+        // Phase 10: Verify Deployment
         _verifyDeployment();
 
         console.log("\n===========================================");
@@ -176,10 +198,23 @@ contract DeployAllModular is DeployHelper {
 
         vaultRewardsModule = address(new VaultRewards());
         console.log("VaultRewards Module deployed:", vaultRewardsModule);
+    }
 
-        // VersionedBeacon
-        deployedBeacon = address(new VersionedBeacon(vaultRouterImpl, deployedTimelock, deployer));
-        console.log("VersionedBeacon deployed:", deployedBeacon);
+    // ========================================================================
+    // POSITION MODULES DEPLOYMENT
+    // ========================================================================
+
+    function _deployPositionModules() internal {
+        console.log("\n--- Phase 4: Deploying Position Modules ---");
+
+        positionRouterImpl = address(new PositionRouter());
+        console.log("PositionRouter Implementation deployed:", positionRouterImpl);
+
+        positionCoreModule = address(new PositionCore());
+        console.log("PositionCore Module deployed:", positionCoreModule);
+
+        positionPendingCloseModule = address(new PositionPendingClose());
+        console.log("PositionPendingClose Module deployed:", positionPendingCloseModule);
     }
 
     // ========================================================================
@@ -187,7 +222,7 @@ contract DeployAllModular is DeployHelper {
     // ========================================================================
 
     function _deployVaultAccessController() internal {
-        console.log("\n--- Phase 4: Deploying VaultAccessController ---");
+        console.log("\n--- Phase 5: Deploying VaultAccessController ---");
 
         accessControllerImpl = address(new VaultAccessController());
 
@@ -210,7 +245,7 @@ contract DeployAllModular is DeployHelper {
     // ========================================================================
 
     function _deployVaultManager() internal {
-        console.log("\n--- Phase 5: Deploying VaultManager ---");
+        console.log("\n--- Phase 6: Deploying VaultManager ---");
 
         vaultManagerImpl = address(new VaultManager());
 
@@ -231,11 +266,69 @@ contract DeployAllModular is DeployHelper {
     }
 
     // ========================================================================
+    // REGISTRY DEPLOYMENT
+    // ========================================================================
+
+    function _deployRegistries() internal {
+        console.log("\n--- Phase 7: Deploying Registries ---");
+
+        // ModuleRegistry
+        moduleRegistryImpl = address(new ModuleRegistry());
+        bytes memory moduleRegistryInitData =
+            abi.encodeWithSelector(ModuleRegistry.initialize.selector, vaultAccessController);
+        moduleRegistry = address(new ERC1967Proxy(moduleRegistryImpl, moduleRegistryInitData));
+        console.log("ModuleRegistry deployed:", moduleRegistry);
+
+        // VaultRegistry
+        vaultRegistryImpl = address(new VaultRegistry());
+        bytes memory vaultRegistryInitData = abi.encodeWithSelector(
+            VaultRegistry.initialize.selector, vaultAccessController, moduleRegistry
+        );
+        vaultRegistryAddress = address(new ERC1967Proxy(vaultRegistryImpl, vaultRegistryInitData));
+        console.log("VaultRegistry deployed:", vaultRegistryAddress);
+
+        // Register initial module versions
+        _registerInitialModuleVersions();
+    }
+
+    function _registerInitialModuleVersions() internal {
+        console.log("\n--- Registering Initial Module Versions ---");
+
+        ModuleRegistry registry = ModuleRegistry(moduleRegistry);
+
+        // Register Router V1
+        registry.registerModule(
+            registry.MODULE_ROUTER(),
+            "1.0.0",
+            vaultRouterImpl,
+            bytes32(0), // No commit hash for initial deployment
+            true // Set as latest
+        );
+        console.log("[OK] Registered VaultRouter v1.0.0");
+
+        // Register Core V1
+        registry.registerModule(registry.MODULE_CORE(), "1.0.0", vaultCoreModule, bytes32(0), true);
+        console.log("[OK] Registered VaultCore v1.0.0");
+
+        // Register Funding V1
+        registry.registerModule(
+            registry.MODULE_FUNDING(), "1.0.0", vaultFundingModule, bytes32(0), true
+        );
+        console.log("[OK] Registered VaultFunding v1.0.0");
+
+        // Register Rewards V1
+        registry.registerModule(
+            registry.MODULE_REWARDS(), "1.0.0", vaultRewardsModule, bytes32(0), true
+        );
+        console.log("[OK] Registered VaultRewards v1.0.0");
+    }
+
+    // ========================================================================
     // CORE CONTRACTS DEPLOYMENT
     // ========================================================================
 
     function _deployCoreContracts() internal {
-        console.log("\n--- Phase 6: Deploying Core Contracts ---");
+        console.log("\n--- Phase 8: Deploying Core Contracts ---");
 
         // SettlementEngine
         settlementEngineImpl = address(new SettlementEngine());
@@ -245,12 +338,18 @@ contract DeployAllModular is DeployHelper {
             payable(address(new ERC1967Proxy(settlementEngineImpl, settlementInitData)));
         console.log("SettlementEngine deployed:", settlementEngine);
 
-        // PositionManager
-        positionManagerImpl = address(new PositionManager());
-        bytes memory positionInitData =
-            abi.encodeWithSelector(PositionManager.initialize.selector, owner, admin);
-        positionManager = payable(address(new ERC1967Proxy(positionManagerImpl, positionInitData)));
-        console.log("PositionManager deployed:", positionManager);
+        // PositionRouter (Modular Position Manager)
+        bytes memory positionInitData = abi.encodeWithSelector(
+            PositionRouter.initialize.selector,
+            vaultAccessController, // accessController
+            settlementEngine, // settlementEngine
+            vaultManager, // vaultManager
+            priceFeedManager, // priceFeedManager
+            positionCoreModule, // coreModule
+            positionPendingCloseModule // pendingCloseModule
+        );
+        positionManager = payable(address(new ERC1967Proxy(positionRouterImpl, positionInitData)));
+        console.log("PositionRouter (PositionManager) deployed:", positionManager);
     }
 
     // ========================================================================
@@ -258,13 +357,11 @@ contract DeployAllModular is DeployHelper {
     // ========================================================================
 
     function _setupConnections() internal {
-        console.log("\n--- Phase 7: Setting up Connections ---");
+        console.log("\n--- Phase 9: Setting up Connections ---");
 
-        // PositionManager connections
-        PositionManager(payable(positionManager)).setVaultManager(vaultManager);
-        PositionManager(payable(positionManager)).setSettlementEngine(settlementEngine);
-        PositionManager(payable(positionManager)).setPriceFeedManager(priceFeedManager);
-        console.log("[OK] PositionManager configured");
+        // PositionRouter is already initialized with connections
+        // But we can update if needed using setters
+        console.log("[OK] PositionRouter configured (via initialize)");
 
         // VaultManager connections
         VaultManager(vaultManager).setPositionManager(positionManager);
@@ -283,13 +380,19 @@ contract DeployAllModular is DeployHelper {
             .grantRole(
                 VaultAccessController(vaultAccessController).VAULT_ADMIN_ROLE(), vaultManager
             );
-        // Grant POSITION_MANAGER_ROLE to PositionManager
+        // Grant POSITION_MANAGER_ROLE to PositionRouter
         VaultAccessController(vaultAccessController)
             .grantRole(
                 VaultAccessController(vaultAccessController).POSITION_MANAGER_ROLE(),
                 positionManager
             );
         console.log("[OK] VaultAccessController configured");
+
+        // Configure VaultManager with registries
+        VaultManager(vaultManager).setModuleRegistry(moduleRegistry);
+        VaultManager(vaultManager).setVaultRegistry(vaultRegistryAddress);
+        VaultManager(vaultManager).setModuleVersions("1.0.0", "1.0.0", "1.0.0", "1.0.0");
+        console.log("[OK] VaultManager registries configured");
 
         // Setup PriceFeedManager with oracle providers
         _setupPriceFeedManager();
@@ -326,15 +429,19 @@ contract DeployAllModular is DeployHelper {
     // ========================================================================
 
     function _verifyDeployment() internal view {
-        console.log("\n--- Phase 8: Verifying Deployment ---");
+        console.log("\n--- Phase 10: Verifying Deployment ---");
 
         require(blocksenseOracle != address(0), "BlocksenseOracle not deployed");
         require(chainlinkOracle != address(0), "ChainlinkOracle not deployed");
         require(settlementEngine != address(0), "SettlementEngine not deployed");
-        require(positionManager != address(0), "PositionManager not deployed");
+        require(positionManager != address(0), "PositionRouter not deployed");
         require(vaultManager != address(0), "VaultManager not deployed");
         require(priceFeedManager != address(0), "PriceFeedManager not deployed");
         require(vaultAccessController != address(0), "VaultAccessController not deployed");
+        require(moduleRegistry != address(0), "ModuleRegistry not deployed");
+        require(vaultRegistryAddress != address(0), "VaultRegistry not deployed");
+        require(positionCoreModule != address(0), "PositionCore not deployed");
+        require(positionPendingCloseModule != address(0), "PositionPendingClose not deployed");
 
         console.log("[OK] All contracts deployed and verified");
     }
@@ -349,21 +456,27 @@ contract DeployAllModular is DeployHelper {
         console.log("\n--- Governance ---");
         console.log("MultisigWallet:", deployedMultisig);
         console.log("TimelockController:", deployedTimelock);
-        console.log("VersionedBeacon:", deployedBeacon);
         console.log("VaultAccessController:", vaultAccessController);
+        console.log("\n--- Registries ---");
+        console.log("ModuleRegistry:", moduleRegistry);
+        console.log("VaultRegistry:", vaultRegistryAddress);
         console.log("\n--- Oracles ---");
         console.log("BlocksenseOracle:", blocksenseOracle);
         console.log("ChainlinkOracle:", chainlinkOracle);
         console.log("PriceFeedManager:", priceFeedManager);
         console.log("\n--- Core Contracts ---");
         console.log("SettlementEngine:", settlementEngine);
-        console.log("PositionManager:", positionManager);
+        console.log("PositionRouter (PositionManager):", positionManager);
         console.log("VaultManager:", vaultManager);
         console.log("\n--- Vault Modules ---");
         console.log("VaultRouter Impl:", vaultRouterImpl);
         console.log("VaultCore Module:", vaultCoreModule);
         console.log("VaultFunding Module:", vaultFundingModule);
         console.log("VaultRewards Module:", vaultRewardsModule);
+        console.log("\n--- Position Modules ---");
+        console.log("PositionRouter Impl:", positionRouterImpl);
+        console.log("PositionCore Module:", positionCoreModule);
+        console.log("PositionPendingClose Module:", positionPendingCloseModule);
         console.log("\n--- Accounts ---");
         console.log("Contract Owner:", owner);
         console.log("Admin Address:", admin);

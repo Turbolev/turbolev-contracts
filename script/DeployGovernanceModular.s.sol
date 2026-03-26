@@ -5,9 +5,10 @@ import "forge-std/Script.sol";
 import "forge-std/console.sol";
 import "./DeployHelper.s.sol";
 import "../src/governance/MultisigWallet.sol";
-import "../src/governance/VersionedBeacon.sol";
 import "../src/vault-modular/VaultAccessController.sol";
 import "../src/vault-modular/VaultRouter.sol";
+import "../src/registry/ModuleRegistry.sol";
+import "../src/registry/VaultRegistry.sol";
 import "@openzeppelin/contracts/governance/TimelockController.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
@@ -18,8 +19,9 @@ import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
  *      1. MultisigWallet - M-of-N multisig for proposals
  *      2. TimelockController (OpenZeppelin) - Time delay for governance
  *      3. VaultRouter implementation - Initial vault implementation
- *      4. VersionedBeacon - Beacon with version tracking
- *      5. VaultAccessController - Centralized access control (single source of truth)
+ *      4. VaultAccessController - Centralized access control (single source of truth)
+ *      5. ModuleRegistry - Track module versions
+ *      6. VaultRegistry - Track vault configurations
  *
  * Architecture:
  * - TimelockController: DEFAULT_ADMIN_ROLE holder, controls critical operations
@@ -38,9 +40,10 @@ contract DeployGovernanceModular is DeployHelper {
     // Deployed contracts
     address public deployedMultisig;
     address public deployedTimelock;
-    address public deployedBeacon;
     address public deployedAccessController;
     address public deployedVaultRouterImpl;
+    address public deployedModuleRegistry;
+    address public deployedVaultRegistry;
 
     // Config
     uint256 public constant DEFAULT_TIMELOCK_DELAY = 1 days;
@@ -64,11 +67,11 @@ contract DeployGovernanceModular is DeployHelper {
         // 3. Deploy VaultRouter implementation
         _deployVaultRouterImpl();
 
-        // 4. Deploy VersionedBeacon
-        _deployVersionedBeacon();
-
-        // 5. Deploy VaultAccessController
+        // 4. Deploy VaultAccessController
         _deployVaultAccessController();
+
+        // 5. Deploy Registries
+        _deployRegistries();
 
         // Print summary
         _printSummary();
@@ -133,20 +136,6 @@ contract DeployGovernanceModular is DeployHelper {
         console.log("VaultRouter Implementation deployed:", deployedVaultRouterImpl);
     }
 
-    function _deployVersionedBeacon() internal {
-        console.log("\n--- Deploying VersionedBeacon ---");
-
-        // Owner is Timelock for governance control
-        // Initial admin is deployer for emergency operations
-        deployedBeacon =
-            address(new VersionedBeacon(deployedVaultRouterImpl, deployedTimelock, deployer));
-
-        console.log("VersionedBeacon deployed:", deployedBeacon);
-        console.log("Initial implementation:", deployedVaultRouterImpl);
-        console.log("Owner (Timelock):", deployedTimelock);
-        console.log("Initial Admin:", deployer);
-    }
-
     function _deployVaultAccessController() internal {
         console.log("\n--- Deploying VaultAccessController ---");
 
@@ -199,23 +188,50 @@ contract DeployGovernanceModular is DeployHelper {
         }
     }
 
+    function _deployRegistries() internal {
+        console.log("\n--- Deploying Registries ---");
+
+        // Deploy ModuleRegistry
+        ModuleRegistry moduleRegistryImpl = new ModuleRegistry();
+        bytes memory moduleRegistryInitData =
+            abi.encodeWithSelector(ModuleRegistry.initialize.selector, deployedAccessController);
+        ERC1967Proxy moduleRegistryProxy =
+            new ERC1967Proxy(address(moduleRegistryImpl), moduleRegistryInitData);
+        deployedModuleRegistry = address(moduleRegistryProxy);
+
+        console.log("ModuleRegistry deployed:", deployedModuleRegistry);
+
+        // Deploy VaultRegistry
+        VaultRegistry vaultRegistryImpl = new VaultRegistry();
+        bytes memory vaultRegistryInitData = abi.encodeWithSelector(
+            VaultRegistry.initialize.selector, deployedAccessController, deployedModuleRegistry
+        );
+        ERC1967Proxy vaultRegistryProxy =
+            new ERC1967Proxy(address(vaultRegistryImpl), vaultRegistryInitData);
+        deployedVaultRegistry = address(vaultRegistryProxy);
+
+        console.log("VaultRegistry deployed:", deployedVaultRegistry);
+    }
+
     function _printSummary() internal view {
         console.log("\n===========================================");
         console.log("GOVERNANCE DEPLOYMENT SUMMARY (MODULAR)");
         console.log("===========================================");
         console.log("MultisigWallet:", deployedMultisig);
         console.log("TimelockController:", deployedTimelock);
-        console.log("VersionedBeacon:", deployedBeacon);
         console.log("VaultAccessController:", deployedAccessController);
         console.log("VaultRouter Implementation:", deployedVaultRouterImpl);
+        console.log("ModuleRegistry:", deployedModuleRegistry);
+        console.log("VaultRegistry:", deployedVaultRegistry);
         console.log("===========================================");
         console.log("\n=== Environment Variables ===");
         console.log("Add these to your .env file:");
         console.log("MULTISIG_WALLET_ADDRESS=", deployedMultisig);
         console.log("TIMELOCK_ADDRESS=", deployedTimelock);
-        console.log("VAULT_BEACON_ADDRESS=", deployedBeacon);
         console.log("VAULT_ACCESS_CONTROLLER_ADDRESS=", deployedAccessController);
         console.log("VAULT_ROUTER_IMPL_ADDRESS=", deployedVaultRouterImpl);
+        console.log("MODULE_REGISTRY_ADDRESS=", deployedModuleRegistry);
+        console.log("VAULT_REGISTRY_ADDRESS=", deployedVaultRegistry);
     }
 
     /**

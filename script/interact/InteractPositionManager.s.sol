@@ -4,16 +4,16 @@ pragma solidity ^0.8.22;
 import "forge-std/Script.sol";
 import "forge-std/console.sol";
 import "../DeployHelper.s.sol";
-import "../../src/PositionManager.sol";
+import "../../src/position-modular/PositionRouter.sol";
 import "../../src/libraries/PositionLib.sol";
 
 contract InteractPositionManager is DeployHelper {
-    PositionManager public pm;
+    PositionRouter public pm;
 
     function setUp() public override {
         super.setUp();
-        pm = PositionManager(payable(positionManager));
-        console.log("PositionManager Address:", address(pm));
+        pm = PositionRouter(payable(positionManager));
+        console.log("PositionRouter Address:", address(pm));
     }
 
     function viewPosition(uint64 positionId) public view {
@@ -67,7 +67,7 @@ contract InteractPositionManager is DeployHelper {
     /**
      * @notice Set access controller address
      * @param _accessController AccessController address
-     * @dev Position keepers are managed via VaultAccessController, not PositionManager directly
+     * @dev Position keepers are managed via VaultAccessController, not PositionRouter directly
      */
     function setAccessController(address _accessController) public {
         vm.startBroadcast(deployer);
@@ -81,7 +81,7 @@ contract InteractPositionManager is DeployHelper {
      */
     function viewAccessController() public view {
         console.log("\n=== Access Controller ===");
-        console.log("AccessController:", address(pm.accessController()));
+        console.log("AccessController:", pm.accessController());
     }
 
     function setMaintenanceMarginRatio(uint256 newRatio) public {
@@ -108,14 +108,20 @@ contract InteractPositionManager is DeployHelper {
     function pauseManager() public {
         vm.startBroadcast(deployer);
         pm.pause();
-        console.log("PositionManager paused");
+        console.log("PositionRouter paused");
         vm.stopBroadcast();
     }
 
     function unpauseManager() public {
         vm.startBroadcast(deployer);
         pm.unpause();
-        console.log("PositionManager unpaused");
+        console.log("PositionRouter unpaused");
         vm.stopBroadcast();
+    }
+
+    function viewModules() public view {
+        console.log("\n=== Position Modules ===");
+        console.log("Core Module:", pm.getModule(pm.MODULE_CORE()));
+        console.log("PendingClose Module:", pm.getModule(pm.MODULE_PENDING_CLOSE()));
     }
 }

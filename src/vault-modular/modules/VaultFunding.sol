@@ -103,8 +103,9 @@ contract VaultFunding is VaultModuleBase {
         // Calculate rate delta for each hour elapsed
         // Only apply funding if there's a counterparty to receive it
         if (hasCounterparty && hoursElapsed > 0) {
-            (int256 longDelta, int256 shortDelta) =
-                FundingRateLib.calculateHourlyRateDelta(hourlyRateBps, isLongDominant);
+            (int256 longDelta, int256 shortDelta) = FundingRateLib.calculateHourlyRateDelta(
+                hourlyRateBps, isLongDominant, funding.totalLongExposure, funding.totalShortExposure
+            );
 
             // Apply for each hour elapsed (capped at MAX_CATCHUP_HOURS)
             funding.cumulativeFundingRateLong += longDelta * int256(hoursElapsed);
@@ -166,6 +167,7 @@ contract VaultFunding is VaultModuleBase {
      * @param direction Position direction (1 = LONG, 2 = SHORT)
      * @return fundingOwed Funding owed (positive = owes, negative = receives)
      * @dev Uses zero-sum distribution: Total paid by dominant = Total received by minority
+     *      No OI check - funding accumulated must be settled even if counterparty closed
      */
     function calculatePositionFunding(
         int256 entryRateLong,
@@ -177,15 +179,13 @@ contract VaultFunding is VaultModuleBase {
 
         if (!funding.fundingEnabled) return 0;
 
-        return FundingRateLib.calculatePositionFundingZeroSum(
+        return FundingRateLib.calculatePositionFunding(
             entryRateLong,
             entryRateShort,
             funding.cumulativeFundingRateLong,
             funding.cumulativeFundingRateShort,
             positionSize,
-            direction,
-            funding.totalLongExposure,
-            funding.totalShortExposure
+            direction
         );
     }
 
@@ -246,15 +246,13 @@ contract VaultFunding is VaultModuleBase {
 
         if (!funding.fundingEnabled) return (false, 0, collateral);
 
-        fundingOwed = FundingRateLib.calculatePositionFundingZeroSum(
+        fundingOwed = FundingRateLib.calculatePositionFunding(
             entryRateLong,
             entryRateShort,
             funding.cumulativeFundingRateLong,
             funding.cumulativeFundingRateShort,
             positionSize,
-            direction,
-            funding.totalLongExposure,
-            funding.totalShortExposure
+            direction
         );
 
         bool isNegative;

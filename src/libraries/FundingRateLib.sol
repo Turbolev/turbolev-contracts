@@ -173,39 +173,52 @@ library FundingRateLib {
     }
 
     /**
-     * @notice Calculate funding rate delta for one hour
+     * @notice Calculate funding rate delta for one hour with zero-sum distribution
      * @param rateBps Funding rate in basis points
      * @param isLongDominant True if longs are paying
+     * @param longOI Total Long open interest
+     * @param shortOI Total Short open interest
      * @return longRateDelta Change in cumulative long rate (scaled by FUNDING_PRECISION)
      * @return shortRateDelta Change in cumulative short rate (scaled by FUNDING_PRECISION)
-     * @dev If longs dominate: longRateDelta > 0 (longs pay), shortRateDelta < 0 (shorts receive)
-     *      If shorts dominate: shortRateDelta > 0 (shorts pay), longRateDelta < 0 (longs receive)
+     * @dev Zero-sum: dominantOI × payerRate = minorityOI × receiverRate
+     *      Payer rate = scaledRate (base rate)
+     *      Receiver rate = scaledRate × (dominantOI / minorityOI) - amplified to receive all paid
      */
-    function calculateHourlyRateDelta(uint16 rateBps, bool isLongDominant)
-        internal
-        pure
-        returns (int256 longRateDelta, int256 shortRateDelta)
-    {
+    function calculateHourlyRateDelta(
+        uint16 rateBps,
+        bool isLongDominant,
+        uint256 longOI,
+        uint256 shortOI
+    ) internal pure returns (int256 longRateDelta, int256 shortRateDelta) {
+        // No counterparty means no funding
+        if (longOI == 0 || shortOI == 0) {
+            return (0, 0);
+        }
+
         // Convert rate from bps to scaled value
         // rateBps = 1 means 0.01% = 0.0001 = 1/10000
         // Scaled: 1 * FUNDING_PRECISION / MathLib.BASIS_POINTS
         int256 scaledRate = int256((uint256(rateBps) * FUNDING_PRECISION) / MathLib.BASIS_POINTS);
 
         if (isLongDominant) {
-            // Longs pay, shorts receive
-            longRateDelta = scaledRate; // Positive = longs owe
-            shortRateDelta = -scaledRate; // Negative = shorts receive
+            // Longs pay: rate per unit = scaledRate
+            // Shorts receive: rate per unit = scaledRate × (longOI / shortOI) for zero-sum
+            longRateDelta = scaledRate;
+            int256 amplifiedRate = MathLib.mulDivSigned(scaledRate, int256(longOI), int256(shortOI));
+            shortRateDelta = -amplifiedRate; // Negative = receives
         } else {
-            // Shorts pay, longs receive
-            longRateDelta = -scaledRate; // Negative = longs receive
-            shortRateDelta = scaledRate; // Positive = shorts owe
+            // Shorts pay: rate per unit = scaledRate
+            // Longs receive: rate per unit = scaledRate × (shortOI / longOI) for zero-sum
+            shortRateDelta = scaledRate;
+            int256 amplifiedRate = MathLib.mulDivSigned(scaledRate, int256(shortOI), int256(longOI));
+            longRateDelta = -amplifiedRate; // Negative = receives
         }
 
         return (longRateDelta, shortRateDelta);
     }
 
     /**
-     * @notice Calculate funding owed by a position (legacy - non-zero-sum)
+     * @notice Calculate funding owed by a position
      * @param entryRateLong Position's entry cumulative long rate
      * @param entryRateShort Position's entry cumulative short rate
      * @param currentRateLong Current cumulative long rate
@@ -213,10 +226,10 @@ library FundingRateLib {
      * @param positionSize Position size (notional value)
      * @param direction Position direction (1 = LONG, 2 = SHORT)
      * @return fundingOwed Funding amount (positive = owes, negative = receives)
-     * @dev Funding = (currentRate - entryRate) * positionSize / FUNDING_PRECISION
-     *      Uses MathLib.mulDivSigned() to prevent overflow when
-     *      rateDiff * positionSize exceeds int256 max before division
-     * @dev DEPRECATED: Use calculatePositionFundingZeroSum for proper zero-sum funding
+     * @dev Zero-sum is already baked into cumulative rates via calculateHourlyRateDelta
+     *      This function simply calculates: (currentRate - entryRate) × positionSize
+     *      No OI check here - funding accumulated during position lifetime must be settled
+     *      even if counterparty no longer exists at close time
      */
     function calculatePositionFunding(
         int256 entryRateLong,
@@ -226,101 +239,23 @@ library FundingRateLib {
         uint256 positionSize,
         uint8 direction
     ) internal pure returns (int256 fundingOwed) {
-        int256 rateDiff;
-
-        if (direction == 1) {
-            // LONG position
-            rateDiff = currentRateLong - entryRateLong;
-        } else if (direction == 2) {
-            // SHORT position
-            rateDiff = currentRateShort - entryRateShort;
-        } else {
-            revert InvalidDirection();
-        }
-
-        // Use MathLib.mulDivSigned() for safe multiplication
-        // This prevents overflow when rateDiff * positionSize exceeds int256 max
-        // before the division by FUNDING_PRECISION
-        // Old code (vulnerable to overflow):
-        //   fundingOwed = (rateDiff * int256(positionSize)) / int256(FUNDING_PRECISION);
-        fundingOwed =
-            MathLib.mulDivSigned(rateDiff, int256(positionSize), int256(FUNDING_PRECISION));
-
-        return fundingOwed;
-    }
-
-    /**
-     * @notice Calculate funding owed by a position with zero-sum distribution
-     * @param entryRateLong Position's entry cumulative long rate
-     * @param entryRateShort Position's entry cumulative short rate
-     * @param currentRateLong Current cumulative long rate
-     * @param currentRateShort Current cumulative short rate
-     * @param positionSize Position size (notional value)
-     * @param direction Position direction (1 = LONG, 2 = SHORT)
-     * @param longOI Total Long open interest
-     * @param shortOI Total Short open interest
-     * @return fundingOwed Funding amount (positive = owes, negative = receives)
-     * @dev Zero-sum: Total Long pays = Total Short receives (and vice versa)
-     *      - Payers: pay based on their position size × rate
-     *      - Receivers: receive proportional share = (positionSize / receiverOI) × totalPaid
-     *      This ensures all funding paid by dominant side is fully distributed to minority side
-     */
-    function calculatePositionFundingZeroSum(
-        int256 entryRateLong,
-        int256 entryRateShort,
-        int256 currentRateLong,
-        int256 currentRateShort,
-        uint256 positionSize,
-        uint8 direction,
-        uint256 longOI,
-        uint256 shortOI
-    ) internal pure returns (int256 fundingOwed) {
         if (direction != 1 && direction != 2) {
             revert InvalidDirection();
         }
 
-        // No counterparty means no funding
-        if (longOI == 0 || shortOI == 0) {
-            return 0;
-        }
-
         int256 rateDiff;
-        bool isReceiver;
 
         if (direction == 1) {
             // LONG position
             rateDiff = currentRateLong - entryRateLong;
-            // Longs receive when rateDiff is negative (shorts were dominant and paid)
-            isReceiver = rateDiff < 0;
         } else {
             // SHORT position
             rateDiff = currentRateShort - entryRateShort;
-            // Shorts receive when rateDiff is negative (longs were dominant and paid)
-            isReceiver = rateDiff < 0;
         }
 
-        if (isReceiver) {
-            // Receiver: gets proportional share of total paid by dominant side
-            // Total paid by dominant = |rateDiff| × dominantOI
-            // This position's share = (positionSize / receiverOI) × totalPaid
-            // Simplified: fundingOwed = rateDiff × (dominantOI / receiverOI) × positionSize
-
-            uint256 dominantOI = (direction == 1) ? shortOI : longOI;
-            uint256 receiverOI = (direction == 1) ? longOI : shortOI;
-
-            // Amplify the rate by OI ratio for receivers
-            // rateDiff is negative for receivers, result will be negative (receives funding)
-            int256 amplifiedRateDiff =
-                MathLib.mulDivSigned(rateDiff, int256(dominantOI), int256(receiverOI));
-
-            fundingOwed = MathLib.mulDivSigned(
-                amplifiedRateDiff, int256(positionSize), int256(FUNDING_PRECISION)
-            );
-        } else {
-            // Payer: pays based on their position size × rate (standard calculation)
-            fundingOwed =
-                MathLib.mulDivSigned(rateDiff, int256(positionSize), int256(FUNDING_PRECISION));
-        }
+        // Simple calculation - zero-sum is already baked into cumulative rates
+        fundingOwed =
+            MathLib.mulDivSigned(rateDiff, int256(positionSize), int256(FUNDING_PRECISION));
 
         return fundingOwed;
     }

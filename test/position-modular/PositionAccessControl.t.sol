@@ -73,18 +73,19 @@ contract PositionAccessControlTest is BaseTestModular {
     // ========================================================================
 
     function test_Pause() public {
-        vm.prank(owner);
+        // Use mockTimelockController which has DEFAULT_ADMIN_ROLE
+        vm.prank(mockTimelockController);
         positionManager.pause();
 
         assertTrue(positionManager.paused(), "Contract should be paused");
     }
 
     function test_Unpause() public {
-        // Pause with owner
-        vm.prank(owner);
+        // Pause with admin
+        vm.prank(mockTimelockController);
         positionManager.pause();
 
-        // Unpause requires UPGRADER_ROLE (mockTimelockController)
+        // Unpause requires UPGRADER_ROLE (mockTimelockController has it)
         vm.prank(mockTimelockController);
         positionManager.unpause();
 
@@ -92,12 +93,12 @@ contract PositionAccessControlTest is BaseTestModular {
     }
 
     function test_Unpause_RevertOnNonUpgrader() public {
-        vm.prank(owner);
+        vm.prank(mockTimelockController);
         positionManager.pause();
 
         // Try unpause with non-upgrader should revert
         vm.prank(user1);
-        vm.expectRevert(PositionManager.NotAuthorized.selector);
+        vm.expectRevert(PositionRouter.NotAuthorized.selector);
         positionManager.unpause();
     }
 
@@ -113,14 +114,14 @@ contract PositionAccessControlTest is BaseTestModular {
         assertTrue(positionManager.paused(), "Contract should be paused by guardian");
     }
 
-    function test_Pause_RevertOnNonOwner() public {
+    function test_Pause_RevertOnNonAdmin() public {
         vm.prank(user1);
         vm.expectRevert();
         positionManager.pause();
     }
 
     function test_OpenPosition_RevertWhenPaused() public {
-        vm.prank(owner);
+        vm.prank(mockTimelockController);
         positionManager.pause();
 
         vm.startPrank(user1);
@@ -145,7 +146,7 @@ contract PositionAccessControlTest is BaseTestModular {
         vm.warp(block.timestamp + 61 seconds);
 
         // Pause contract
-        vm.prank(owner);
+        vm.prank(mockTimelockController);
         positionManager.pause();
 
         // Try to close - should fail
@@ -156,19 +157,19 @@ contract PositionAccessControlTest is BaseTestModular {
     }
 
     // ========================================================================
-    // OWNER-ONLY FUNCTION TESTS
+    // ADMIN FUNCTION TESTS (Requires DEFAULT_ADMIN_ROLE or VAULT_ADMIN_ROLE)
     // ========================================================================
 
     function test_SetVaultManager() public {
         address newVaultManager = makeAddr("newVaultManager");
 
-        vm.prank(owner);
+        vm.prank(mockTimelockController);
         positionManager.setVaultManager(newVaultManager);
 
         assertEq(positionManager.vaultManager(), newVaultManager, "VaultManager should be updated");
     }
 
-    function test_SetVaultManager_RevertOnNonOwner() public {
+    function test_SetVaultManager_RevertOnNonAdmin() public {
         vm.prank(user1);
         vm.expectRevert();
         positionManager.setVaultManager(makeAddr("newVaultManager"));
@@ -177,7 +178,7 @@ contract PositionAccessControlTest is BaseTestModular {
     function test_SetSettlementEngine() public {
         address newEngine = makeAddr("newSettlementEngine");
 
-        vm.prank(owner);
+        vm.prank(mockTimelockController);
         positionManager.setSettlementEngine(newEngine);
 
         assertEq(
@@ -185,7 +186,7 @@ contract PositionAccessControlTest is BaseTestModular {
         );
     }
 
-    function test_SetSettlementEngine_RevertOnNonOwner() public {
+    function test_SetSettlementEngine_RevertOnNonAdmin() public {
         vm.prank(user1);
         vm.expectRevert();
         positionManager.setSettlementEngine(makeAddr("newEngine"));
@@ -194,7 +195,7 @@ contract PositionAccessControlTest is BaseTestModular {
     function test_SetPriceFeedManager() public {
         address newManager = makeAddr("newPriceFeedManager");
 
-        vm.prank(owner);
+        vm.prank(mockTimelockController);
         positionManager.setPriceFeedManager(newManager);
 
         assertEq(
@@ -202,7 +203,7 @@ contract PositionAccessControlTest is BaseTestModular {
         );
     }
 
-    function test_SetPriceFeedManager_RevertOnNonOwner() public {
+    function test_SetPriceFeedManager_RevertOnNonAdmin() public {
         vm.prank(user1);
         vm.expectRevert();
         positionManager.setPriceFeedManager(makeAddr("newManager"));
@@ -247,9 +248,9 @@ contract PositionAccessControlTest is BaseTestModular {
     // ========================================================================
 
     function test_InitialConfiguration() public view {
-        assertEq(positionManager.owner(), owner, "Owner should be set");
+        // PositionRouter uses AccessController for access control (no single owner)
         assertEq(
-            address(positionManager.accessController()),
+            positionManager.accessController(),
             address(vaultAccessController),
             "AccessController should be set"
         );
@@ -280,13 +281,13 @@ contract PositionAccessControlTest is BaseTestModular {
     }
 
     function test_CannotSetZeroVaultManager() public {
-        vm.prank(owner);
+        vm.prank(mockTimelockController);
         vm.expectRevert();
         positionManager.setVaultManager(address(0));
     }
 
     function test_CannotSetZeroAccessController() public {
-        vm.prank(owner);
+        vm.prank(mockTimelockController);
         vm.expectRevert();
         positionManager.setAccessController(address(0));
     }
@@ -294,11 +295,11 @@ contract PositionAccessControlTest is BaseTestModular {
     function test_SetAccessController() public {
         address newAccessController = makeAddr("newAccessController");
 
-        vm.prank(owner);
+        vm.prank(mockTimelockController);
         positionManager.setAccessController(newAccessController);
 
         assertEq(
-            address(positionManager.accessController()),
+            positionManager.accessController(),
             newAccessController,
             "AccessController should be updated"
         );

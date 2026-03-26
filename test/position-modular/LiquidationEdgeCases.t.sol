@@ -2,6 +2,7 @@
 pragma solidity ^0.8.22;
 
 import "../vault-modular/BaseTestModular.sol";
+import "../../src/libraries/PositionLib.sol";
 
 /**
  * @title LiquidationEdgeCasesTest
@@ -60,10 +61,10 @@ contract LiquidationEdgeCasesTest is BaseTestModular {
 
         // High leverage positions have less buffer before liquidation
         // Get position
-        (, uint8 leverage,,,,,,,, uint256 collateral,,,,,,,,,,,,,) = positionManager.positions(1);
+        PositionLib.Position memory pos = positionManager.getPosition(1);
 
-        assertEq(leverage, 20, "Leverage should be 20x");
-        assertEq(collateral, 10 ether, "Collateral should be 10 ether");
+        assertEq(pos.leverage, 20, "Leverage should be 20x");
+        assertEq(pos.amount, 10 ether, "Collateral should be 10 ether");
     }
 
     function test_LowLeverage_MoreResistantToLiquidation() public {
@@ -81,10 +82,10 @@ contract LiquidationEdgeCasesTest is BaseTestModular {
         );
         vm.stopPrank();
 
-        (, uint8 leverage,,,,,,,, uint256 collateral,,,,,,,,,,,,,) = positionManager.positions(1);
+        PositionLib.Position memory pos = positionManager.getPosition(1);
 
-        assertEq(leverage, 2, "Leverage should be 2x");
-        assertEq(collateral, 10 ether, "Collateral should be 10 ether");
+        assertEq(pos.leverage, 2, "Leverage should be 2x");
+        assertEq(pos.amount, 10 ether, "Collateral should be 10 ether");
     }
 
     // ========================================================================
@@ -104,9 +105,9 @@ contract LiquidationEdgeCasesTest is BaseTestModular {
         vm.stopPrank();
 
         // Check updated collateral
-        (,,,,,,,,, uint256 collateral,,,,,,,,,,,,,) = positionManager.positions(1);
+        PositionLib.Position memory pos = positionManager.getPosition(1);
 
-        assertEq(collateral, 15 ether, "Collateral should be increased");
+        assertEq(pos.amount, 15 ether, "Collateral should be increased");
     }
 
     // ========================================================================
@@ -262,8 +263,8 @@ contract LiquidationEdgeCasesTest is BaseTestModular {
         vm.stopPrank();
 
         // Verify position was created
-        (,,,,,, address positionUser,,,,,,,,,,,,,,,,) = positionManager.positions(1);
+        PositionLib.Position memory pos = positionManager.getPosition(1);
 
-        assertEq(positionUser, user1, "Position should be created");
+        assertEq(pos.user, user1, "Position should be created");
     }
 }
