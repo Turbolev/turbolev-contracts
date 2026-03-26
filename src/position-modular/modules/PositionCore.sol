@@ -64,7 +64,6 @@ contract PositionCore is PositionModuleBase {
         uint64 indexed positionId,
         address indexed user,
         uint256 liquidationPrice,
-        uint256 liquidationFee,
         uint256 timestamp
     );
 
@@ -469,15 +468,7 @@ contract PositionCore is PositionModuleBase {
         if (closePrice == 0) revert InvalidPrice();
 
         if (isLiquidation) {
-            uint256 effectiveLiquidationFeeBps =
-                ISettlementEngine(core.settlementEngine).liquidationFeeBps();
-            if (effectiveLiquidationFeeBps == 0) {
-                effectiveLiquidationFeeBps = PositionLib.LIQUIDATION_FEE_BPS;
-            }
-            uint256 liquidationFee =
-                (pos.amount * effectiveLiquidationFeeBps) / MathLib.BASIS_POINTS;
-
-            emit BetLiquidated(positionId, pos.user, closePrice, liquidationFee, block.timestamp);
+            emit BetLiquidated(positionId, pos.user, closePrice, block.timestamp);
         }
 
         _processSettlement(

@@ -87,44 +87,6 @@ contract SettlementEngineTest is BaseTestModular {
         settlementEngine.setVaultManager(makeAddr("newVM"));
     }
 
-    // ========================================================================
-    // LIQUIDATION FEE CONFIG TESTS
-    // ========================================================================
-
-    function test_SetLiquidationFeeBps_Success() public {
-        // Default value
-        uint16 initialFee = settlementEngine.liquidationFeeBps();
-        assertEq(initialFee, 200, "Default should be 200 bps (2%)");
-
-        // Update
-        vm.prank(owner);
-        settlementEngine.setLiquidationFeeBps(300); // 3%
-
-        // Verify
-        assertEq(settlementEngine.liquidationFeeBps(), 300, "Should be updated to 300");
-    }
-
-    function test_SetLiquidationFeeBps_RevertAboveMax() public {
-        vm.prank(owner);
-        vm.expectRevert();
-        settlementEngine.setLiquidationFeeBps(1001); // Above max 10%
-    }
-
-    function test_SetLiquidationFeeBps_RevertNotOwner() public {
-        vm.prank(user1);
-        vm.expectRevert();
-        settlementEngine.setLiquidationFeeBps(300);
-    }
-
-    function test_SetLiquidationFeeBps_RevertWhenPaused() public {
-        vm.prank(owner);
-        settlementEngine.pause();
-
-        vm.prank(owner);
-        vm.expectRevert();
-        settlementEngine.setLiquidationFeeBps(300);
-    }
-
     function test_SetMaxProfitCapBps_Success() public {
         // Default value
         uint16 initialCap = settlementEngine.maxProfitCapBps();

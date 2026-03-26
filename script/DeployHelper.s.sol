@@ -54,7 +54,6 @@ contract DeployHelper is Script {
     uint256 public constant ORACLE_MAX_PRICE_AGE = 3600; // 1 hour (seconds)
 
     // Settlement Engine config
-    uint16 public constant HOUSE_EDGE_BPS = 200; // 2%
     uint16 public constant WIN_MULTIPLIER_BPS = 30_000; // 3x
     uint256 public constant MIN_BET_AMOUNT = 0.001 ether;
     uint256 public constant MAX_BET_AMOUNT = 1000 ether;

@@ -62,9 +62,6 @@ library PositionLib {
     // This means liquidation happens when loss = (100% - 20%) = 80% of collateral
     uint256 public constant DEFAULT_MAINTENANCE_MARGIN_RATIO = 2000; // 20% in bps
 
-    // Flat Liquidation Fee (in basis points)
-    uint256 public constant LIQUIDATION_FEE_BPS = 200; // Flat 2% for all leverage levels
-
     // Minimum time a position must be held before closing
     // 30s is sufficient to prevent flash loan attacks (block time ~12s)
     // and allows oracle prices to update (Chainlink heartbeat ~20s)
@@ -212,14 +209,6 @@ library PositionLib {
             // SHORT: liquidated when currentPrice >= liquidationPrice
             return currentPrice >= position.liquidationPrice;
         }
-    }
-
-    /**
-     * @notice Calculate liquidation fee (flat rate for all leverage levels)
-     * @return fee Fee in basis points (always 2%)
-     */
-    function calculateLiquidationFee() internal pure returns (uint256) {
-        return LIQUIDATION_FEE_BPS; // Always 2%
     }
 
     /**

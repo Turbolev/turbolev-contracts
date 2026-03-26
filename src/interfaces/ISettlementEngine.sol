@@ -53,7 +53,6 @@ interface ISettlementEngine {
         external
         view
         returns (
-            uint16 houseEdgeBps,
             uint16 winMultiplierBps,
             uint256 minBetAmount,
             uint256 maxBetAmount,
@@ -96,18 +95,6 @@ interface ISettlementEngine {
      * @return oracle ChainlinkOracle contract address
      */
     function chainlinkOracle() external view returns (address oracle);
-
-    /**
-     * @notice Get liquidation fee in basis points
-     * @return liquidationFeeBps Liquidation fee in bps
-     */
-    function liquidationFeeBps() external view returns (uint16);
-
-    /**
-     * @notice Set liquidation fee in basis points
-     * @param _liquidationFeeBps New liquidation fee (max 1000 = 10%)
-     */
-    function setLiquidationFeeBps(uint16 _liquidationFeeBps) external;
 
     /**
      * @notice Get max profit cap in basis points

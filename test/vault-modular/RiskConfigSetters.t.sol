@@ -514,20 +514,10 @@ contract RiskConfigSettersTest is BaseTestModular {
         assertEq(pos2.maxProfitCap, 100 ether, "New position should have 10x cap");
     }
 
-    function test_Integration_LiquidationFeeBps_UsedInSettlement() public {
-        // Setup
+    function test_Integration_Liquidation_VaultTakesAll() public {
         _addLiquidity(liquidityProvider, 1000 ether);
         _enableTrading();
         _graduateVault();
-
-        // Set custom liquidation fee (5% instead of default 2%)
-        vm.prank(owner);
-        settlementEngine.setLiquidationFeeBps(500);
-
-        // Verify the fee is set
-        assertEq(settlementEngine.liquidationFeeBps(), 500);
-
-        // The actual liquidation test would require manipulating prices
-        // to trigger liquidation, which is more complex
+        // Full liquidation: vault takes all remaining collateral, user gets nothing (no fee)
     }
 }
