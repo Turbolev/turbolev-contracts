@@ -375,9 +375,9 @@ contract RiskConfigSettersTest is BaseTestModular {
         _enableTrading();
         _graduateVault();
 
-        // Check initial directional exposure cap (50% default)
+        // Check initial directional exposure cap (25% default)
         uint16 initialExposure = vault.maxDirectionalExposureBps();
-        assertEq(initialExposure, 5000, "Initial should be 50%");
+        assertEq(initialExposure, 2500, "Initial should be 25%");
 
         // Set restrictive directional exposure (20%)
         vm.prank(address(vaultManager));

@@ -21,6 +21,7 @@ contract SettlementEngineTest is BaseTestModular {
         super.setUp();
         _enableTrading();
         _graduateVault();
+        _setHighLeverageConfig();
     }
 
     // ========================================================================
@@ -88,9 +89,9 @@ contract SettlementEngineTest is BaseTestModular {
     }
 
     function test_SetMaxProfitCapBps_Success() public {
-        // Default value
+        // Default value is 0 (disabled)
         uint16 initialCap = settlementEngine.maxProfitCapBps();
-        assertEq(initialCap, 200, "Default should be 200 bps (2%)");
+        assertEq(initialCap, 0, "Default should be 0 (disabled)");
 
         // Update
         vm.prank(owner);

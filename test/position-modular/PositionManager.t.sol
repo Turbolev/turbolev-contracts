@@ -22,6 +22,7 @@ contract PositionManagerTest is BaseTestModular {
         super.setUp();
         _enableTrading();
         _graduateVault(); // Need graduated vault for trading
+        _setHighLeverageConfig();
     }
 
     // ========================================================================

@@ -21,6 +21,7 @@ contract PositionFeeIntegrationTest is BaseTestModular {
         super.setUp();
         _enableTrading();
         _graduateVault();
+        _setHighLeverageConfig();
     }
 
     // ========================================================================

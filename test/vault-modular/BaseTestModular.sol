@@ -423,4 +423,15 @@ contract BaseTestModular is Test {
         // Add enough liquidity to graduate
         _addLiquidity(liquidityProvider, DEFAULT_GRADUATION_THRESHOLD);
     }
+
+    function _setHighLeverageConfig() internal {
+        vm.prank(address(vaultManager));
+        vault.setLeverageTierConfig(
+            100_000 * 1e18, // tier1Threshold
+            500_000 * 1e18, // tier2Threshold
+            50, // tier1MaxLeverage
+            50, // tier2MaxLeverage
+            50 // tier3MaxLeverage
+        );
+    }
 }

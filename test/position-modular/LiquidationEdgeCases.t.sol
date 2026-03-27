@@ -21,6 +21,7 @@ contract LiquidationEdgeCasesTest is BaseTestModular {
         super.setUp();
         _enableTrading();
         _graduateVault();
+        _setHighLeverageConfig();
     }
 
     // ========================================================================
