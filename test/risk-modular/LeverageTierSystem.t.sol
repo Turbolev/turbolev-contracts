@@ -20,6 +20,7 @@ contract LeverageTierSystemTest is BaseTestModular {
 
         // Enable trading
         _enableTrading();
+        _setHighLeverageConfig();
     }
 
     // ========================================================================

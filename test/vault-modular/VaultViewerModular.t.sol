@@ -161,35 +161,31 @@ contract VaultViewerModularTest is BaseTestModular {
     }
 
     // ========================================================================
-    // FUNDING RATE TESTS
+    // PRICE IMPACT TESTS
     // ========================================================================
 
-    function test_getFundingStats() public view {
+    function test_getImpactStats() public view {
         (
-            int256 cumulativeLongRate,
-            int256 cumulativeShortRate,
-            uint256 lastUpdateTime,
-            uint256 currentHourlyRateBps,
-            bool longsPayShorts,
-            uint256 imbalanceBps
-        ) = vaultViewer.getFundingStats(address(vault));
+            uint256 longExposure,
+            uint256 shortExposure,
+            uint256 currentImpactBps,
+            bool isLongDominant,
+            uint256 imbalanceBps,
+            uint256 totalFeesCollected
+        ) = vaultViewer.getImpactStats(address(vault));
 
-        assertEq(cumulativeLongRate, 0, "Cumulative long rate should be 0");
-        assertEq(cumulativeShortRate, 0, "Cumulative short rate should be 0");
-        // lastUpdateTime may be 0 if funding not initialized
+        assertEq(longExposure, 0, "Long exposure should be 0");
+        assertEq(shortExposure, 0, "Short exposure should be 0");
         assertEq(imbalanceBps, 0, "Imbalance should be 0 with no positions");
+        assertEq(totalFeesCollected, 0, "No fees collected yet");
     }
 
-    function test_getCurrentHourlyFundingRate() public view {
-        (uint256 rateBps, bool longsPayShorts, uint256 imbalanceBps, bool hasCounterparty) =
-            vaultViewer.getCurrentHourlyFundingRate(address(vault));
+    function test_getCurrentImpactRate() public view {
+        (uint256 impactBps, bool isLongDominant, uint256 imbalanceBps) =
+            vaultViewer.getCurrentImpactRate(address(vault));
 
-        // With no positions, imbalance is 0 but rate returns tier1 (lowest tier for 0-20% imbalance)
-        // This is expected behavior - rate is tier1 even with no imbalance
         assertEq(imbalanceBps, 0, "Imbalance should be 0");
-        assertFalse(hasCounterparty, "No counterparty with no positions");
-        // Rate is tier1 (1 bps) since 0% imbalance falls in tier1 range (0-20%)
-        assertEq(rateBps, 1, "Rate should be tier1 (1 bps) for 0-20% imbalance range");
+        assertEq(impactBps, 0, "Impact should be 0 with no exposure");
     }
 
     // ========================================================================
@@ -328,35 +324,18 @@ contract VaultViewerModularTest is BaseTestModular {
     }
 
     // ========================================================================
-    // FUNDING LIQUIDATION TESTS
+    // SIMULATE EXECUTION PRICE TESTS
     // ========================================================================
 
-    function test_checkFundingLiquidation() public view {
-        (bool isLiquidatable, int256 fundingOwed, uint256 effectiveCollateral) = vaultViewer.checkFundingLiquidation(
-            address(vault),
-            100 ether, // collateral
-            0, // entryRateLong
-            0, // entryRateShort
-            10 ether, // positionSize
-            1, // direction (LONG)
-            2000 // maintenanceMarginRatio (20%)
-        );
+    function test_simulateExecutionPrice_NoExposure() public view {
+        uint256 markPrice = 1000e18;
+        uint256 positionSize = 100e18; // notional = collateral * leverage
+        (uint256 execPrice, uint256 impactFee, uint256 impactBps, bool isCrowded) =
+            vaultViewer.simulateExecutionPrice(address(vault), markPrice, 1, positionSize);
 
-        // With no funding enabled or rates, should not be liquidatable
-        assertFalse(isLiquidatable, "Should not be liquidatable with no funding");
-        assertEq(effectiveCollateral, 100 ether, "Effective collateral should equal input");
-    }
-
-    function test_calculatePositionFundingOwed() public view {
-        int256 fundingOwed = vaultViewer.calculatePositionFundingOwed(
-            address(vault),
-            0, // entryRateLong
-            0, // entryRateShort
-            10 ether, // positionSize
-            1 // direction (LONG)
-        );
-
-        // With no funding enabled or rates, owed should be 0
-        assertEq(fundingOwed, 0, "Funding owed should be 0");
+        assertEq(execPrice, markPrice, "No impact with no exposure");
+        assertEq(impactFee, 0, "No fee with no exposure");
+        assertEq(impactBps, 0, "No impact bps with no exposure");
+        assertFalse(isCrowded, "Not crowded with no exposure");
     }
 }

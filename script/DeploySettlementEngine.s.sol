@@ -56,7 +56,7 @@ contract DeploySettlementEngine is DeployHelper {
             // Apply config (only for new deployments)
             console.log("Applying configuration...");
             SettlementEngine(settlementEngine)
-                .updateConfig(HOUSE_EDGE_BPS, WIN_MULTIPLIER_BPS, MIN_BET_AMOUNT, MAX_BET_AMOUNT);
+                .updateConfig(WIN_MULTIPLIER_BPS, MIN_BET_AMOUNT, MAX_BET_AMOUNT);
             SettlementEngine(settlementEngine).setMaxProfitCapBps(MAX_PROFIT_CAP_BPS);
 
             console.log("[SUCCESS] Deployed new SettlementEngine proxy");
@@ -80,14 +80,6 @@ contract DeploySettlementEngine is DeployHelper {
      */
     function _reconnectContracts() internal {
         console.log("\n--- Reconnecting Contracts ---");
-
-        // Only reconnect if dependencies are available
-        if (_isContractDeployed(blocksenseOracle)) {
-            // DEPRECATED:             SettlementEngine(settlementEngine).setBlocksenseOracle(blocksenseOracle);
-            console.log("Reconnected BlocksenseOracle to SettlementEngine");
-        } else {
-            console.log("WARNING: BlocksenseOracle not set - skipping connection");
-        }
 
         if (_isContractDeployed(vaultManager)) {
             SettlementEngine(settlementEngine).setVaultManager(vaultManager);

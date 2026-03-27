@@ -12,8 +12,6 @@ import "./VaultRouter.sol";
 import "./VaultAccessController.sol";
 import "../interfaces/IVaultManager.sol";
 import "../interfaces/IVaultRouter.sol";
-import "../interfaces/IModuleRegistry.sol";
-import "../interfaces/IVaultRegistry.sol";
 
 /**
  * @title VaultManager
@@ -57,12 +55,6 @@ contract VaultManager is
     /// @notice VaultRewards module address
     address public rewardsModule;
 
-    /// @notice TimelockController address (for governance operations via schedule/execute)
-    address public timelockController;
-
-    /// @notice MultisigWallet address
-    address public multisigWallet;
-
     /// @notice Mapping: projectToken => vault address
     mapping(address => address) public vaultsByProjectToken;
 
@@ -72,23 +64,11 @@ contract VaultManager is
     /// @notice Mapping: vault address => vault info
     mapping(address => IVaultManager.VaultInfo) public vaultInfos;
 
-    /// @notice ModuleRegistry for tracking module versions
-    IModuleRegistry public moduleRegistry;
-
-    /// @notice VaultRegistry for tracking vault configurations
-    IVaultRegistry public vaultRegistry;
-
-    /// @notice Current module versions (for new vaults)
-    string public currentRouterVersion;
-    string public currentCoreVersion;
-    string public currentFundingVersion;
-    string public currentRewardsVersion;
-
     // ========================================================================
     // STORAGE GAP
     // ========================================================================
 
-    uint256[24] private __gap;
+    uint256[30] private __gap;
 
     // ========================================================================
     // CONSTANTS
@@ -126,11 +106,6 @@ contract VaultManager is
     event AccessControllerUpdated(address indexed oldController, address indexed newController);
     event VaultRouterImplUpdated(address indexed oldImpl, address indexed newImpl);
     event ModulesUpdated(address coreModule, address fundingModule, address rewardsModule);
-    event ModuleRegistryUpdated(address indexed oldRegistry, address indexed newRegistry);
-    event VaultRegistryUpdated(address indexed oldRegistry, address indexed newRegistry);
-    event ModuleVersionsUpdated(
-        string routerVersion, string coreVersion, string fundingVersion, string rewardsVersion
-    );
 
     // Emergency events
     event EmergencyPauseVault(address indexed vault, address indexed caller, uint256 timestamp);
@@ -166,13 +141,6 @@ contract VaultManager is
         _;
     }
 
-    modifier onlyMultisig() {
-        if (msg.sender != multisigWallet) {
-            revert NotAuthorized();
-        }
-        _;
-    }
-
     modifier onlyEmergencyRole() {
         if (!VaultAccessController(accessController).hasEmergencyRole(msg.sender)) {
             revert NotAuthorized();
@@ -197,8 +165,6 @@ contract VaultManager is
      * @param _coreModule VaultCore module address
      * @param _fundingModule VaultFunding module address
      * @param _rewardsModule VaultRewards module address
-     * @param _timelockController TimelockController address
-     * @param _multisigWallet MultisigWallet address
      */
     function initialize(
         address initialOwner,
@@ -206,9 +172,7 @@ contract VaultManager is
         address _vaultRouterImpl,
         address _coreModule,
         address _fundingModule,
-        address _rewardsModule,
-        address _timelockController,
-        address _multisigWallet
+        address _rewardsModule
     ) public initializer {
         if (initialOwner == address(0)) revert InvalidAddress();
         if (_accessController == address(0)) revert InvalidAddress();
@@ -227,8 +191,6 @@ contract VaultManager is
         coreModule = _coreModule;
         fundingModule = _fundingModule;
         rewardsModule = _rewardsModule;
-        timelockController = _timelockController;
-        multisigWallet = _multisigWallet;
     }
 
     // ========================================================================
@@ -305,19 +267,6 @@ contract VaultManager is
 
         emit ModularVaultCreated(_projectToken, vaultAddress, coreModule, block.timestamp);
         emit VaultCreated(_projectToken, vaultAddress, false, block.timestamp);
-
-        // Register with VaultRegistry if available
-        if (address(vaultRegistry) != address(0)) {
-            try vaultRegistry.registerVault(
-                vaultAddress,
-                _projectToken,
-                currentRouterVersion,
-                currentCoreVersion,
-                currentFundingVersion,
-                currentRewardsVersion
-            ) { }
-                catch { }
-        }
 
         return vaultAddress;
     }
@@ -419,35 +368,35 @@ contract VaultManager is
     /**
      * @notice Pause vault by project token
      */
-    function pauseVault(address _projectToken) external onlyMultisig {
+    function pauseVault(address _projectToken) external onlyEmergencyRole {
         IVaultRouter(_getVault(_projectToken)).pause();
     }
 
     /**
      * @notice Unpause vault by project token
      */
-    function unpauseVault(address _projectToken) external onlyMultisig {
+    function unpauseVault(address _projectToken) external onlyEmergencyRole {
         IVaultRouter(_getVault(_projectToken)).unpause();
     }
 
     /**
      * @notice Pause vault by address
      */
-    function pauseVaultByAddress(address vault) public onlyMultisig {
+    function pauseVaultByAddress(address vault) public onlyEmergencyRole {
         IVaultRouter(vault).pause();
     }
 
     /**
      * @notice Unpause vault by address
      */
-    function unpauseVaultByAddress(address vault) public onlyMultisig {
+    function unpauseVaultByAddress(address vault) public onlyEmergencyRole {
         IVaultRouter(vault).unpause();
     }
 
     /**
      * @notice Batch pause vaults
      */
-    function batchPauseVaults(address[] calldata vaults) external onlyMultisig {
+    function batchPauseVaults(address[] calldata vaults) external onlyEmergencyRole {
         for (uint256 i = 0; i < vaults.length; i++) {
             pauseVaultByAddress(vaults[i]);
         }
@@ -456,7 +405,7 @@ contract VaultManager is
     /**
      * @notice Batch unpause vaults
      */
-    function batchUnpauseVaults(address[] calldata vaults) external onlyMultisig {
+    function batchUnpauseVaults(address[] calldata vaults) external onlyEmergencyRole {
         for (uint256 i = 0; i < vaults.length; i++) {
             unpauseVaultByAddress(vaults[i]);
         }
@@ -465,7 +414,7 @@ contract VaultManager is
     /**
      * @notice Emergency pause all
      */
-    function emergencyPauseAll() external onlyMultisig {
+    function emergencyPauseAll() external onlyEmergencyRole {
         _pause();
 
         for (uint256 i = 0; i < allVaults.length; i++) {
@@ -485,7 +434,7 @@ contract VaultManager is
     /**
      * @notice Emergency unpause all
      */
-    function emergencyUnpauseAll() external onlyMultisig {
+    function emergencyUnpauseAll() external onlyEmergencyRole {
         _unpause();
 
         for (uint256 i = 0; i < allVaults.length; i++) {
@@ -588,11 +537,6 @@ contract VaultManager is
         if (info.vaultAddress == address(0)) revert VaultNotFound();
         info.isActive = false;
         emit VaultDeactivated(vault, block.timestamp);
-
-        // Sync to VaultRegistry if available
-        if (address(vaultRegistry) != address(0)) {
-            try vaultRegistry.deactivateVault(vault) { } catch { }
-        }
     }
 
     function reactivateVault(address vault) external onlyOwner whenNotPaused {
@@ -600,11 +544,6 @@ contract VaultManager is
         if (info.vaultAddress == address(0)) revert VaultNotFound();
         info.isActive = true;
         emit VaultReactivated(vault, block.timestamp);
-
-        // Sync to VaultRegistry if available
-        if (address(vaultRegistry) != address(0)) {
-            try vaultRegistry.reactivateVault(vault) { } catch { }
-        }
     }
 
     // ========================================================================
@@ -650,56 +589,6 @@ contract VaultManager is
         fundingModule = _fundingModule;
         rewardsModule = _rewardsModule;
         emit ModulesUpdated(_coreModule, _fundingModule, _rewardsModule);
-    }
-
-    function setTimelockController(address _timelockController) external onlyOwner whenNotPaused {
-        timelockController = _timelockController;
-    }
-
-    function setMultisigWallet(address _multisigWallet) external onlyOwner whenNotPaused {
-        multisigWallet = _multisigWallet;
-    }
-
-    /**
-     * @notice Set ModuleRegistry address
-     * @param _moduleRegistry ModuleRegistry address
-     */
-    function setModuleRegistry(address _moduleRegistry) external onlyOwner whenNotPaused {
-        if (_moduleRegistry == address(0)) revert InvalidAddress();
-        address oldRegistry = address(moduleRegistry);
-        moduleRegistry = IModuleRegistry(_moduleRegistry);
-        emit ModuleRegistryUpdated(oldRegistry, _moduleRegistry);
-    }
-
-    /**
-     * @notice Set VaultRegistry address
-     * @param _vaultRegistry VaultRegistry address
-     */
-    function setVaultRegistry(address _vaultRegistry) external onlyOwner whenNotPaused {
-        if (_vaultRegistry == address(0)) revert InvalidAddress();
-        address oldRegistry = address(vaultRegistry);
-        vaultRegistry = IVaultRegistry(_vaultRegistry);
-        emit VaultRegistryUpdated(oldRegistry, _vaultRegistry);
-    }
-
-    /**
-     * @notice Set current module versions for new vaults
-     * @param routerVersion Router version string
-     * @param coreVersion Core module version string
-     * @param fundingVersion Funding module version string
-     * @param rewardsVersion Rewards module version string
-     */
-    function setModuleVersions(
-        string calldata routerVersion,
-        string calldata coreVersion,
-        string calldata fundingVersion,
-        string calldata rewardsVersion
-    ) external onlyOwner whenNotPaused {
-        currentRouterVersion = routerVersion;
-        currentCoreVersion = coreVersion;
-        currentFundingVersion = fundingVersion;
-        currentRewardsVersion = rewardsVersion;
-        emit ModuleVersionsUpdated(routerVersion, coreVersion, fundingVersion, rewardsVersion);
     }
 
     function pause() external onlyOwner {
@@ -804,28 +693,6 @@ contract VaultManager is
 
     function version() external pure returns (string memory) {
         return "3.1.0-modular";
-    }
-
-    /**
-     * @notice Get current module versions
-     * @return routerVersion Current router version
-     * @return coreVersion Current core version
-     * @return fundingVersion Current funding version
-     * @return rewardsVersion Current rewards version
-     */
-    function getCurrentModuleVersions()
-        external
-        view
-        returns (
-            string memory routerVersion,
-            string memory coreVersion,
-            string memory fundingVersion,
-            string memory rewardsVersion
-        )
-    {
-        return (
-            currentRouterVersion, currentCoreVersion, currentFundingVersion, currentRewardsVersion
-        );
     }
 }
 

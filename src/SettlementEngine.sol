@@ -7,8 +7,8 @@ import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 // NOTE: Direct oracle imports removed - all oracle logic via PriceFeedManager
-import "./libraries/PositionLib.sol";
-import "./libraries/MathLib.sol";
+import "./libraries/position/PositionLib.sol";
+import "./libraries/math/MathLib.sol";
 import "./interfaces/IVaultManager.sol";
 import "./interfaces/IAssetVault.sol";
 import "./interfaces/IPriceFeedManager.sol";
@@ -20,7 +20,6 @@ import "./interfaces/IVaultAccessController.sol";
  *
  * Features:
  * - Calculate payout based on win/loss
- * - House edge management
  * - Win multiplier configuration
  * - Settlement history tracking
  * - UUPS Upgradeable pattern
@@ -36,9 +35,6 @@ contract SettlementEngine is
     // CONSTANTS
     // ========================================================================
 
-    /// @notice Default house edge in bps (2%)
-    uint16 public constant DEFAULT_HOUSE_EDGE_BPS = 200;
-
     /// @notice Default win multiplier in bps (3x)
     uint16 public constant DEFAULT_WIN_MULTIPLIER_BPS = 30_000;
 
@@ -48,15 +44,12 @@ contract SettlementEngine is
     /// @notice Default max bet amount (1000 ether)
     uint256 public constant DEFAULT_MAX_BET_AMOUNT = 1000 ether;
 
-    /// @notice Default max profit cap in bps (2%)
-    uint16 public constant DEFAULT_MAX_PROFIT_CAP_BPS = 200;
+    /// @notice Default max profit cap in bps (0 = disabled, only 3x collateral cap applies)
+    uint16 public constant DEFAULT_MAX_PROFIT_CAP_BPS = 0;
 
     // ========================================================================
     // STATE VARIABLES
     // ========================================================================
-
-    /// @notice House edge in bps (500 = 5%)
-    uint16 public houseEdgeBps;
 
     /// @notice Win multiplier in bps (19500 = 1.95x)
     uint16 public winMultiplierBps;
@@ -79,9 +72,6 @@ contract SettlementEngine is
     /// @notice Max profit cap in bps (200 = 2% of vault USD value)
     uint16 public maxProfitCapBps;
 
-    /// @notice Liquidation fee in bps (200 = 2% flat fee)
-    uint16 public liquidationFeeBps;
-
     /// @notice Access controller for role-based access
     IVaultAccessController public accessController;
 
@@ -89,9 +79,8 @@ contract SettlementEngine is
     // STORAGE GAP (for future upgrades)
     // ========================================================================
 
-    /// @dev Storage gap to allow for new variables in future versions
-    /// @notice Currently using 11 storage slots, reserving 39 slots for future use
-    uint256[39] private __gap;
+    /// @dev Storage gap to allow for new variables in future upgrades
+    uint256[40] private __gap;
 
     // ========================================================================
     // STRUCTS
@@ -121,9 +110,7 @@ contract SettlementEngine is
         uint256 timestamp
     );
 
-    event ConfigUpdated(
-        uint16 houseEdgeBps, uint16 winMultiplierBps, uint256 minBetAmount, uint256 maxBetAmount
-    );
+    event ConfigUpdated(uint16 winMultiplierBps, uint256 minBetAmount, uint256 maxBetAmount);
 
     event PositionManagerUpdated(address indexed oldAddress, address indexed newAddress);
     event VaultManagerUpdated(address indexed oldAddress, address indexed newAddress);
@@ -138,7 +125,6 @@ contract SettlementEngine is
     );
 
     event MaxProfitCapBpsUpdated(uint16 oldBps, uint16 newBps);
-    event LiquidationFeeBpsUpdated(uint16 oldBps, uint16 newBps);
     event AccessControllerUpdated(address indexed oldAddress, address indexed newAddress);
     event EmergencyUpgrade(
         address indexed newImplementation, address indexed caller, uint256 timestamp
@@ -189,12 +175,10 @@ contract SettlementEngine is
         __UUPSUpgradeable_init();
 
         // Default config
-        houseEdgeBps = DEFAULT_HOUSE_EDGE_BPS;
         winMultiplierBps = DEFAULT_WIN_MULTIPLIER_BPS;
         minBetAmount = DEFAULT_MIN_BET_AMOUNT;
         maxBetAmount = DEFAULT_MAX_BET_AMOUNT;
         maxProfitCapBps = DEFAULT_MAX_PROFIT_CAP_BPS;
-        liquidationFeeBps = uint16(PositionLib.LIQUIDATION_FEE_BPS); // Default 2%
     }
 
     // ========================================================================
@@ -225,9 +209,7 @@ contract SettlementEngine is
         view
         returns (uint256 potentialPayout)
     {
-        uint256 grossPayout = (amount * winMultiplierBps) / MathLib.BASIS_POINTS;
-        uint256 houseEdge = (grossPayout * houseEdgeBps) / MathLib.BASIS_POINTS;
-        potentialPayout = grossPayout - houseEdge;
+        potentialPayout = (amount * winMultiplierBps) / MathLib.BASIS_POINTS;
         return potentialPayout;
     }
 
@@ -269,38 +251,26 @@ contract SettlementEngine is
         // Determine win/loss
         won = !isLiquidation && pnl > 0;
 
-        // Calculate liquidation fee if applicable
-        uint256 liquidationFee = 0;
-        if (isLiquidation) {
-            // Use configurable liquidationFeeBps (falls back to default if not set)
-            uint256 effectiveLiquidationFeeBps =
-                liquidationFeeBps > 0 ? liquidationFeeBps : PositionLib.LIQUIDATION_FEE_BPS;
-            liquidationFee = (position.amount * effectiveLiquidationFeeBps) / MathLib.BASIS_POINTS;
-        }
-
         // Calculate final payout/settlement
         payout = 0;
         fee = 0;
 
         if (isLiquidation) {
-            // Liquidation: User gets remaining collateral minus liquidation fee (if any)
-            // Remaining = collateral - abs(loss) - liquidation fee
-            uint256 absLoss = pnl < 0 ? uint256(-pnl) : 0;
-            uint256 remaining = position.amount > absLoss ? position.amount - absLoss : 0;
-            payout = remaining > liquidationFee ? remaining - liquidationFee : 0;
-            fee = liquidationFee; // Now flat 2% (calculated from PositionLib)
+            // Full liquidation: vault takes all remaining collateral, user gets nothing
+            payout = 0;
+            fee = 0;
         } else if (won) {
-            // Won: User gets collateral + profit - house edge
+            // Won: User gets collateral + profit (no house edge)
             uint256 profit = uint256(pnl);
 
             // Apply profit cap
             // Cap 1: 3× collateral (stored in position at open time)
             uint256 cap1 = position.maxProfitCap; // 3× collateral
 
-            // Cap 2: 2% of vault token value (at settlement time)
+            // Cap 2: % of vault TVL (disabled by default, maxProfitCapBps = 0)
             uint256 cap2 = _calculateVaultCap(position.projectToken);
 
-            // Use minimum of two caps
+            // Use minimum of two caps (cap2 ignored when 0)
             uint256 maxProfit = cap1;
             if (cap2 > 0 && cap2 < cap1) {
                 maxProfit = cap2;
@@ -318,11 +288,8 @@ contract SettlementEngine is
                 );
             }
 
-            uint256 grossPayout = position.amount + cappedProfit;
-
-            // Apply house edge on capped profit
-            fee = (cappedProfit * houseEdgeBps) / MathLib.BASIS_POINTS;
-            payout = grossPayout - fee;
+            payout = position.amount + cappedProfit;
+            fee = 0;
         } else {
             // Lost: User gets collateral minus loss
             uint256 absLoss = uint256(-pnl); // pnl is negative when user loses
@@ -404,25 +371,21 @@ contract SettlementEngine is
     /**
      * @notice Update settlement config
      */
-    function updateConfig(
-        uint16 _houseEdgeBps,
-        uint16 _winMultiplierBps,
-        uint256 _minBetAmount,
-        uint256 _maxBetAmount
-    ) external onlyOwner whenNotPaused {
-        // Validate
-        if (_houseEdgeBps > 1000) revert InvalidConfig(); // Max 10% house edge
+    function updateConfig(uint16 _winMultiplierBps, uint256 _minBetAmount, uint256 _maxBetAmount)
+        external
+        onlyOwner
+        whenNotPaused
+    {
         if (_winMultiplierBps < MathLib.BASIS_POINTS) revert InvalidConfig(); // Min 1x multiplier (10000 bps)
         if (_winMultiplierBps > MathLib.BASIS_POINTS * 100) revert InvalidConfig(); // Max 100x multiplier
         if (_minBetAmount == 0) revert InvalidConfig();
         if (_maxBetAmount < _minBetAmount) revert InvalidConfig();
 
-        houseEdgeBps = _houseEdgeBps;
         winMultiplierBps = _winMultiplierBps;
         minBetAmount = _minBetAmount;
         maxBetAmount = _maxBetAmount;
 
-        emit ConfigUpdated(_houseEdgeBps, _winMultiplierBps, _minBetAmount, _maxBetAmount);
+        emit ConfigUpdated(_winMultiplierBps, _minBetAmount, _maxBetAmount);
     }
 
     /**
@@ -511,17 +474,6 @@ contract SettlementEngine is
     }
 
     /**
-     * @notice Set liquidation fee in basis points
-     * @param _liquidationFeeBps New liquidation fee (max 1000 = 10%)
-     */
-    function setLiquidationFeeBps(uint16 _liquidationFeeBps) external onlyOwner whenNotPaused {
-        if (_liquidationFeeBps > 1000) revert InvalidConfig();
-        uint16 oldBps = liquidationFeeBps;
-        liquidationFeeBps = _liquidationFeeBps;
-        emit LiquidationFeeBpsUpdated(oldBps, _liquidationFeeBps);
-    }
-
-    /**
      * @notice Authorize upgrade with Timelock + Emergency Guardian pattern
      * @dev Two paths for upgrade:
      *      1. Normal path: UPGRADER_ROLE (Timelock) - no restrictions
@@ -557,10 +509,10 @@ contract SettlementEngine is
     // ========================================================================
 
     /**
-     * @notice Calculate vault-based cap (2% of vault token value)
+     * @notice Calculate vault-based profit cap (maxProfitCapBps % of vault TVL)
      * @param projectToken Project token address
-     * @return vaultCap 2% of vault liquidity in tokens (0 if not available)
-     * @dev Used at settlement time to compare with 3× collateral cap
+     * @return vaultCap Cap in tokens (0 if disabled or vault not available)
+     * @dev Returns 0 when maxProfitCapBps = 0, effectively disabling the TVL-based cap
      */
     function _calculateVaultCap(address projectToken) internal view returns (uint256) {
         if (vaultManager == address(0)) {
@@ -602,14 +554,13 @@ contract SettlementEngine is
         external
         view
         returns (
-            uint16 _houseEdgeBps,
             uint16 _winMultiplierBps,
             uint256 _minBetAmount,
             uint256 _maxBetAmount,
             bool _paused
         )
     {
-        return (houseEdgeBps, winMultiplierBps, minBetAmount, maxBetAmount, paused());
+        return (winMultiplierBps, minBetAmount, maxBetAmount, paused());
     }
 
     /**

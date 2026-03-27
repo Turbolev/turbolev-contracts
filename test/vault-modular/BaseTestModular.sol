@@ -5,10 +5,10 @@ import "forge-std/Test.sol";
 import "forge-std/console.sol";
 
 import "../../src/SettlementEngine.sol";
-import "../../src/oracles/BlocksenseOracle.sol";
-import "../../src/oracles/ChainlinkOracle.sol";
+import "../../src/oracles/PythOracle.sol";
 import "../../src/PriceFeedManager.sol";
 import "../../src/interfaces/IPriceFeedManager.sol";
+import "../../src/interfaces/oracles/IPyth.sol";
 
 // Modular Vault imports
 import "../../src/vault-modular/VaultRouter.sol";
@@ -17,18 +17,13 @@ import "../../src/vault-modular/VaultManager.sol" as ModularVM;
 import "../../src/vault-modular/modules/VaultCore.sol";
 import "../../src/vault-modular/modules/VaultFunding.sol";
 import "../../src/vault-modular/modules/VaultRewards.sol";
-import "../../src/vault-modular/libraries/VaultStorageLib.sol";
+import "../../src/libraries/vault/VaultStorageLib.sol";
 import "../../src/interfaces/IVaultRouter.sol";
 
 // Modular Position imports
 import "../../src/position-modular/PositionRouter.sol";
 import "../../src/position-modular/modules/PositionCore.sol";
-import "../../src/position-modular/modules/PositionPendingClose.sol";
 
-import "../../src/interfaces/ICLFeedRegistryAdapter.sol";
-import "../../src/interfaces/ICLAggregatorAdapter.sol";
-import "../../src/interfaces/IChainlinkAggregatorV3.sol";
-import "../../src/interfaces/chainlink/IChainlinkAggregator.sol";
 import "../../src/interfaces/IPriceFeedManager.sol";
 import "../../src/interfaces/oracles/IBaseOracle.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
@@ -37,182 +32,46 @@ import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 // MOCK CONTRACTS
 // ========================================================================
 
-contract MockRegistry is ICLFeedRegistryAdapter {
-    mapping(address => mapping(address => int256)) private prices;
-    mapping(address => mapping(address => uint8)) private decimalsMapping;
-    mapping(address => mapping(address => uint256)) private timestamps;
+contract MockPyth is IPyth {
+    mapping(bytes32 => Price) private _prices;
 
-    function setPrice(address base, address quote, int256 price) external {
-        prices[base][quote] = price;
-        timestamps[base][quote] = block.timestamp;
+    function setPrice(bytes32 priceId, int64 price, int32 expo, uint256 publishTime) external {
+        _prices[priceId] = Price({ price: price, conf: 0, expo: expo, publishTime: publishTime });
     }
 
-    function setDecimals(address base, address quote, uint8 _decimals) external {
-        decimalsMapping[base][quote] = _decimals;
+    function getPriceUnsafe(bytes32 id) external view override returns (Price memory) {
+        return _prices[id];
     }
 
-    function decimals(address base, address quote) external view override returns (uint8) {
-        uint8 d = decimalsMapping[base][quote];
-        return d == 0 ? 18 : d;
-    }
-
-    function latestRoundData(address base, address quote)
+    function getPriceNoOlderThan(bytes32 id, uint256 maxAge)
         external
         view
         override
-        returns (
-            uint80 roundId,
-            int256 answer,
-            uint256 startedAt,
-            uint256 updatedAt,
-            uint80 answeredInRound
-        )
+        returns (Price memory)
     {
-        int256 price = prices[base][quote];
-        uint256 ts = timestamps[base][quote];
-        if (ts == 0) ts = block.timestamp;
-        return (1, price == 0 ? int256(100e18) : price, ts, ts, 1);
+        Price memory p = _prices[id];
+        require(p.publishTime > 0 && (block.timestamp - p.publishTime) <= maxAge, "Price too old");
+        return p;
     }
 
-    function latestAnswer(address base, address quote) external view returns (int256) {
-        int256 price = prices[base][quote];
-        return price == 0 ? int256(100e18) : price;
+    function getPrice(bytes32 id) external view override returns (Price memory) {
+        return _prices[id];
     }
 
-    function description(address, address) external pure override returns (string memory) {
-        return "Mock Registry";
+    function getEmaPrice(bytes32 id) external view override returns (Price memory) {
+        return _prices[id];
     }
 
-    function version(address, address) external pure returns (uint256) {
-        return 1;
-    }
+    function updatePriceFeeds(bytes[] calldata) external payable override { }
 
-    function getRoundData(address, address, uint80)
+    function updatePriceFeedsIfNecessary(bytes[] calldata, bytes32[] calldata, uint64[] calldata)
         external
-        view
+        payable
         override
-        returns (uint80, int256, uint256, uint256, uint80)
-    {
-        return (1, int256(100e18), block.timestamp, block.timestamp, 1);
-    }
+    { }
 
-    function latestRound(address, address) external pure override returns (uint256) {
-        return 1;
-    }
-
-    function getAnswer(address, address, uint256) external pure returns (int256) {
-        return int256(100e18);
-    }
-
-    function getTimestamp(address, address, uint256) external view returns (uint256) {
-        return block.timestamp;
-    }
-
-    function getFeed(address, address) external pure returns (address) {
-        return address(0);
-    }
-
-    function isFeedEnabled(address) external pure returns (bool) {
-        return true;
-    }
-
-    function getPhaseRange(address, address, uint16) external pure returns (uint80, uint80) {
-        return (1, 1);
-    }
-
-    function getCurrentPhaseId(address, address) external pure returns (uint16) {
-        return 1;
-    }
-
-    function getPhaseId(address, address, uint80) external pure returns (uint16) {
-        return 1;
-    }
-
-    function getPreviousRoundId(address, address, uint80) external pure returns (uint80) {
+    function getUpdateFee(bytes[] calldata) external pure override returns (uint256) {
         return 0;
-    }
-
-    function getNextRoundId(address, address, uint80) external pure returns (uint80) {
-        return 2;
-    }
-}
-
-contract MockAdapter is ICLAggregatorAdapter, IChainlinkAggregatorV3 {
-    address public dataFeedStore;
-    uint256 public id;
-    uint256 public mockTimestamp;
-    address public baseToken;
-    address public quoteToken;
-
-    constructor(address _dataFeedStore, uint256 _id) {
-        dataFeedStore = _dataFeedStore;
-        id = _id;
-        mockTimestamp = block.timestamp;
-    }
-
-    function setTokens(address _baseToken, address _quoteToken) external {
-        baseToken = _baseToken;
-        quoteToken = _quoteToken;
-    }
-
-    function setMockTimestamp(uint256 _timestamp) external {
-        mockTimestamp = _timestamp;
-    }
-
-    function latestRoundData()
-        external
-        view
-        override(IChainlinkAggregator, IChainlinkAggregatorV3)
-        returns (uint80, int256, uint256, uint256, uint80)
-    {
-        if (baseToken != address(0) && quoteToken != address(0)) {
-            int256 price = MockRegistry(dataFeedStore).latestAnswer(baseToken, quoteToken);
-            return (1, price, mockTimestamp, mockTimestamp, 1);
-        }
-        return (1, 100e18, mockTimestamp, mockTimestamp, 1);
-    }
-
-    function decimals()
-        external
-        pure
-        override(IChainlinkAggregator, IChainlinkAggregatorV3)
-        returns (uint8)
-    {
-        return 18;
-    }
-
-    function description()
-        external
-        pure
-        override(IChainlinkAggregator, IChainlinkAggregatorV3)
-        returns (string memory)
-    {
-        return "Mock Adapter";
-    }
-
-    function version() external pure override returns (uint256) {
-        return 1;
-    }
-
-    function getRoundData(uint80)
-        external
-        view
-        override
-        returns (uint80, int256, uint256, uint256, uint80)
-    {
-        if (baseToken != address(0) && quoteToken != address(0)) {
-            int256 price = MockRegistry(dataFeedStore).latestAnswer(baseToken, quoteToken);
-            return (1, price, mockTimestamp, mockTimestamp, 1);
-        }
-        return (1, 100e18, mockTimestamp, mockTimestamp, 1);
-    }
-
-    function latestAnswer() external pure returns (int256) {
-        return 100e18;
-    }
-
-    function latestRound() external pure returns (uint256) {
-        return 1;
     }
 }
 
@@ -282,8 +141,7 @@ contract BaseTestModular is Test {
     PositionRouter public positionManager;
     ModularVM.VaultManager public vaultManager;
     SettlementEngine public settlementEngine;
-    BlocksenseOracle public blocksenseOracle;
-    ChainlinkOracle public chainlinkOracle;
+    PythOracle public pythOracle;
     PriceFeedManager public priceFeedManager;
 
     // Modular Vault contracts
@@ -296,16 +154,17 @@ contract BaseTestModular is Test {
     // Modular Position contracts
     PositionRouter public positionRouterImpl;
     PositionCore public positionCoreModule;
-    PositionPendingClose public positionPendingCloseModule;
 
     // Deployed vault (proxy)
     VaultRouter public vault;
 
     // Mock contracts
-    MockRegistry public mockRegistry;
-    MockAdapter public mockAdapter;
+    MockPyth public mockPyth;
     MockERC20 public projectToken;
     MockERC20 public usdc;
+
+    // Pyth price feed ID for projectToken
+    bytes32 public projectTokenPriceId;
 
     // Test accounts
     address public owner;
@@ -316,8 +175,8 @@ contract BaseTestModular is Test {
     address public priceUpdater;
     address public backend;
     address public keeper;
-    address public mockMultisigWallet;
     address public mockTimelockController;
+    address public mockEmergencyGuardian;
 
     // Test vault address (for convenience)
     address public testVault;
@@ -344,7 +203,7 @@ contract BaseTestModular is Test {
         backend = makeAddr("backend");
         keeper = makeAddr("keeper");
         mockTimelockController = makeAddr("mockTimelockController");
-        mockMultisigWallet = makeAddr("mockMultisigWallet");
+        mockEmergencyGuardian = makeAddr("mockEmergencyGuardian");
 
         // Deploy mock tokens
         projectToken = new MockERC20("Project Token", "PROJ");
@@ -377,28 +236,20 @@ contract BaseTestModular is Test {
     }
 
     function _deployContracts() internal {
-        // Deploy mock registry
-        mockRegistry = new MockRegistry();
+        // Deploy mock Pyth
+        mockPyth = new MockPyth();
+        projectTokenPriceId = keccak256("PROJ/USD");
 
-        // Deploy mock adapter
-        mockAdapter = new MockAdapter(address(mockRegistry), 1);
-
-        // Deploy BlocksenseOracle (upgradeable via ERC1967Proxy)
-        BlocksenseOracle oracleImpl = new BlocksenseOracle();
-        bytes memory oracleInitData = abi.encodeWithSelector(
-            BlocksenseOracle.initialize.selector,
+        // Deploy PythOracle (upgradeable via ERC1967Proxy)
+        PythOracle pythImpl = new PythOracle();
+        bytes memory pythInitData = abi.encodeWithSelector(
+            PythOracle.initialize.selector,
             owner,
+            address(mockPyth),
             3600 // max price age
         );
-        ERC1967Proxy oracleProxy = new ERC1967Proxy(address(oracleImpl), oracleInitData);
-        blocksenseOracle = BlocksenseOracle(payable(address(oracleProxy)));
-
-        // Deploy ChainlinkOracle (upgradeable via ERC1967Proxy)
-        ChainlinkOracle chainlinkImpl = new ChainlinkOracle();
-        bytes memory chainlinkInitData =
-            abi.encodeWithSelector(ChainlinkOracle.initialize.selector, 3600);
-        ERC1967Proxy chainlinkProxy = new ERC1967Proxy(address(chainlinkImpl), chainlinkInitData);
-        chainlinkOracle = ChainlinkOracle(address(chainlinkProxy));
+        ERC1967Proxy pythProxy = new ERC1967Proxy(address(pythImpl), pythInitData);
+        pythOracle = PythOracle(payable(address(pythProxy)));
 
         // Deploy PriceFeedManager (upgradeable via ERC1967Proxy)
         PriceFeedManager priceFeedImpl = new PriceFeedManager();
@@ -427,7 +278,6 @@ contract BaseTestModular is Test {
     function _deployModularPosition() internal {
         // Deploy modules (logic contracts)
         positionCoreModule = new PositionCore();
-        positionPendingCloseModule = new PositionPendingClose();
 
         // Deploy PositionRouter implementation
         positionRouterImpl = new PositionRouter();
@@ -439,8 +289,7 @@ contract BaseTestModular is Test {
             address(settlementEngine), // settlementEngine
             address(vaultManager), // vaultManager
             address(priceFeedManager), // priceFeedManager
-            address(positionCoreModule), // coreModule
-            address(positionPendingCloseModule) // pendingCloseModule
+            address(positionCoreModule) // coreModule
         );
         ERC1967Proxy positionProxy = new ERC1967Proxy(address(positionRouterImpl), positionInitData);
         positionManager = PositionRouter(payable(address(positionProxy)));
@@ -472,9 +321,7 @@ contract BaseTestModular is Test {
             address(vaultRouterImpl),
             address(vaultCoreModule),
             address(vaultFundingModule),
-            address(vaultRewardsModule),
-            mockTimelockController,
-            mockMultisigWallet
+            address(vaultRewardsModule)
         );
         ERC1967Proxy vaultManagerProxy =
             new ERC1967Proxy(address(vaultManagerImpl), vaultManagerInitData);
@@ -488,12 +335,18 @@ contract BaseTestModular is Test {
             mockTimelockController, // admin
             address(vaultManager),
             address(positionManager),
-            mockMultisigWallet
+            address(0) // no multisig in tests
         );
 
-        // Grant POSITION_KEEPER_ROLE to admin for testing
+        // Grant roles for testing
         vm.startPrank(mockTimelockController);
         vaultAccessController.grantRole(vaultAccessController.POSITION_KEEPER_ROLE(), admin);
+        vaultAccessController.grantRole(
+            vaultAccessController.EMERGENCY_ROLE(), mockEmergencyGuardian
+        );
+        vaultAccessController.grantRole(
+            vaultAccessController.GUARDIAN_ROLE(), mockEmergencyGuardian
+        );
         vm.stopPrank();
 
         // Set addresses
@@ -515,44 +368,29 @@ contract BaseTestModular is Test {
     }
 
     function _setupContracts() internal {
-        // Set default price decimals for mock registry
-        mockRegistry.setDecimals(address(projectToken), address(usdc), 18);
+        // Set initial price in mock Pyth (100 USD, expo -8)
+        mockPyth.setPrice(projectTokenPriceId, 100e8, -8, block.timestamp);
 
-        // Set tokens for mock adapter now that they're created
-        mockAdapter.setTokens(address(projectToken), address(usdc));
+        // Configure PythOracle: map projectToken -> priceId
+        pythOracle.setPriceFeedId(address(projectToken), projectTokenPriceId);
 
-        // Configure PriceFeedManager V2.1 with Oracle Registry
-        // 1. Register providers (without feed - feed is per-token in config)
-        IPriceFeedManager.OracleProvider memory chainlinkProvider = IPriceFeedManager.OracleProvider({
-            oracleContract: address(chainlinkOracle),
-            oracleType: IBaseOracle.OracleType.PUSH,
+        // Configure PriceFeedManager with Pyth provider
+        IPriceFeedManager.OracleProvider memory pythProvider = IPriceFeedManager.OracleProvider({
+            oracleContract: address(pythOracle),
+            oracleType: IBaseOracle.OracleType.PULL,
             enabled: true
         });
-        priceFeedManager.registerOracleProvider(
-            priceFeedManager.CHAINLINK_PROVIDER(), chainlinkProvider
-        );
+        priceFeedManager.registerOracleProvider(priceFeedManager.PYTH_PROVIDER(), pythProvider);
 
-        IPriceFeedManager.OracleProvider memory blocksenseProvider = IPriceFeedManager.OracleProvider({
-            oracleContract: address(blocksenseOracle),
-            oracleType: IBaseOracle.OracleType.PUSH,
-            enabled: true
-        });
-        priceFeedManager.registerOracleProvider(
-            priceFeedManager.BLOCKSENSE_PROVIDER(), blocksenseProvider
-        );
-
-        // 2. Configure token with feed addresses
+        // Configure token with Pyth as primary provider
         IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
-            primaryProviderId: priceFeedManager.CHAINLINK_PROVIDER(),
-            secondaryProviderId: priceFeedManager.BLOCKSENSE_PROVIDER(),
-            primaryFeed: address(mockAdapter),
-            secondaryFeed: address(mockAdapter),
+            primaryProviderId: priceFeedManager.PYTH_PROVIDER(),
+            secondaryProviderId: bytes32(0),
+            primaryFeed: address(projectToken),
+            secondaryFeed: address(0),
             usePullMode: false
         });
         priceFeedManager.setPriceFeedConfig(address(projectToken), config);
-
-        // Set default price
-        mockRegistry.setPrice(address(projectToken), address(usdc), 100e18);
     }
 
     function _createVault() internal {
@@ -584,5 +422,16 @@ contract BaseTestModular is Test {
     function _graduateVault() internal {
         // Add enough liquidity to graduate
         _addLiquidity(liquidityProvider, DEFAULT_GRADUATION_THRESHOLD);
+    }
+
+    function _setHighLeverageConfig() internal {
+        vm.prank(address(vaultManager));
+        vault.setLeverageTierConfig(
+            100_000 * 1e18, // tier1Threshold
+            500_000 * 1e18, // tier2Threshold
+            50, // tier1MaxLeverage
+            50, // tier2MaxLeverage
+            50 // tier3MaxLeverage
+        );
     }
 }

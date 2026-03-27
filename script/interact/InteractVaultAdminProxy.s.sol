@@ -77,7 +77,7 @@ contract InteractVaultAdminProxy is Script {
             console.log("Is Graduated:", info.isGraduated);
             console.log("Trading Enabled:", info.tradingEnabled);
             console.log("Is Paused:", v.paused());
-            console.log("Funding Enabled:", v.fundingEnabled());
+            console.log("Impact Enabled:", v.isImpactEnabled());
         }
     }
 
@@ -215,30 +215,30 @@ contract InteractVaultAdminProxy is Script {
         console.log("[SUCCESS] Treasury updated for all vaults");
     }
 
-    function setVaultFundingEnabled(address projectToken, bool enabled) public {
-        console.log("\n=== Set Funding Enabled ===");
+    function setVaultImpactEnabled(address projectToken, bool enabled) public {
+        console.log("\n=== Set Impact Enabled ===");
         console.log("Project Token:", projectToken);
         console.log("Enabled:", enabled);
 
         vm.startBroadcast(deployer);
-        adminProxy.setVaultFundingEnabled(projectToken, enabled);
+        adminProxy.setVaultImpactEnabled(projectToken, enabled);
         vm.stopBroadcast();
 
-        console.log("[SUCCESS] Funding enabled updated");
+        console.log("[SUCCESS] Impact enabled updated");
     }
 
-    function setFundingEnabledForAllVaults(bool enabled) public {
-        console.log("\n=== Set Funding Enabled for All Vaults ===");
+    function setImpactEnabledForAllVaults(bool enabled) public {
+        console.log("\n=== Set Impact Enabled for All Vaults ===");
         console.log("Enabled:", enabled);
 
         vm.startBroadcast(deployer);
-        adminProxy.setFundingEnabledForAllVaults(enabled);
+        adminProxy.setImpactEnabledForAllVaults(enabled);
         vm.stopBroadcast();
 
-        console.log("[SUCCESS] Funding enabled updated for all vaults");
+        console.log("[SUCCESS] Impact enabled updated for all vaults");
     }
 
-    function setVaultFundingConfig(
+    function setVaultImpactConfig(
         address projectToken,
         uint16 tier1,
         uint16 tier2,
@@ -246,7 +246,7 @@ contract InteractVaultAdminProxy is Script {
         uint16 tier4,
         uint16 tier5
     ) public {
-        console.log("\n=== Set Funding Config ===");
+        console.log("\n=== Set Impact Config ===");
         console.log("Project Token:", projectToken);
         console.log("Tier 1:", tier1);
         console.log("Tier 2:", tier2);
@@ -255,10 +255,10 @@ contract InteractVaultAdminProxy is Script {
         console.log("Tier 5:", tier5);
 
         vm.startBroadcast(deployer);
-        adminProxy.setVaultFundingConfig(projectToken, tier1, tier2, tier3, tier4, tier5);
+        adminProxy.setVaultImpactConfig(projectToken, tier1, tier2, tier3, tier4, tier5);
         vm.stopBroadcast();
 
-        console.log("[SUCCESS] Funding config updated");
+        console.log("[SUCCESS] Impact config updated");
     }
 
     function withdrawFees(address projectToken, uint256 amount) public {

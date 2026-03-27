@@ -5,7 +5,7 @@ import "forge-std/Script.sol";
 import "forge-std/console.sol";
 import "../DeployHelper.s.sol";
 import "../../src/position-modular/PositionRouter.sol";
-import "../../src/libraries/PositionLib.sol";
+import "../../src/libraries/position/PositionLib.sol";
 
 contract InteractPositionManager is DeployHelper {
     PositionRouter public pm;
@@ -30,38 +30,6 @@ contract InteractPositionManager is DeployHelper {
         console.log("Liquidation Price:", pos.liquidationPrice);
         console.log("Position Size:", pos.positionSize);
         console.log("Created At:", pos.createdTimestamp);
-    }
-
-    function viewPendingCloseRequests() public view {
-        console.log("\n=== Pending Close Requests ===");
-        uint64[] memory pendingList = pm.getPendingClosePositionIds();
-        console.log("Total pending:", pendingList.length);
-        for (uint256 i = 0; i < pendingList.length && i < 10; i++) {
-            console.log("Position", i, ":", pendingList[i]);
-        }
-        if (pendingList.length > 10) {
-            console.log("... and", pendingList.length - 10, "more");
-        }
-    }
-
-    function viewPendingCloseCount() public view {
-        console.log("\n=== Pending Close Count ===");
-        uint256 count = pm.getPendingCloseCount();
-        console.log("Pending count:", count);
-    }
-
-    function hasPendingCloseRequest(uint64 positionId) public view {
-        console.log("\n=== Pending Close Check ===");
-        bool hasPending = pm.hasPendingCloseRequest(positionId);
-        console.log("Position ID:", positionId);
-        console.log("Has Pending:", hasPending);
-    }
-
-    function cancelPendingClose(uint64 positionId) public {
-        vm.startBroadcast(deployer);
-        pm.cancelPendingClose(positionId);
-        console.log("Pending close cancelled for position:", positionId);
-        vm.stopBroadcast();
     }
 
     /**
@@ -122,6 +90,5 @@ contract InteractPositionManager is DeployHelper {
     function viewModules() public view {
         console.log("\n=== Position Modules ===");
         console.log("Core Module:", pm.getModule(pm.MODULE_CORE()));
-        console.log("PendingClose Module:", pm.getModule(pm.MODULE_PENDING_CLOSE()));
     }
 }

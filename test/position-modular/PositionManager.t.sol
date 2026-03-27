@@ -2,7 +2,7 @@
 pragma solidity ^0.8.22;
 
 import "../vault-modular/BaseTestModular.sol";
-import "../../src/libraries/PositionLib.sol";
+import "../../src/libraries/position/PositionLib.sol";
 
 /**
  * @title PositionManagerTest
@@ -22,6 +22,7 @@ contract PositionManagerTest is BaseTestModular {
         super.setUp();
         _enableTrading();
         _graduateVault(); // Need graduated vault for trading
+        _setHighLeverageConfig();
     }
 
     // ========================================================================
@@ -180,7 +181,7 @@ contract PositionManagerTest is BaseTestModular {
         vm.warp(block.timestamp + 61 seconds);
 
         // Close position
-        positionManager.closePosition(positionId, block.timestamp + 1 hours, 0, "");
+        positionManager.closePosition(positionId, block.timestamp + 1 hours, "");
         vm.stopPrank();
     }
 
@@ -198,7 +199,7 @@ contract PositionManagerTest is BaseTestModular {
         // User2 tries to close - should fail
         vm.startPrank(user2);
         vm.expectRevert();
-        positionManager.closePosition(1, block.timestamp + 1 hours, 0, "");
+        positionManager.closePosition(1, block.timestamp + 1 hours, "");
         vm.stopPrank();
     }
 

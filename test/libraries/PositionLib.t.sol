@@ -3,8 +3,8 @@ pragma solidity ^0.8.22;
 
 import "forge-std/Test.sol";
 import "forge-std/console.sol";
-import "../../src/libraries/PositionLib.sol";
-import "../../src/libraries/MathLib.sol";
+import "../../src/libraries/position/PositionLib.sol";
+import "../../src/libraries/math/MathLib.sol";
 
 /**
  * @title PositionLibWrapper
@@ -86,7 +86,6 @@ contract PositionLibTest is Test {
             2000,
             "DEFAULT_MAINTENANCE_MARGIN_RATIO should be 2000"
         );
-        assertEq(PositionLib.LIQUIDATION_FEE_BPS, 200, "LIQUIDATION_FEE_BPS should be 200");
         // H-05 FIX: MIN_POSITION_HOLD_TIME reduced from 60 to 30 seconds
         assertEq(
             PositionLib.MIN_POSITION_HOLD_TIME, 30, "MIN_POSITION_HOLD_TIME should be 30 (H-05 fix)"
@@ -279,16 +278,6 @@ contract PositionLibTest is Test {
         // Current price below liquidation → not liquidated
         assertFalse(PositionLib.isLiquidated(pos, 107e18), "Short should not be liquidated at 107");
         assertFalse(PositionLib.isLiquidated(pos, 100e18), "Short should not be liquidated at 100");
-    }
-
-    // ========================================================================
-    // CALCULATE LIQUIDATION FEE TESTS
-    // ========================================================================
-
-    function test_CalculateLiquidationFee_AlwaysFlat() public {
-        // Test that fee is always 200 BPS (2%) - flat rate for all positions
-        // 8.5 FIX: leverage parameter removed since it was unused
-        assertEq(PositionLib.calculateLiquidationFee(), 200, "Fee should be 200 BPS (2%)");
     }
 
     // ========================================================================
@@ -654,9 +643,8 @@ contract PositionLibTest is Test {
             minCloseTime: block.timestamp + 60,
             initialMargin: 1e18,
             addedMargin: 0,
-            entryFundingRateLong: 0,
-            entryFundingRateShort: 0,
-            lastFundingSettlement: block.timestamp
+            impactFee: 0,
+            executionPrice: 0
         });
     }
 }

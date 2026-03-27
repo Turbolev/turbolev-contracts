@@ -170,95 +170,54 @@ contract InteractVaultAccessController is DeployHelper {
     }
 
     // ========================================================================
-    // 2-OF-N GUARDIAN EMERGENCY FUNCTIONS
+    // GUARDIAN EMERGENCY FUNCTIONS (Single GUARDIAN_ROLE)
     // ========================================================================
 
     /**
-     * @notice Initiate emergency pause for a vault (Step 1 of 2)
+     * @notice Emergency pause a single vault immediately
      * @param vault Vault address to pause
-     * @dev Only callable by GUARDIAN_ROLE, requires second guardian to confirm
+     * @dev Only callable by GUARDIAN_ROLE (e.g. Gnosis Safe)
      */
-    function initiatePauseVault(address vault) public {
+    function pauseVault(address vault) public {
         vm.startBroadcast(deployer);
-        accessController.initiatePauseVault(vault);
-        console.log("Emergency pause initiated for vault:", vault);
-        console.log("Waiting for second guardian to confirm...");
+        accessController.pauseVault(vault);
+        console.log("Emergency pause executed for vault:", vault);
         vm.stopBroadcast();
     }
 
     /**
-     * @notice Confirm emergency pause for a vault (Step 2 of 2)
-     * @param vault Vault address to pause
-     * @dev Only callable by GUARDIAN_ROLE, must be different from initiator
-     */
-    function confirmPauseVault(address vault) public {
-        vm.startBroadcast(deployer);
-        accessController.confirmPauseVault(vault);
-        console.log("Emergency pause confirmed and executed for vault:", vault);
-        vm.stopBroadcast();
-    }
-
-    /**
-     * @notice Initiate emergency batch pause (Step 1 of 2)
+     * @notice Emergency batch pause vaults immediately
      * @param vaults Array of vault addresses
-     * @dev Only callable by GUARDIAN_ROLE, requires second guardian to confirm
+     * @dev Only callable by GUARDIAN_ROLE (e.g. Gnosis Safe)
      */
-    function initiateBatchPause(address[] calldata vaults) public {
+    function batchPauseVaults(address[] calldata vaults) public {
         vm.startBroadcast(deployer);
-        accessController.initiateBatchPause(vaults);
-        console.log("Emergency batch pause initiated for", vaults.length, "vaults");
-        console.log("Waiting for second guardian to confirm...");
+        accessController.batchPauseVaults(vaults);
+        console.log("Emergency batch pause executed for", vaults.length, "vaults");
         vm.stopBroadcast();
     }
 
     /**
-     * @notice Confirm emergency batch pause (Step 2 of 2)
-     * @param vaults Array of vault addresses
-     * @dev Only callable by GUARDIAN_ROLE, must be different from initiator
-     */
-    function confirmBatchPause(address[] calldata vaults) public {
-        vm.startBroadcast(deployer);
-        accessController.confirmBatchPause(vaults);
-        console.log("Emergency batch pause confirmed and executed for", vaults.length, "vaults");
-        vm.stopBroadcast();
-    }
-
-    /**
-     * @notice Cancel pending emergency action
-     * @dev Only callable by GUARDIAN_ROLE
-     */
-    function cancelEmergencyAction() public {
-        vm.startBroadcast(deployer);
-        accessController.cancelEmergencyAction();
-        console.log("Pending emergency action cancelled");
-        vm.stopBroadcast();
-    }
-
-    // ========================================================================
-    // GUARDIAN MANAGEMENT
-    // ========================================================================
-
-    /**
-     * @notice Add a guardian
-     * @param guardian Guardian address to add
+     * @notice Grant GUARDIAN_ROLE to an address (e.g. Gnosis Safe)
+     * @param guardian Guardian address
      * @dev Only callable by DEFAULT_ADMIN_ROLE
      */
-    function addGuardian(address guardian) public {
+    function grantGuardianRole(address guardian) public {
         vm.startBroadcast(deployer);
-        accessController.addGuardian(guardian);
-        console.log("Guardian added:", guardian);
+        accessController.grantRole(accessController.GUARDIAN_ROLE(), guardian);
+        console.log("GUARDIAN_ROLE granted to:", guardian);
         vm.stopBroadcast();
     }
 
     /**
-     * @notice Remove a guardian
-     * @param guardian Guardian address to remove
+     * @notice Revoke GUARDIAN_ROLE from an address
+     * @param guardian Guardian address
      * @dev Only callable by DEFAULT_ADMIN_ROLE
      */
-    function removeGuardian(address guardian) public {
+    function revokeGuardianRole(address guardian) public {
         vm.startBroadcast(deployer);
-        accessController.removeGuardian(guardian);
-        console.log("Guardian removed:", guardian);
+        accessController.revokeRole(accessController.GUARDIAN_ROLE(), guardian);
+        console.log("GUARDIAN_ROLE revoked from:", guardian);
         vm.stopBroadcast();
     }
 

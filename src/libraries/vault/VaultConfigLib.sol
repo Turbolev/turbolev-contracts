@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.22;
 
-import "./MathLib.sol";
+import "../math/MathLib.sol";
 
 /**
  * @title VaultConfigLib
@@ -60,25 +60,25 @@ library VaultConfigLib {
 
     uint256 constant DEFAULT_LEVERAGE_TIER1_THRESHOLD = 100_000 * 1e18;
     uint256 constant DEFAULT_LEVERAGE_TIER2_THRESHOLD = 500_000 * 1e18;
-    uint16 constant DEFAULT_TIER1_MAX_LEVERAGE = 100;
-    uint16 constant DEFAULT_TIER2_MAX_LEVERAGE = 200;
-    uint16 constant DEFAULT_TIER3_MAX_LEVERAGE = 500;
+    uint16 constant DEFAULT_TIER1_MAX_LEVERAGE = 10;
+    uint16 constant DEFAULT_TIER2_MAX_LEVERAGE = 10;
+    uint16 constant DEFAULT_TIER3_MAX_LEVERAGE = 10;
 
     // ========================================================================
     // DEFAULT VALUES - OI TIER CONFIG
     // ========================================================================
 
-    uint16 constant DEFAULT_TOTAL_OI_RISK_MULTIPLIER_BPS = 20_000; // 2x
+    uint16 constant DEFAULT_TOTAL_OI_RISK_MULTIPLIER_BPS = 15_000; // 1.5x
     uint16 constant DEFAULT_OI_TIER1_MULTIPLIER_BPS = 15_000; // 1.5x
-    uint16 constant DEFAULT_OI_TIER2_MULTIPLIER_BPS = 20_000; // 2x
-    uint16 constant DEFAULT_OI_TIER3_MULTIPLIER_BPS = 25_000; // 2.5x
-    uint16 constant DEFAULT_OI_TIER4_MULTIPLIER_BPS = 30_000; // 3x
+    uint16 constant DEFAULT_OI_TIER2_MULTIPLIER_BPS = 15_000; // 1.5x
+    uint16 constant DEFAULT_OI_TIER3_MULTIPLIER_BPS = 15_000; // 1.5x
+    uint16 constant DEFAULT_OI_TIER4_MULTIPLIER_BPS = 15_000; // 1.5x
 
     // ========================================================================
     // DEFAULT VALUES - RISK CONFIG
     // ========================================================================
 
-    uint16 constant DEFAULT_MAX_DIRECTIONAL_EXPOSURE_BPS = 5000; // 50%
+    uint16 constant DEFAULT_MAX_DIRECTIONAL_EXPOSURE_BPS = 2500; // 25%
 
     // ========================================================================
     // DEFAULT VALUES - MAX PROFIT CAP CONFIG

@@ -185,7 +185,7 @@ contract FeePoolAndRewardsTest is BaseTestModular {
 
         // Close position
         vm.prank(trader1);
-        positionManager.closePosition(positionId, 3600, 0, bytes(""));
+        positionManager.closePosition(positionId, 3600, bytes(""));
 
         // Calculate expected close fee
         uint256 expectedCloseFee = (TRADE_AMOUNT * DEFAULT_CLOSE_POSITION_FEE_BPS) / 10_000;
@@ -413,13 +413,13 @@ contract FeePoolAndRewardsTest is BaseTestModular {
 
         // All traders close positions
         vm.prank(trader1);
-        positionManager.closePosition(pos1, 3600, 0, bytes(""));
+        positionManager.closePosition(pos1, 3600, bytes(""));
 
         vm.prank(trader2);
-        positionManager.closePosition(pos2, 3600, 0, bytes(""));
+        positionManager.closePosition(pos2, 3600, bytes(""));
 
         vm.prank(trader3);
-        positionManager.closePosition(pos3, 3600, 0, bytes(""));
+        positionManager.closePosition(pos3, 3600, bytes(""));
 
         uint256 feePoolAfterClose = vault.feePool();
         uint256 totalFeesCollected = feePoolAfterClose - feePoolBefore;
@@ -478,14 +478,14 @@ contract FeePoolAndRewardsTest is BaseTestModular {
         vm.stopPrank();
 
         // Change price slightly to make trader lose (but not liquidated)
-        mockRegistry.setPrice(address(projectToken), address(usdc), 98e18); // Price drops 2%
+        mockPyth.setPrice(projectTokenPriceId, 98e8, -8, block.timestamp); // Price drops 2%
 
         // Wait for min close time
         vm.warp(block.timestamp + 61);
 
         // Close position (trader loses)
         vm.prank(trader1);
-        positionManager.closePosition(positionId, 3600, 0, bytes(""));
+        positionManager.closePosition(positionId, 3600, bytes(""));
 
         VaultStorageLib.VaultInfo memory infoAfter = vault.vaultInfo();
 
@@ -527,12 +527,12 @@ contract FeePoolAndRewardsTest is BaseTestModular {
         vm.stopPrank();
 
         // Make trader lose slightly (vault wins)
-        mockRegistry.setPrice(address(projectToken), address(usdc), 97e18);
+        mockPyth.setPrice(projectTokenPriceId, 97e8, -8, block.timestamp);
 
         vm.warp(block.timestamp + 61);
 
         vm.prank(trader1);
-        positionManager.closePosition(pos1, 3600, 0, bytes(""));
+        positionManager.closePosition(pos1, 3600, bytes(""));
 
         // Check dailyNetPnL
         int256 dailyPnL = vault.dailyNetPnL();
@@ -582,12 +582,12 @@ contract FeePoolAndRewardsTest is BaseTestModular {
         vm.stopPrank();
 
         // Make trader lose slightly (avoid liquidation)
-        mockRegistry.setPrice(address(projectToken), address(usdc), 97e18);
+        mockPyth.setPrice(projectTokenPriceId, 97e8, -8, block.timestamp);
 
         vm.warp(block.timestamp + 61);
 
         vm.prank(trader1);
-        positionManager.closePosition(pos1, 3600, 0, bytes(""));
+        positionManager.closePosition(pos1, 3600, bytes(""));
 
         // Move to next day and finalize
         vm.warp(block.timestamp + 1 days);
@@ -656,7 +656,7 @@ contract FeePoolAndRewardsTest is BaseTestModular {
         vm.warp(block.timestamp + 61);
 
         vm.prank(trader1);
-        positionManager.closePosition(pos1, 3600, 0, bytes(""));
+        positionManager.closePosition(pos1, 3600, bytes(""));
 
         // Move to next day and finalize rewards to distribute PnL
         vm.warp(block.timestamp + 1 days);
@@ -797,19 +797,19 @@ contract FeePoolAndRewardsTest is BaseTestModular {
         console.log("\nPHASE 3: Close Positions");
 
         // Small price change to avoid liquidation
-        mockRegistry.setPrice(address(projectToken), address(usdc), 99e18); // Price drops 1%
+        mockPyth.setPrice(projectTokenPriceId, 99e8, -8, block.timestamp); // Price drops 1%
 
         vm.warp(block.timestamp + 61);
 
         // Close all positions
         vm.prank(trader1);
-        positionManager.closePosition(positions[0], 3600, 0, bytes(""));
+        positionManager.closePosition(positions[0], 3600, bytes(""));
 
         vm.prank(trader2);
-        positionManager.closePosition(positions[1], 3600, 0, bytes(""));
+        positionManager.closePosition(positions[1], 3600, bytes(""));
 
         vm.prank(trader3);
-        positionManager.closePosition(positions[2], 3600, 0, bytes(""));
+        positionManager.closePosition(positions[2], 3600, bytes(""));
 
         uint256 feePoolAfterTrades = vault.feePool();
         VaultStorageLib.VaultInfo memory afterTrades = vault.vaultInfo();

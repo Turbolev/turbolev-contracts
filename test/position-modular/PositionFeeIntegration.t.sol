@@ -21,6 +21,7 @@ contract PositionFeeIntegrationTest is BaseTestModular {
         super.setUp();
         _enableTrading();
         _graduateVault();
+        _setHighLeverageConfig();
     }
 
     // ========================================================================
@@ -91,7 +92,7 @@ contract PositionFeeIntegrationTest is BaseTestModular {
         uint256 balanceBefore = projectToken.balanceOf(user1);
 
         // Close position
-        positionManager.closePosition(1, block.timestamp + 1 hours, 0, "");
+        positionManager.closePosition(1, block.timestamp + 1 hours, "");
 
         uint256 balanceAfter = projectToken.balanceOf(user1);
 

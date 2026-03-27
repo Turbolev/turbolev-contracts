@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.22;
 
-import "./libraries/PositionStorageLib.sol";
+import "../libraries/position/PositionStorageLib.sol";
 import "../vault-modular/VaultAccessController.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -149,17 +149,6 @@ abstract contract PositionModuleBase {
      */
     function _core() internal pure returns (PositionStorageLib.CoreStorage storage) {
         return PositionStorageLib.getCoreStorage();
-    }
-
-    /**
-     * @notice Get pending close storage
-     */
-    function _pendingClose()
-        internal
-        pure
-        returns (PositionStorageLib.PendingCloseStorage storage)
-    {
-        return PositionStorageLib.getPendingCloseStorage();
     }
 
     /**

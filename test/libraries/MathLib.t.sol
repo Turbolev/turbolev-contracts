@@ -2,7 +2,7 @@
 pragma solidity ^0.8.22;
 
 import "forge-std/Test.sol";
-import "../../src/libraries/MathLib.sol";
+import "../../src/libraries/math/MathLib.sol";
 
 /**
  * @title MathLibWrapper

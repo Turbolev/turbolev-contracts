@@ -18,14 +18,10 @@ contract DeployPriceFeedManager is Script {
         vm.startBroadcast();
 
         address owner = vm.envAddress("OWNER_ADDRESS");
-        address blocksenseOracle = vm.envAddress("BLOCKSENSE_ORACLE_ADDRESS");
-        address chainlinkOracle = vm.envAddress("CHAINLINK_ORACLE_ADDRESS");
 
         console.log("\n===========================================");
         console.log("Deploying PriceFeedManager");
         console.log("Owner:", owner);
-        console.log("BlocksenseOracle:", blocksenseOracle);
-        console.log("ChainlinkOracle:", chainlinkOracle);
         console.log("===========================================\n");
 
         // Deploy implementation
@@ -33,9 +29,7 @@ contract DeployPriceFeedManager is Script {
         console.log("PriceFeedManager Implementation:", priceFeedManagerImpl);
 
         // Prepare initialization data
-        bytes memory initData = abi.encodeWithSelector(
-            PriceFeedManager.initialize.selector, owner, payable(blocksenseOracle), chainlinkOracle
-        );
+        bytes memory initData = abi.encodeWithSelector(PriceFeedManager.initialize.selector, owner);
 
         // Deploy proxy
         priceFeedManagerProxy = address(new ERC1967Proxy(priceFeedManagerImpl, initData));

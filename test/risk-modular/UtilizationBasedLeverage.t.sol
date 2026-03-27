@@ -19,6 +19,7 @@ contract UtilizationBasedLeverageTest is BaseTestModular {
     function setUp() public override {
         super.setUp();
         _enableTrading();
+        _setHighLeverageConfig();
     }
 
     // ========================================================================

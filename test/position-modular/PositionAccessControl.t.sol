@@ -103,9 +103,11 @@ contract PositionAccessControlTest is BaseTestModular {
     }
 
     function test_PauseEmergency_ByGuardian() public {
-        // Add guardian
-        vm.prank(mockTimelockController);
-        vaultAccessController.addGuardian(admin);
+        // Grant GUARDIAN_ROLE to admin for this test
+        bytes32 guardianRole = vaultAccessController.GUARDIAN_ROLE();
+        vm.startPrank(mockTimelockController);
+        vaultAccessController.grantRole(guardianRole, admin);
+        vm.stopPrank();
 
         // Guardian can emergency pause
         vm.prank(admin);
@@ -152,7 +154,7 @@ contract PositionAccessControlTest is BaseTestModular {
         // Try to close - should fail
         vm.startPrank(user1);
         vm.expectRevert();
-        positionManager.closePosition(1, block.timestamp + 1 hours, 0, "");
+        positionManager.closePosition(1, block.timestamp + 1 hours, "");
         vm.stopPrank();
     }
 
@@ -226,7 +228,7 @@ contract PositionAccessControlTest is BaseTestModular {
 
         // User1 can close
         vm.startPrank(user1);
-        positionManager.closePosition(1, block.timestamp + 1 hours, 0, "");
+        positionManager.closePosition(1, block.timestamp + 1 hours, "");
         vm.stopPrank();
     }
 

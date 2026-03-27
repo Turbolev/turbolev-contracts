@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.22;
 
-import "../libraries/PositionLib.sol";
+import "../libraries/position/PositionLib.sol";
 
 /**
  * @title ISettlementEngine
@@ -52,13 +52,7 @@ interface ISettlementEngine {
     function getSettlementConfig()
         external
         view
-        returns (
-            uint16 houseEdgeBps,
-            uint16 winMultiplierBps,
-            uint256 minBetAmount,
-            uint256 maxBetAmount,
-            bool paused
-        );
+        returns (uint16 winMultiplierBps, uint256 minBetAmount, uint256 maxBetAmount, bool paused);
 
     /**
      * @notice Get settlement price from Blocksense Oracle with custom max age
@@ -96,18 +90,6 @@ interface ISettlementEngine {
      * @return oracle ChainlinkOracle contract address
      */
     function chainlinkOracle() external view returns (address oracle);
-
-    /**
-     * @notice Get liquidation fee in basis points
-     * @return liquidationFeeBps Liquidation fee in bps
-     */
-    function liquidationFeeBps() external view returns (uint16);
-
-    /**
-     * @notice Set liquidation fee in basis points
-     * @param _liquidationFeeBps New liquidation fee (max 1000 = 10%)
-     */
-    function setLiquidationFeeBps(uint16 _liquidationFeeBps) external;
 
     /**
      * @notice Get max profit cap in basis points

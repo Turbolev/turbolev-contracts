@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.22;
 
-import "../../libraries/FundingRateLib.sol";
-import "../../libraries/VaultConfigLib.sol";
+import "../math/PriceImpactLib.sol";
+import "./VaultConfigLib.sol";
 
 /**
  * @title VaultStorageLib
@@ -27,7 +27,7 @@ library VaultStorageLib {
     /// @dev Namespace for core vault storage (liquidity, LP positions, payouts, fees)
     string internal constant NAMESPACE_CORE = "boolean.vault.core";
 
-    /// @dev Namespace for funding rate storage (cumulative rates, exposure tracking)
+    /// @dev Namespace for price impact storage (OI tracking, impact config)
     string internal constant NAMESPACE_FUNDING = "boolean.vault.funding";
 
     /// @dev Namespace for rewards storage (daily snapshots, LP rewards)
@@ -158,18 +158,14 @@ library VaultStorageLib {
 
     /// @custom:storage-location erc7201:boolean.vault.funding
     struct FundingStorage {
-        // Cumulative funding rates
-        int256 cumulativeFundingRateLong;
-        int256 cumulativeFundingRateShort;
-        // Update tracking
-        uint256 lastFundingUpdateTime;
-        uint256 lastFundingUpdateHour;
-        // Exposure tracking
+        // OI exposure tracking (reused slot, same namespace for upgrade safety)
         uint256 totalLongExposure;
         uint256 totalShortExposure;
-        // Configuration
-        FundingRateLib.FundingConfig fundingConfig;
-        bool fundingEnabled;
+        // Price impact configuration
+        PriceImpactLib.ImpactConfig impactConfig;
+        bool impactEnabled;
+        // Total impact fees collected (informational)
+        uint256 totalImpactFeesCollected;
     }
 
     /// @custom:storage-location erc7201:boolean.vault.rewards

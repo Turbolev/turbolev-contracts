@@ -2,7 +2,7 @@
 pragma solidity ^0.8.22;
 
 import "forge-std/Test.sol";
-import "../../src/libraries/FundingRateLib.sol";
+import "../../src/libraries/position/FundingRateLib.sol";
 
 // Wrapper contract to test library revert cases
 contract FundingRateLibWrapper {

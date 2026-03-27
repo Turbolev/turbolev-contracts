@@ -2,7 +2,7 @@
 pragma solidity ^0.8.22;
 
 import "../vault-modular/BaseTestModular.sol";
-import "../../src/libraries/PositionLib.sol";
+import "../../src/libraries/position/PositionLib.sol";
 
 /**
  * @title LiquidationEdgeCasesTest
@@ -21,6 +21,7 @@ contract LiquidationEdgeCasesTest is BaseTestModular {
         super.setUp();
         _enableTrading();
         _graduateVault();
+        _setHighLeverageConfig();
     }
 
     // ========================================================================
@@ -237,7 +238,7 @@ contract LiquidationEdgeCasesTest is BaseTestModular {
         vm.warp(block.timestamp + 61 seconds);
 
         // User can close position before liquidation threshold is reached
-        positionManager.closePosition(1, block.timestamp + 1 hours, 0, "");
+        positionManager.closePosition(1, block.timestamp + 1 hours, "");
         vm.stopPrank();
     }
 

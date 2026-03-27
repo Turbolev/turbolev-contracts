@@ -4,8 +4,7 @@ pragma solidity ^0.8.22;
 import "forge-std/Script.sol";
 import "./DeployHelper.s.sol";
 
-import "../src/oracles/BlocksenseOracle.sol";
-import "../src/oracles/ChainlinkOracle.sol";
+import "../src/oracles/PythOracle.sol";
 import "../src/SettlementEngine.sol";
 import "../src/PriceFeedManager.sol";
 import "../src/interfaces/IPriceFeedManager.sol";
@@ -22,17 +21,11 @@ import "../src/vault-modular/modules/VaultRewards.sol";
 // Modular Position imports
 import "../src/position-modular/PositionRouter.sol";
 import "../src/position-modular/modules/PositionCore.sol";
-import "../src/position-modular/modules/PositionPendingClose.sol";
 
 // Governance
-import "../src/governance/MultisigWallet.sol";
 import "../src/vault-modular/VaultAdminProxy.sol";
 import "@openzeppelin/contracts/governance/TimelockController.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-
-// Registry
-import "../src/registry/ModuleRegistry.sol";
-import "../src/registry/VaultRegistry.sol";
 
 /**
  * @title DeployAllModular
@@ -41,8 +34,7 @@ import "../src/registry/VaultRegistry.sol";
  */
 contract DeployAllModular is DeployHelper {
     // Implementations for upgradeable contracts
-    address public blocksenseOracleImpl;
-    address public chainlinkOracleImpl;
+    address public pythOracleImpl;
     address public settlementEngineImpl;
     address public vaultManagerImpl;
     address public priceFeedManagerImpl;
@@ -51,23 +43,14 @@ contract DeployAllModular is DeployHelper {
     // Modular Position components
     address public positionRouterImpl;
     address public positionCoreModule;
-    address public positionPendingCloseModule;
 
     // Modular vault components (inherited from DeployHelper)
 
     // Governance
-    address public deployedMultisig;
     address public deployedTimelock;
-
-    // Registry
-    address public moduleRegistryImpl;
-    address public moduleRegistry;
-    address public vaultRegistryImpl;
-    address public vaultRegistryAddress;
 
     // Config
     uint256 public constant DEFAULT_TIMELOCK_DELAY = 1 days;
-    uint256 public constant DEFAULT_THRESHOLD = 2;
     uint256 public constant DELAY_BETWEEN_STEPS = 2 seconds;
 
     function run() public {
@@ -99,10 +82,7 @@ contract DeployAllModular is DeployHelper {
         // Phase 6: Deploy VaultManager
         _deployVaultManager();
 
-        // Phase 7: Deploy Registries
-        _deployRegistries();
-
-        // Phase 8: Deploy Core Contracts (Settlement, Position Router)
+        // Phase 7: Deploy Core Contracts (Settlement, Position Router)
         _deployCoreContracts();
 
         // Phase 9: Setup Connections
@@ -127,22 +107,12 @@ contract DeployAllModular is DeployHelper {
     function _deployGovernance() internal {
         console.log("\n--- Phase 1: Deploying Governance ---");
 
-        // 1. Deploy MultisigWallet
-        address[] memory owners = new address[](2);
-        owners[0] = deployer;
-        owners[1] = admin;
-        uint256 threshold = vm.envOr("MULTISIG_THRESHOLD", DEFAULT_THRESHOLD);
-
-        deployedMultisig = address(new MultisigWallet(owners, threshold));
-        console.log("MultisigWallet deployed:", deployedMultisig);
-
-        // 2. Deploy TimelockController
+        // Deploy TimelockController
         uint256 minDelay = vm.envOr("TIMELOCK_DELAY", DEFAULT_TIMELOCK_DELAY);
         address[] memory proposers = new address[](1);
-        proposers[0] = deployedMultisig;
-        address[] memory executors = new address[](2);
-        executors[0] = deployedMultisig;
-        executors[1] = admin;
+        proposers[0] = admin;
+        address[] memory executors = new address[](1);
+        executors[0] = admin;
 
         deployedTimelock = address(new TimelockController(minDelay, proposers, executors, deployer));
         console.log("TimelockController deployed:", deployedTimelock);
@@ -155,21 +125,14 @@ contract DeployAllModular is DeployHelper {
     function _deployOracles() internal {
         console.log("\n--- Phase 2: Deploying Oracles ---");
 
-        // BlocksenseOracle
-        blocksenseOracleImpl = address(new BlocksenseOracle());
-        bytes memory blocksenseInitData = abi.encodeWithSelector(
-            BlocksenseOracle.initialize.selector, owner, ORACLE_MAX_PRICE_AGE
+        // PythOracle
+        address pythContractAddr = vm.envAddress("PYTH_CONTRACT");
+        pythOracleImpl = address(new PythOracle());
+        bytes memory pythInitData = abi.encodeWithSelector(
+            PythOracle.initialize.selector, owner, pythContractAddr, ORACLE_MAX_PRICE_AGE
         );
-        blocksenseOracle =
-            payable(address(new ERC1967Proxy(blocksenseOracleImpl, blocksenseInitData)));
-        console.log("BlocksenseOracle deployed:", blocksenseOracle);
-
-        // ChainlinkOracle
-        chainlinkOracleImpl = address(new ChainlinkOracle());
-        bytes memory chainlinkInitData =
-            abi.encodeWithSelector(ChainlinkOracle.initialize.selector, ORACLE_MAX_PRICE_AGE);
-        chainlinkOracle = payable(address(new ERC1967Proxy(chainlinkOracleImpl, chainlinkInitData)));
-        console.log("ChainlinkOracle deployed:", chainlinkOracle);
+        pythOracle = payable(address(new ERC1967Proxy(pythOracleImpl, pythInitData)));
+        console.log("PythOracle deployed:", pythOracle);
 
         // PriceFeedManager
         priceFeedManagerImpl = address(new PriceFeedManager());
@@ -212,9 +175,6 @@ contract DeployAllModular is DeployHelper {
 
         positionCoreModule = address(new PositionCore());
         console.log("PositionCore Module deployed:", positionCoreModule);
-
-        positionPendingCloseModule = address(new PositionPendingClose());
-        console.log("PositionPendingClose Module deployed:", positionPendingCloseModule);
     }
 
     // ========================================================================
@@ -226,13 +186,16 @@ contract DeployAllModular is DeployHelper {
 
         accessControllerImpl = address(new VaultAccessController());
 
+        // Gnosis Safe address for EMERGENCY_ROLE (optional, set via env)
+        address gnosisSafe = vm.envOr("GNOSIS_SAFE_ADDRESS", address(0));
+
         // Initialize with placeholder for vaultManager (will be set later)
         bytes memory accessControllerInitData = abi.encodeWithSelector(
             VaultAccessController.initialize.selector,
             deployedTimelock, // admin = Timelock
             deployer, // vaultManager placeholder (will be updated)
             deployer, // positionManager placeholder (will be updated)
-            deployedMultisig // multisig for EMERGENCY_ROLE
+            gnosisSafe // Gnosis Safe for EMERGENCY_ROLE (address(0) = skip)
         );
 
         vaultAccessController =
@@ -256,71 +219,11 @@ contract DeployAllModular is DeployHelper {
             vaultRouterImpl,
             vaultCoreModule,
             vaultFundingModule,
-            vaultRewardsModule,
-            deployedTimelock,
-            deployedMultisig
+            vaultRewardsModule
         );
 
         vaultManager = payable(address(new ERC1967Proxy(vaultManagerImpl, vaultManagerInitData)));
         console.log("VaultManager deployed:", vaultManager);
-    }
-
-    // ========================================================================
-    // REGISTRY DEPLOYMENT
-    // ========================================================================
-
-    function _deployRegistries() internal {
-        console.log("\n--- Phase 7: Deploying Registries ---");
-
-        // ModuleRegistry
-        moduleRegistryImpl = address(new ModuleRegistry());
-        bytes memory moduleRegistryInitData =
-            abi.encodeWithSelector(ModuleRegistry.initialize.selector, vaultAccessController);
-        moduleRegistry = address(new ERC1967Proxy(moduleRegistryImpl, moduleRegistryInitData));
-        console.log("ModuleRegistry deployed:", moduleRegistry);
-
-        // VaultRegistry
-        vaultRegistryImpl = address(new VaultRegistry());
-        bytes memory vaultRegistryInitData = abi.encodeWithSelector(
-            VaultRegistry.initialize.selector, vaultAccessController, moduleRegistry
-        );
-        vaultRegistryAddress = address(new ERC1967Proxy(vaultRegistryImpl, vaultRegistryInitData));
-        console.log("VaultRegistry deployed:", vaultRegistryAddress);
-
-        // Register initial module versions
-        _registerInitialModuleVersions();
-    }
-
-    function _registerInitialModuleVersions() internal {
-        console.log("\n--- Registering Initial Module Versions ---");
-
-        ModuleRegistry registry = ModuleRegistry(moduleRegistry);
-
-        // Register Router V1
-        registry.registerModule(
-            registry.MODULE_ROUTER(),
-            "1.0.0",
-            vaultRouterImpl,
-            bytes32(0), // No commit hash for initial deployment
-            true // Set as latest
-        );
-        console.log("[OK] Registered VaultRouter v1.0.0");
-
-        // Register Core V1
-        registry.registerModule(registry.MODULE_CORE(), "1.0.0", vaultCoreModule, bytes32(0), true);
-        console.log("[OK] Registered VaultCore v1.0.0");
-
-        // Register Funding V1
-        registry.registerModule(
-            registry.MODULE_FUNDING(), "1.0.0", vaultFundingModule, bytes32(0), true
-        );
-        console.log("[OK] Registered VaultFunding v1.0.0");
-
-        // Register Rewards V1
-        registry.registerModule(
-            registry.MODULE_REWARDS(), "1.0.0", vaultRewardsModule, bytes32(0), true
-        );
-        console.log("[OK] Registered VaultRewards v1.0.0");
     }
 
     // ========================================================================
@@ -345,8 +248,7 @@ contract DeployAllModular is DeployHelper {
             settlementEngine, // settlementEngine
             vaultManager, // vaultManager
             priceFeedManager, // priceFeedManager
-            positionCoreModule, // coreModule
-            positionPendingCloseModule // pendingCloseModule
+            positionCoreModule // coreModule
         );
         positionManager = payable(address(new ERC1967Proxy(positionRouterImpl, positionInitData)));
         console.log("PositionRouter (PositionManager) deployed:", positionManager);
@@ -388,12 +290,6 @@ contract DeployAllModular is DeployHelper {
             );
         console.log("[OK] VaultAccessController configured");
 
-        // Configure VaultManager with registries
-        VaultManager(vaultManager).setModuleRegistry(moduleRegistry);
-        VaultManager(vaultManager).setVaultRegistry(vaultRegistryAddress);
-        VaultManager(vaultManager).setModuleVersions("1.0.0", "1.0.0", "1.0.0", "1.0.0");
-        console.log("[OK] VaultManager registries configured");
-
         // Setup PriceFeedManager with oracle providers
         _setupPriceFeedManager();
     }
@@ -403,24 +299,14 @@ contract DeployAllModular is DeployHelper {
 
         PriceFeedManager manager = PriceFeedManager(payable(priceFeedManager));
 
-        // Register Chainlink Provider
-        IPriceFeedManager.OracleProvider memory chainlinkProvider = IPriceFeedManager.OracleProvider({
-            oracleContract: chainlinkOracle, oracleType: IBaseOracle.OracleType.PUSH, enabled: true
+        // Register Pyth Provider
+        IPriceFeedManager.OracleProvider memory pythProvider = IPriceFeedManager.OracleProvider({
+            oracleContract: pythOracle, oracleType: IBaseOracle.OracleType.PULL, enabled: true
         });
 
-        if (!manager.providerExists(manager.CHAINLINK_PROVIDER())) {
-            manager.registerOracleProvider(manager.CHAINLINK_PROVIDER(), chainlinkProvider);
-            console.log("[OK] Registered CHAINLINK_PROVIDER");
-        }
-
-        // Register Blocksense Provider
-        IPriceFeedManager.OracleProvider memory blocksenseProvider = IPriceFeedManager.OracleProvider({
-            oracleContract: blocksenseOracle, oracleType: IBaseOracle.OracleType.PUSH, enabled: true
-        });
-
-        if (!manager.providerExists(manager.BLOCKSENSE_PROVIDER())) {
-            manager.registerOracleProvider(manager.BLOCKSENSE_PROVIDER(), blocksenseProvider);
-            console.log("[OK] Registered BLOCKSENSE_PROVIDER");
+        if (!manager.providerExists(manager.PYTH_PROVIDER())) {
+            manager.registerOracleProvider(manager.PYTH_PROVIDER(), pythProvider);
+            console.log("[OK] Registered PYTH_PROVIDER");
         }
     }
 
@@ -431,17 +317,13 @@ contract DeployAllModular is DeployHelper {
     function _verifyDeployment() internal view {
         console.log("\n--- Phase 10: Verifying Deployment ---");
 
-        require(blocksenseOracle != address(0), "BlocksenseOracle not deployed");
-        require(chainlinkOracle != address(0), "ChainlinkOracle not deployed");
+        require(pythOracle != address(0), "PythOracle not deployed");
         require(settlementEngine != address(0), "SettlementEngine not deployed");
         require(positionManager != address(0), "PositionRouter not deployed");
         require(vaultManager != address(0), "VaultManager not deployed");
         require(priceFeedManager != address(0), "PriceFeedManager not deployed");
         require(vaultAccessController != address(0), "VaultAccessController not deployed");
-        require(moduleRegistry != address(0), "ModuleRegistry not deployed");
-        require(vaultRegistryAddress != address(0), "VaultRegistry not deployed");
         require(positionCoreModule != address(0), "PositionCore not deployed");
-        require(positionPendingCloseModule != address(0), "PositionPendingClose not deployed");
 
         console.log("[OK] All contracts deployed and verified");
     }
@@ -454,15 +336,10 @@ contract DeployAllModular is DeployHelper {
         console.log("=== DEPLOYMENT SUMMARY (MODULAR) ===");
         console.log("Network Chain ID:", block.chainid);
         console.log("\n--- Governance ---");
-        console.log("MultisigWallet:", deployedMultisig);
         console.log("TimelockController:", deployedTimelock);
         console.log("VaultAccessController:", vaultAccessController);
-        console.log("\n--- Registries ---");
-        console.log("ModuleRegistry:", moduleRegistry);
-        console.log("VaultRegistry:", vaultRegistryAddress);
         console.log("\n--- Oracles ---");
-        console.log("BlocksenseOracle:", blocksenseOracle);
-        console.log("ChainlinkOracle:", chainlinkOracle);
+        console.log("PythOracle:", pythOracle);
         console.log("PriceFeedManager:", priceFeedManager);
         console.log("\n--- Core Contracts ---");
         console.log("SettlementEngine:", settlementEngine);
@@ -476,7 +353,6 @@ contract DeployAllModular is DeployHelper {
         console.log("\n--- Position Modules ---");
         console.log("PositionRouter Impl:", positionRouterImpl);
         console.log("PositionCore Module:", positionCoreModule);
-        console.log("PositionPendingClose Module:", positionPendingCloseModule);
         console.log("\n--- Accounts ---");
         console.log("Contract Owner:", owner);
         console.log("Admin Address:", admin);

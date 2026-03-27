@@ -6,7 +6,7 @@ import "forge-std/console.sol";
 import "../DeployHelper.s.sol";
 import "../../src/vault-modular/VaultRouter.sol";
 import "../../src/vault-modular/VaultManager.sol";
-import "../../src/vault-modular/libraries/VaultStorageLib.sol";
+import "../../src/libraries/vault/VaultStorageLib.sol";
 
 /**
  * @title InteractVaultRouter
@@ -204,20 +204,22 @@ contract InteractVaultRouter is DeployHelper {
     }
 
     // ========================================================================
-    // FUNDING CONFIG FUNCTIONS
+    // PRICE IMPACT CONFIG FUNCTIONS
     // ========================================================================
 
-    function setFundingConfig(
-        uint16 tier1RateBps,
-        uint16 tier2RateBps,
-        uint16 tier3RateBps,
-        uint16 tier4RateBps,
-        uint16 tier5RateBps
+    function setImpactConfig(
+        uint16 tier1ImpactBps,
+        uint16 tier2ImpactBps,
+        uint16 tier3ImpactBps,
+        uint16 tier4ImpactBps,
+        uint16 tier5ImpactBps
     ) public {
         vm.startBroadcast(deployer);
 
-        vault.setFundingConfig(tier1RateBps, tier2RateBps, tier3RateBps, tier4RateBps, tier5RateBps);
-        console.log("Funding config updated");
+        vault.setImpactConfig(
+            tier1ImpactBps, tier2ImpactBps, tier3ImpactBps, tier4ImpactBps, tier5ImpactBps
+        );
+        console.log("Impact config updated");
 
         vm.stopBroadcast();
     }

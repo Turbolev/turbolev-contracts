@@ -2,8 +2,8 @@
 pragma solidity ^0.8.22;
 
 import "../PositionModuleBase.sol";
-import "../../libraries/PositionLib.sol";
-import "../../libraries/MathLib.sol";
+import "../../libraries/position/PositionLib.sol";
+import "../../libraries/math/MathLib.sol";
 import "../../interfaces/IVaultManager.sol";
 import "../../interfaces/IAssetVault.sol";
 import "../../interfaces/ISettlementEngine.sol";
@@ -56,16 +56,11 @@ contract PositionCore is PositionModuleBase {
         uint256 closeTimestamp,
         uint256 pricePublishTime,
         PositionStorageLib.PositionClosedBy closedBy,
-        uint256 totalFee,
-        int256 fundingOwed
+        uint256 totalFee
     );
 
     event BetLiquidated(
-        uint64 indexed positionId,
-        address indexed user,
-        uint256 liquidationPrice,
-        uint256 liquidationFee,
-        uint256 timestamp
+        uint64 indexed positionId, address indexed user, uint256 liquidationPrice, uint256 timestamp
     );
 
     event MaintenanceMarginRatioUpdated(uint256 oldRatio, uint256 newRatio);
@@ -88,23 +83,14 @@ contract PositionCore is PositionModuleBase {
         uint256 timestamp
     );
 
-    event PositionPendingClose(
+    event PriceImpactApplied(
         uint64 indexed positionId,
         address indexed user,
-        uint256 requestTime,
-        uint256 deadline,
-        uint256 maxAcceptablePrice,
-        uint256 closePrice,
-        uint256 pricePublishTime,
-        PositionStorageLib.PendingCloseReason reason,
-        PositionStorageLib.PositionClosedBy closedBy
-    );
-
-    event FundingSettled(
-        uint64 indexed positionId,
-        address indexed user,
-        int256 fundingAmount,
         uint8 direction,
+        uint256 markPrice,
+        uint256 executionPrice,
+        uint256 impactBps,
+        uint256 impactFee,
         uint256 timestamp
     );
 
@@ -273,12 +259,39 @@ contract PositionCore is PositionModuleBase {
         pos.initialMargin = amount;
         pos.addedMargin = 0;
 
-        // Store entry funding rates
-        (int256 entryLongRate, int256 entryShortRate) =
-            IAssetVault(vaultAddress).getCumulativeFundingRates();
-        pos.entryFundingRateLong = entryLongRate;
-        pos.entryFundingRateShort = entryShortRate;
-        pos.lastFundingSettlement = block.timestamp;
+        // Calculate and settle price impact upfront
+        // positionSize (notional) is used so impactFee is consistent with imbalance_ratio
+        (uint256 executionPrice, uint256 impactFee, uint256 impactBps, bool isCrowdedSide) =
+            IAssetVault(vaultAddress).getExecutionPrice(openPrice, direction, positionSize);
+
+        pos.executionPrice = executionPrice;
+        pos.impactFee = impactFee;
+
+        // Record impact fee in vault (fee stays in vault, reduces effective collateral)
+        if (impactFee > 0) {
+            IAssetVault(vaultAddress)
+                .recordImpactFee(
+                    positionId,
+                    msg.sender,
+                    direction,
+                    openPrice,
+                    executionPrice,
+                    impactBps,
+                    impactFee,
+                    isCrowdedSide
+                );
+
+            emit PriceImpactApplied(
+                positionId,
+                msg.sender,
+                direction,
+                openPrice,
+                executionPrice,
+                impactBps,
+                impactFee,
+                block.timestamp
+            );
+        }
 
         emit PositionOpened(
             positionId,
@@ -287,7 +300,7 @@ contract PositionCore is PositionModuleBase {
             amount,
             leverage,
             direction,
-            openPrice,
+            executionPrice,
             pos.liquidationPrice,
             positionSize,
             block.timestamp,
@@ -298,14 +311,14 @@ contract PositionCore is PositionModuleBase {
     }
 
     /**
-     * @notice Close position
+     * @notice Close position at current mark price (no slippage protection)
      */
-    function closePosition(
-        uint64 positionId,
-        uint256 deadline,
-        uint256 maxAcceptablePrice,
-        bytes calldata priceUpdateData
-    ) external payable nonReentrant whenNotPaused {
+    function closePosition(uint64 positionId, uint256 deadline, bytes calldata priceUpdateData)
+        external
+        payable
+        nonReentrant
+        whenNotPaused
+    {
         PositionStorageLib.CoreStorage storage core = PositionStorageLib.getCoreStorage();
         PositionLib.Position storage pos = core.positions[positionId];
 
@@ -319,7 +332,7 @@ contract PositionCore is PositionModuleBase {
         uint256 maxAge = _calculateMaxAge(deadline);
         if (core.priceFeedManager == address(0)) revert InvalidAddress();
 
-        // Try to get price
+        // Get current mark price
         bool priceSuccess = false;
         uint256 closePrice;
         uint256 pricePublishTime;
@@ -349,34 +362,12 @@ contract PositionCore is PositionModuleBase {
             revert PriceStale();
         }
 
-        // Check maxAcceptablePrice
-        if (maxAcceptablePrice > 0) {
-            bool priceAcceptable = true;
-            if (pos.direction == PositionLib.BET_DIRECTION_LONG) {
-                if (closePrice < maxAcceptablePrice) priceAcceptable = false;
-            } else {
-                if (closePrice > maxAcceptablePrice) priceAcceptable = false;
-            }
-
-            if (!priceAcceptable) {
-                _addPendingCloseRequest(
-                    positionId,
-                    deadline,
-                    maxAcceptablePrice,
-                    closePrice,
-                    pricePublishTime,
-                    PositionStorageLib.PendingCloseReason.PRICE_NOT_ACCEPTABLE
-                );
-                return;
-            }
-        }
-
         // Check liquidation
         if (PositionLib.isLiquidated(pos, closePrice)) {
             revert PositionAlreadyLiquidated();
         }
 
-        // Process settlement
+        // Settle at current mark price
         _processSettlement(
             positionId,
             closePrice,
@@ -504,15 +495,7 @@ contract PositionCore is PositionModuleBase {
         if (closePrice == 0) revert InvalidPrice();
 
         if (isLiquidation) {
-            uint256 effectiveLiquidationFeeBps =
-                ISettlementEngine(core.settlementEngine).liquidationFeeBps();
-            if (effectiveLiquidationFeeBps == 0) {
-                effectiveLiquidationFeeBps = PositionLib.LIQUIDATION_FEE_BPS;
-            }
-            uint256 liquidationFee =
-                (pos.amount * effectiveLiquidationFeeBps) / MathLib.BASIS_POINTS;
-
-            emit BetLiquidated(positionId, pos.user, closePrice, liquidationFee, block.timestamp);
+            emit BetLiquidated(positionId, pos.user, closePrice, block.timestamp);
         }
 
         _processSettlement(
@@ -558,32 +541,8 @@ contract PositionCore is PositionModuleBase {
         ) = ISettlementEngine(core.settlementEngine)
             .processSettlement(pos, closePrice, isLiquidation);
 
-        // Calculate funding adjustment
-        int256 fundingOwed = IAssetVault(vaultAddress)
-            .calculatePositionFunding(
-                pos.entryFundingRateLong, pos.entryFundingRateShort, pos.positionSize, pos.direction
-            );
-
-        // Adjust payout by funding
+        // No ongoing funding — impact fee was settled upfront at open.
         uint256 adjustedPayout = payout;
-        if (fundingOwed > 0) {
-            uint256 fundingDeduction = uint256(fundingOwed);
-            if (fundingDeduction >= adjustedPayout) {
-                adjustedPayout = 0;
-            } else {
-                adjustedPayout -= fundingDeduction;
-            }
-            vaultPnL += fundingOwed;
-        } else if (fundingOwed < 0) {
-            uint256 fundingReceived = uint256(-fundingOwed);
-            adjustedPayout += fundingReceived;
-            vaultPnL += fundingOwed;
-        }
-
-        // Emit funding event
-        if (fundingOwed != 0) {
-            emit FundingSettled(positionId, pos.user, fundingOwed, pos.direction, block.timestamp);
-        }
 
         // Update vault P&L
         uint256 closeFee = IVaultManager(core.vaultManager)
@@ -626,59 +585,8 @@ contract PositionCore is PositionModuleBase {
             block.timestamp,
             pricePublishTime,
             closedBy,
-            settlementFee + closeFee,
-            fundingOwed
+            settlementFee + closeFee
         );
-    }
-
-    // ========================================================================
-    // PENDING CLOSE HELPER
-    // ========================================================================
-
-    /**
-     * @notice Add position to pending close queue
-     */
-    function _addPendingCloseRequest(
-        uint64 positionId,
-        uint256 deadline,
-        uint256 maxAcceptablePrice,
-        uint256 closePrice,
-        uint256 pricePublishTime,
-        PositionStorageLib.PendingCloseReason reason
-    ) internal {
-        PositionStorageLib.CoreStorage storage core = PositionStorageLib.getCoreStorage();
-        PositionStorageLib.PendingCloseStorage storage pending =
-            PositionStorageLib.getPendingCloseStorage();
-        PositionLib.Position storage pos = core.positions[positionId];
-
-        pos.state = PositionLib.POSITION_STATE_PENDING_CLOSE;
-        pos.lastModifiedTimestamp = block.timestamp;
-
-        if (!pending.isPendingClose[positionId]) {
-            pending.pendingCloseRequests[positionId] = PositionStorageLib.PendingCloseRequest({
-                positionId: positionId,
-                requestTime: block.timestamp,
-                deadline: deadline,
-                maxAcceptablePrice: maxAcceptablePrice,
-                closePrice: closePrice,
-                pricePublishTime: pricePublishTime
-            });
-
-            pending.pendingClosePositionIds.push(positionId);
-            pending.isPendingClose[positionId] = true;
-
-            emit PositionPendingClose(
-                positionId,
-                pos.user,
-                block.timestamp,
-                deadline,
-                maxAcceptablePrice,
-                closePrice,
-                pricePublishTime,
-                reason,
-                PositionStorageLib.PositionClosedBy.PENDING_CLOSE_REQUESTED
-            );
-        }
     }
 
     // ========================================================================

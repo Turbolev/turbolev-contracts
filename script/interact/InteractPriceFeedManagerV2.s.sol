@@ -8,45 +8,18 @@ import "../../src/interfaces/oracles/IBaseOracle.sol";
 /**
  * @title InteractPriceFeedManagerV2
  * @notice Script to interact with PriceFeedManager V2 (Oracle Registry)
+ * @dev MVP: Pyth Oracle only
  */
 contract InteractPriceFeedManagerV2 is Script {
     function registerProviders() external {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         address payable priceFeedManager = payable(vm.envAddress("PRICE_FEED_MANAGER_ADDRESS"));
-        address chainlinkOracle = vm.envAddress("CHAINLINK_ORACLE_ADDRESS");
-        address blocksenseOracle = vm.envAddress("BLOCKSENSE_ORACLE_ADDRESS");
-        address pythOracle = vm.envOr("PYTH_ORACLE_ADDRESS", address(0));
+        address pythOracle = vm.envAddress("PYTH_ORACLE_ADDRESS");
 
         console.log("=== Register Oracle Providers ===");
         vm.startBroadcast(deployerPrivateKey);
 
         PriceFeedManager manager = PriceFeedManager(priceFeedManager);
-
-        if (chainlinkOracle != address(0)) {
-            IPriceFeedManager.OracleProvider memory chainlinkProvider =
-                IPriceFeedManager.OracleProvider({
-                    oracleContract: chainlinkOracle,
-                    oracleType: IBaseOracle.OracleType.PUSH,
-                    enabled: true
-                });
-            if (!manager.providerExists(manager.CHAINLINK_PROVIDER())) {
-                manager.registerOracleProvider(manager.CHAINLINK_PROVIDER(), chainlinkProvider);
-                console.log("Registered CHAINLINK_PROVIDER");
-            }
-        }
-
-        if (blocksenseOracle != address(0)) {
-            IPriceFeedManager.OracleProvider memory blocksenseProvider =
-                IPriceFeedManager.OracleProvider({
-                    oracleContract: blocksenseOracle,
-                    oracleType: IBaseOracle.OracleType.PUSH,
-                    enabled: true
-                });
-            if (!manager.providerExists(manager.BLOCKSENSE_PROVIDER())) {
-                manager.registerOracleProvider(manager.BLOCKSENSE_PROVIDER(), blocksenseProvider);
-                console.log("Registered BLOCKSENSE_PROVIDER");
-            }
-        }
 
         if (pythOracle != address(0)) {
             IPriceFeedManager.OracleProvider memory pythProvider = IPriceFeedManager.OracleProvider({
@@ -115,51 +88,21 @@ contract InteractPriceFeedManagerV2 is Script {
         console.log("Use Pull Mode:", config.usePullMode);
     }
 
-    function setupTokenConfigChainlinkPrimary() external {
+    function setupTokenConfigPythPrimary() external {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         address payable priceFeedManager = payable(vm.envAddress("PRICE_FEED_MANAGER_ADDRESS"));
         address projectToken = vm.envAddress("PROJECT_TOKEN");
-        address chainlinkFeed = vm.envAddress("CHAINLINK_FEED");
-        address blocksenseAdapter = vm.envOr("BLOCKSENSE_ADAPTER", address(0));
 
-        console.log("=== Setup Chainlink Primary ===");
+        console.log("=== Setup Pyth Primary ===");
         vm.startBroadcast(deployerPrivateKey);
 
         PriceFeedManager manager = PriceFeedManager(priceFeedManager);
         IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
-            primaryProviderId: manager.CHAINLINK_PROVIDER(),
-            secondaryProviderId: blocksenseAdapter != address(0)
-                ? manager.BLOCKSENSE_PROVIDER()
-                : bytes32(0),
-            primaryFeed: chainlinkFeed,
-            secondaryFeed: blocksenseAdapter,
-            usePullMode: false
-        });
-
-        manager.setPriceFeedConfig(projectToken, config);
-        console.log("Token configured successfully!");
-        vm.stopBroadcast();
-    }
-
-    function setupTokenConfigBlocksensePrimary() external {
-        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
-        address payable priceFeedManager = payable(vm.envAddress("PRICE_FEED_MANAGER_ADDRESS"));
-        address projectToken = vm.envAddress("PROJECT_TOKEN");
-        address blocksenseAdapter = vm.envAddress("BLOCKSENSE_ADAPTER");
-        address chainlinkFeed = vm.envOr("CHAINLINK_FEED", address(0));
-
-        console.log("=== Setup Blocksense Primary ===");
-        vm.startBroadcast(deployerPrivateKey);
-
-        PriceFeedManager manager = PriceFeedManager(priceFeedManager);
-        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
-            primaryProviderId: manager.BLOCKSENSE_PROVIDER(),
-            secondaryProviderId: chainlinkFeed != address(0)
-                ? manager.CHAINLINK_PROVIDER()
-                : bytes32(0),
-            primaryFeed: blocksenseAdapter,
-            secondaryFeed: chainlinkFeed,
-            usePullMode: false
+            primaryProviderId: manager.PYTH_PROVIDER(),
+            secondaryProviderId: bytes32(0),
+            primaryFeed: projectToken,
+            secondaryFeed: address(0),
+            usePullMode: true
         });
 
         manager.setPriceFeedConfig(projectToken, config);

@@ -72,20 +72,31 @@ interface IVaultRouter {
     function maxDirectionalExposureBps() external view returns (uint16);
 
     // ========================================================================
-    // FUNDING GETTERS
+    // PRICE IMPACT GETTERS
     // ========================================================================
 
-    function getCumulativeFundingRates()
+    function getExecutionPrice(uint256 markPrice, uint8 direction, uint256 positionSize)
         external
         view
-        returns (int256 cumulativeLongRate, int256 cumulativeShortRate);
-    function lastFundingUpdateTime() external view returns (uint256);
-    function fundingEnabled() external view returns (bool);
-    function getFundingConfig() external view returns (uint16, uint16, uint16, uint16, uint16);
-    function getCurrentHourlyFundingRate()
+        returns (uint256 executionPrice, uint256 impactFee, uint256 impactBps, bool isCrowdedSide);
+    function getCurrentImpactRate()
         external
         view
-        returns (uint256 rateBps, bool longsPayShorts, uint256 imbalanceBps, bool hasCounterparty);
+        returns (uint256 impactBps, bool isLongDominant, uint256 imbalanceBps);
+    function getImpactStats()
+        external
+        view
+        returns (
+            uint256 longExposure,
+            uint256 shortExposure,
+            uint256 currentImpactBps,
+            bool isLongDominant,
+            uint256 imbalanceBps,
+            uint256 totalFeesCollected
+        );
+    function isImpactEnabled() external view returns (bool);
+    function getImpactConfig() external view returns (uint16, uint16, uint16, uint16, uint16);
+    function totalImpactFeesCollected() external view returns (uint256);
 
     // ========================================================================
     // RISK CONFIG GETTERS
@@ -184,15 +195,24 @@ interface IVaultRouter {
     function setGraduationThreshold(uint256 threshold) external;
     function withdrawFees(uint256 amount) external;
     function updateVaultParams(uint256 minBetAmount, uint256 maxBetAmount) external;
-    function updateHourlyFunding() external returns (int256, int256, uint256, bool);
-    function setFundingConfig(
-        uint16 tier1RateBps,
-        uint16 tier2RateBps,
-        uint16 tier3RateBps,
-        uint16 tier4RateBps,
-        uint16 tier5RateBps
+    function recordImpactFee(
+        uint64 positionId,
+        address user,
+        uint8 direction,
+        uint256 markPrice,
+        uint256 executionPrice,
+        uint256 impactBps,
+        uint256 impactFee,
+        bool isCrowdedSide
     ) external;
-    function setFundingEnabled(bool enabled) external;
+    function setImpactConfig(
+        uint16 tier1ImpactBps,
+        uint16 tier2ImpactBps,
+        uint16 tier3ImpactBps,
+        uint16 tier4ImpactBps,
+        uint16 tier5ImpactBps
+    ) external;
+    function setImpactEnabled(bool enabled) external;
 
     // ========================================================================
     // RISK CONFIG SETTERS (used by VaultAdminProxy)

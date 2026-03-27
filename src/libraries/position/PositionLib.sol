@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.22;
 
-import { MathLib } from "./MathLib.sol";
+import { MathLib } from "../math/MathLib.sol";
 
 /**
  * @title PositionLib
@@ -62,9 +62,6 @@ library PositionLib {
     // This means liquidation happens when loss = (100% - 20%) = 80% of collateral
     uint256 public constant DEFAULT_MAINTENANCE_MARGIN_RATIO = 2000; // 20% in bps
 
-    // Flat Liquidation Fee (in basis points)
-    uint256 public constant LIQUIDATION_FEE_BPS = 200; // Flat 2% for all leverage levels
-
     // Minimum time a position must be held before closing
     // 30s is sufficient to prevent flash loan attacks (block time ~12s)
     // and allows oracle prices to update (Chainlink heartbeat ~20s)
@@ -101,10 +98,9 @@ library PositionLib {
         uint256 minCloseTime; // Flash loan protection: earliest close time
         uint256 initialMargin; // Original collateral (before any add margin)
         uint256 addedMargin; // Total margin added after position open
-        // ========== FUNDING RATE FIELDS ==========
-        int256 entryFundingRateLong; // Cumulative funding rate for Longs at position open
-        int256 entryFundingRateShort; // Cumulative funding rate for Shorts at position open
-        uint256 lastFundingSettlement; // Timestamp of last funding settlement
+        // ========== PRICE IMPACT FIELDS ==========
+        uint256 impactFee; // One-time skew fee paid at open (stays in vault)
+        uint256 executionPrice; // Adjusted open price after impact (used for P&L display)
     }
 
     // ========================================================================
@@ -212,14 +208,6 @@ library PositionLib {
             // SHORT: liquidated when currentPrice >= liquidationPrice
             return currentPrice >= position.liquidationPrice;
         }
-    }
-
-    /**
-     * @notice Calculate liquidation fee (flat rate for all leverage levels)
-     * @return fee Fee in basis points (always 2%)
-     */
-    function calculateLiquidationFee() internal pure returns (uint256) {
-        return LIQUIDATION_FEE_BPS; // Always 2%
     }
 
     /**

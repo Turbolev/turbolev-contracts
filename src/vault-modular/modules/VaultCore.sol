@@ -2,13 +2,13 @@
 pragma solidity ^0.8.22;
 
 import "../VaultModuleBase.sol";
-import "../libraries/VaultStorageLib.sol";
-import "../../libraries/VaultLiquidityLib.sol";
-import "../../libraries/VaultPayoutLib.sol";
-import "../../libraries/VaultRiskLib.sol";
-import "../../libraries/VaultConfigLib.sol";
-import "../../libraries/FundingRateLib.sol";
-import "../../libraries/MathLib.sol";
+import "../../libraries/vault/VaultStorageLib.sol";
+import "../../libraries/vault/VaultLiquidityLib.sol";
+import "../../libraries/vault/VaultPayoutLib.sol";
+import "../../libraries/vault/VaultRiskLib.sol";
+import "../../libraries/vault/VaultConfigLib.sol";
+import "../../libraries/math/PriceImpactLib.sol";
+import "../../libraries/math/MathLib.sol";
 
 /**
  * @title VaultCore
@@ -257,11 +257,9 @@ contract VaultCore is VaultModuleBase {
         // Initialize max profit cap multiplier
         risk.maxProfitCapMultiplier = VaultConfigLib.DEFAULT_MAX_PROFIT_CAP_MULTIPLIER;
 
-        // Initialize funding config
-        funding.fundingConfig = FundingRateLib.getDefaultConfig();
-        funding.fundingEnabled = true;
-        funding.lastFundingUpdateTime = block.timestamp;
-        funding.lastFundingUpdateHour = block.timestamp / FundingRateLib.SECONDS_PER_HOUR;
+        // Initialize price impact config
+        funding.impactConfig = PriceImpactLib.getDefaultConfig();
+        funding.impactEnabled = true;
 
         // Initialize reentrancy guard
         core.reentrancyStatus = VaultStorageLib.NOT_ENTERED;

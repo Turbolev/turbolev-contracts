@@ -44,7 +44,7 @@ contract InteractVaultViewerModular is DeployHelper {
         viewTotalOIBreakdown();
         viewEffectiveMaxLeverage();
         viewDirectionalExposure();
-        viewFundingStats();
+        viewImpactStats();
         viewVaultUtilization();
         viewLPStats();
 
@@ -197,36 +197,35 @@ contract InteractVaultViewerModular is DeployHelper {
     // FUNDING RATE FUNCTIONS
     // ========================================================================
 
-    function viewFundingStats() public view {
-        console.log("\n--- Funding Stats ---");
+    function viewImpactStats() public view {
+        console.log("\n--- Price Impact Stats ---");
 
         (
-            int256 cumulativeLongRate,
-            int256 cumulativeShortRate,
-            uint256 lastUpdateTime,
-            uint256 currentHourlyRateBps,
-            bool longsPayShorts,
-            uint256 imbalanceBps
-        ) = viewer.getFundingStats(vaultAddress);
+            uint256 longExposure,
+            uint256 shortExposure,
+            uint256 currentImpactBps,
+            bool isLongDominant,
+            uint256 imbalanceBps,
+            uint256 totalFeesCollected
+        ) = viewer.getImpactStats(vaultAddress);
 
-        console.log("Cumulative Long Rate:", cumulativeLongRate);
-        console.log("Cumulative Short Rate:", cumulativeShortRate);
-        console.log("Last Update Time:", lastUpdateTime);
-        console.log("Current Hourly Rate:", currentHourlyRateBps, "bps");
-        console.log("Longs Pay Shorts:", longsPayShorts);
+        console.log("Long Exposure:", longExposure);
+        console.log("Short Exposure:", shortExposure);
+        console.log("Current Impact:", currentImpactBps, "bps");
+        console.log("Long Dominant:", isLongDominant);
         console.log("Imbalance:", imbalanceBps, "bps");
+        console.log("Total Fees Collected:", totalFeesCollected);
     }
 
-    function viewCurrentHourlyFundingRate() public view {
-        console.log("\n--- Current Hourly Funding Rate ---");
+    function viewCurrentImpactRate() public view {
+        console.log("\n--- Current Price Impact Rate ---");
 
-        (uint256 rateBps, bool longsPayShorts, uint256 imbalanceBps, bool hasCounterparty) =
-            viewer.getCurrentHourlyFundingRate(vaultAddress);
+        (uint256 impactBps, bool isLongDominant, uint256 imbalanceBps) =
+            viewer.getCurrentImpactRate(vaultAddress);
 
-        console.log("Rate:", rateBps, "bps");
-        console.log("Longs Pay Shorts:", longsPayShorts);
+        console.log("Impact Rate:", impactBps, "bps");
+        console.log("Long Dominant:", isLongDominant);
         console.log("Imbalance:", imbalanceBps, "bps");
-        console.log("Has Counterparty:", hasCounterparty);
     }
 
     // ========================================================================

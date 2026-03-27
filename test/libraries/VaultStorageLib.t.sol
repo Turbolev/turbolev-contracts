@@ -2,7 +2,7 @@
 pragma solidity ^0.8.22;
 
 import "forge-std/Test.sol";
-import "../../src/vault-modular/libraries/VaultStorageLib.sol";
+import "../../src/libraries/vault/VaultStorageLib.sol";
 
 /**
  * @title VaultStorageLibTest
