@@ -2,44 +2,53 @@
 pragma solidity ^0.8.22;
 
 import "../VaultModuleBase.sol";
-import "../libraries/VaultStorageLib.sol";
-import "../../libraries/FundingRateLib.sol";
-import "../../libraries/VaultConfigLib.sol";
+import "../../libraries/vault/VaultStorageLib.sol";
+import "../../libraries/math/PriceImpactLib.sol";
+import "../../libraries/vault/VaultConfigLib.sol";
 
 /**
  * @title VaultFunding
- * @notice Funding rate module handling hourly funding updates and position funding calculations
+ * @notice Price impact module: settles skew fee upfront at order creation.
  * @dev Called via delegatecall from VaultRouter. Uses shared EIP-7201 storage.
  *
  * Responsibilities:
- * - Hourly Funding Updates: updateHourlyFunding
- * - Position Funding Calculations: calculatePositionFunding, checkFundingLiquidation
+ * - Execution Price Calculation: getExecutionPrice
+ * - Impact Fee Settlement: recordImpactFee (called by VaultManager on depositFromBet)
  * - Exposure Tracking: totalLongExposure, totalShortExposure
- * - Funding Config: setFundingConfig, setFundingEnabled
+ * - Impact Config: setImpactConfig, setImpactEnabled
+ *
+ * Fee Flow:
+ *   crowded-side user opens position
+ *   → impactFee = collateral * impactBps / 10000
+ *   → impactFee stays in vault (added to feePool / vault liquidity)
+ *   → user's effective collateral = collateral - impactFee
  */
 contract VaultFunding is VaultModuleBase {
     // ========================================================================
     // EVENTS
     // ========================================================================
 
-    event HourlyFundingUpdated(
-        int256 newLongRate,
-        int256 newShortRate,
-        uint256 imbalanceBps,
-        uint256 hourlyRateBps,
-        bool isLongDominant,
-        bool hasCounterparty,
+    event PriceImpactApplied(
+        uint64 indexed positionId,
+        address indexed user,
+        uint8 direction,
+        uint256 markPrice,
+        uint256 executionPrice,
+        uint256 impactBps,
+        uint256 impactFee,
+        bool isCrowdedSide,
         uint256 timestamp
     );
-    event FundingUpdateCapped(uint256 actualHours, uint256 cappedHours, uint256 timestamp);
-    event FundingConfigUpdated(
-        uint16 tier1RateBps,
-        uint16 tier2RateBps,
-        uint16 tier3RateBps,
-        uint16 tier4RateBps,
-        uint16 tier5RateBps
+
+    event ImpactConfigUpdated(
+        uint16 tier1ImpactBps,
+        uint16 tier2ImpactBps,
+        uint16 tier3ImpactBps,
+        uint16 tier4ImpactBps,
+        uint16 tier5ImpactBps
     );
-    event FundingEnabledUpdated(bool enabled);
+
+    event ImpactEnabledUpdated(bool enabled);
 
     // ========================================================================
     // ERRORS
@@ -48,97 +57,79 @@ contract VaultFunding is VaultModuleBase {
     error InvalidParameters();
 
     // ========================================================================
-    // FUNDING RATE FUNCTIONS
+    // PRICE IMPACT FUNCTIONS
     // ========================================================================
 
     /**
-     * @notice Update hourly funding rates
-     * @dev Permissionless - anyone can call to update funding
-     *      Can only actually update once per hour (returns early if already updated).
-     *      MAX_CATCHUP_HOURS limits impact if updates are missed for extended periods.
+     * @notice Calculate execution price and impact fee for a new position
+     * @param markPrice Current oracle mark price
+     * @param direction Position direction (1 = LONG, 2 = SHORT)
+     * @param positionSize Notional position size (collateral * leverage)
+     * @return executionPrice Adjusted price for P&L calculation
+     * @return impactFee Fee collected by vault (= positionSize * impactBps / 10000)
+     * @return impactBps Applied impact in basis points
+     * @return isCrowdedSide True if user opened on the crowded (penalized) side
      */
-    function updateHourlyFunding()
+    function getExecutionPrice(uint256 markPrice, uint8 direction, uint256 positionSize)
         external
-        nonReentrant
-        permissionlessOrKeeper
-        returns (
-            int256 newLongRate,
-            int256 newShortRate,
-            uint256 imbalanceBps,
-            bool hasCounterparty
-        )
+        view
+        returns (uint256 executionPrice, uint256 impactFee, uint256 impactBps, bool isCrowdedSide)
     {
         VaultStorageLib.FundingStorage storage funding = _funding();
 
-        if (!funding.fundingEnabled) {
-            return (funding.cumulativeFundingRateLong, funding.cumulativeFundingRateShort, 0, false);
+        if (!funding.impactEnabled) {
+            return (markPrice, 0, 0, false);
         }
 
-        uint256 currentHour = block.timestamp / FundingRateLib.SECONDS_PER_HOUR;
-
-        // Calculate hours elapsed since last update
-        uint256 hoursElapsed = currentHour - funding.lastFundingUpdateHour;
-
-        if (hoursElapsed == 0) {
-            // Already updated this hour - return early with minimal gas
-            return (funding.cumulativeFundingRateLong, funding.cumulativeFundingRateShort, 0, true);
-        }
-
-        // Cap hours to limit manipulation impact
-        bool wasCapped = false;
-        if (hoursElapsed > VaultConfigLib.MAX_CATCHUP_HOURS) {
-            wasCapped = true;
-            hoursElapsed = VaultConfigLib.MAX_CATCHUP_HOURS;
-        }
-
-        // Calculate current imbalance
-        bool isLongDominant;
-        (imbalanceBps, isLongDominant, hasCounterparty) = FundingRateLib.calculateImbalance(
-            funding.totalLongExposure, funding.totalShortExposure
+        PriceImpactLib.ImpactResult memory result = PriceImpactLib.calculateExecutionPrice(
+            markPrice,
+            direction,
+            funding.totalLongExposure,
+            funding.totalShortExposure,
+            funding.impactConfig
         );
 
-        // Get hourly rate based on imbalance tier
-        uint16 hourlyRateBps = FundingRateLib.getHourlyRate(imbalanceBps, funding.fundingConfig);
+        impactFee =
+            PriceImpactLib.calculateImpactFee(positionSize, result.impactBps, result.isCrowdedSide);
 
-        // Calculate rate delta for each hour elapsed
-        // Only apply funding if there's a counterparty to receive it
-        if (hasCounterparty && hoursElapsed > 0) {
-            (int256 longDelta, int256 shortDelta) = FundingRateLib.calculateHourlyRateDelta(
-                hourlyRateBps, isLongDominant, funding.totalLongExposure, funding.totalShortExposure
-            );
+        return (result.executionPrice, impactFee, result.impactBps, result.isCrowdedSide);
+    }
 
-            // Apply for each hour elapsed (capped at MAX_CATCHUP_HOURS)
-            funding.cumulativeFundingRateLong += longDelta * int256(hoursElapsed);
-            funding.cumulativeFundingRateShort += shortDelta * int256(hoursElapsed);
-        }
+    /**
+     * @notice Record impact fee collected and emit event (called by VaultManager)
+     * @param positionId Position ID
+     * @param user User address
+     * @param direction Position direction
+     * @param markPrice Oracle mark price
+     * @param executionPrice Adjusted execution price
+     * @param impactBps Applied impact bps
+     * @param impactFee Fee amount collected
+     * @param isCrowdedSide True if user was on crowded side
+     */
+    function recordImpactFee(
+        uint64 positionId,
+        address user,
+        uint8 direction,
+        uint256 markPrice,
+        uint256 executionPrice,
+        uint256 impactBps,
+        uint256 impactFee,
+        bool isCrowdedSide
+    ) external nonReentrant onlyPositionManager {
+        VaultStorageLib.FundingStorage storage funding = _funding();
+        funding.totalImpactFeesCollected += impactFee;
 
-        // Update timestamp
-        funding.lastFundingUpdateTime = block.timestamp;
-        funding.lastFundingUpdateHour = currentHour;
-
-        newLongRate = funding.cumulativeFundingRateLong;
-        newShortRate = funding.cumulativeFundingRateShort;
-
-        emit HourlyFundingUpdated(
-            newLongRate,
-            newShortRate,
-            imbalanceBps,
-            hourlyRateBps,
-            isLongDominant,
-            hasCounterparty,
+        emit PriceImpactApplied(
+            positionId,
+            user,
+            direction,
+            markPrice,
+            executionPrice,
+            impactBps,
+            impactFee,
+            isCrowdedSide,
             block.timestamp
         );
-
-        // Emit event if hours were capped
-        if (wasCapped) {
-            emit FundingUpdateCapped(
-                currentHour - funding.lastFundingUpdateHour,
-                VaultConfigLib.MAX_CATCHUP_HOURS,
-                block.timestamp
-            );
-        }
-
-        return (newLongRate, newShortRate, imbalanceBps, hasCounterparty);
     }
 
     // ========================================================================
@@ -146,156 +137,32 @@ contract VaultFunding is VaultModuleBase {
     // ========================================================================
 
     /**
-     * @notice Get cumulative funding rates
-     * @return cumulativeLongRate Cumulative funding rate for Longs
-     * @return cumulativeShortRate Cumulative funding rate for Shorts
-     */
-    function getCumulativeFundingRates()
-        external
-        view
-        returns (int256 cumulativeLongRate, int256 cumulativeShortRate)
-    {
-        VaultStorageLib.FundingStorage storage funding = _funding();
-        return (funding.cumulativeFundingRateLong, funding.cumulativeFundingRateShort);
-    }
-
-    /**
-     * @notice Calculate funding owed by a position (zero-sum distribution)
-     * @param entryRateLong Entry cumulative funding rate for Longs
-     * @param entryRateShort Entry cumulative funding rate for Shorts
-     * @param positionSize Position size
-     * @param direction Position direction (1 = LONG, 2 = SHORT)
-     * @return fundingOwed Funding owed (positive = owes, negative = receives)
-     * @dev Uses zero-sum distribution: Total paid by dominant = Total received by minority
-     *      No OI check - funding accumulated must be settled even if counterparty closed
-     */
-    function calculatePositionFunding(
-        int256 entryRateLong,
-        int256 entryRateShort,
-        uint256 positionSize,
-        uint8 direction
-    ) external view returns (int256 fundingOwed) {
-        VaultStorageLib.FundingStorage storage funding = _funding();
-
-        if (!funding.fundingEnabled) return 0;
-
-        return FundingRateLib.calculatePositionFunding(
-            entryRateLong,
-            entryRateShort,
-            funding.cumulativeFundingRateLong,
-            funding.cumulativeFundingRateShort,
-            positionSize,
-            direction
-        );
-    }
-
-    /**
-     * @notice Get current hourly funding rate based on imbalance
-     * @return rateBps Current hourly rate in basis points (0 if disabled or no counterparty)
-     * @return longsPayShorts True if longs pay shorts
+     * @notice Get current price impact rate based on OI imbalance
+     * @return impactBps Current impact rate in basis points
+     * @return isLongDominant True if longs are dominant
      * @return imbalanceBps Current imbalance in basis points
-     * @return hasCounterparty True if there's a counterparty
-     * @dev Returns rateBps = 0 if funding is disabled or no counterparty exists
      */
-    function getCurrentHourlyFundingRate()
+    function getCurrentImpactRate()
         external
         view
-        returns (uint256 rateBps, bool longsPayShorts, uint256 imbalanceBps, bool hasCounterparty)
+        returns (uint256 impactBps, bool isLongDominant, uint256 imbalanceBps)
     {
         VaultStorageLib.FundingStorage storage funding = _funding();
 
-        // Return 0 if funding is disabled
-        if (!funding.fundingEnabled) {
-            return (0, false, 0, false);
+        if (!funding.impactEnabled) {
+            return (0, false, 0);
         }
 
-        (imbalanceBps, longsPayShorts, hasCounterparty) = FundingRateLib.calculateImbalance(
-            funding.totalLongExposure, funding.totalShortExposure
-        );
-
-        // Only return rate if there's a counterparty (funding only applies when both sides exist)
-        if (!hasCounterparty) {
-            return (0, longsPayShorts, imbalanceBps, false);
+        if (funding.totalLongExposure + funding.totalShortExposure == 0) {
+            return (0, false, 0);
         }
-
-        rateBps = FundingRateLib.getHourlyRate(imbalanceBps, funding.fundingConfig);
-    }
-
-    /**
-     * @notice Check if position should be liquidated due to funding
-     * @param collateral Position collateral
-     * @param entryRateLong Entry cumulative funding rate for Longs
-     * @param entryRateShort Entry cumulative funding rate for Shorts
-     * @param positionSize Position size
-     * @param direction Position direction (1 = LONG, 2 = SHORT)
-     * @param maintenanceMarginRatio Maintenance margin ratio in basis points
-     * @return isLiquidatable True if position should be liquidated
-     * @return fundingOwed Funding owed
-     * @return effectiveCollateral Effective collateral after funding
-     * @dev Uses zero-sum funding calculation
-     */
-    function checkFundingLiquidation(
-        uint256 collateral,
-        int256 entryRateLong,
-        int256 entryRateShort,
-        uint256 positionSize,
-        uint8 direction,
-        uint256 maintenanceMarginRatio
-    ) external view returns (bool isLiquidatable, int256 fundingOwed, uint256 effectiveCollateral) {
-        VaultStorageLib.FundingStorage storage funding = _funding();
-
-        if (!funding.fundingEnabled) return (false, 0, collateral);
-
-        fundingOwed = FundingRateLib.calculatePositionFunding(
-            entryRateLong,
-            entryRateShort,
-            funding.cumulativeFundingRateLong,
-            funding.cumulativeFundingRateShort,
-            positionSize,
-            direction
-        );
-
-        bool isNegative;
-        (effectiveCollateral, isNegative) =
-            FundingRateLib.calculateEffectiveCollateral(collateral, fundingOwed);
-        if (isNegative) return (true, fundingOwed, 0);
-
-        isLiquidatable =
-            FundingRateLib.checkFundingLiquidation(collateral, fundingOwed, maintenanceMarginRatio);
-    }
-
-    /**
-     * @notice Get funding statistics
-     * @return cumulativeLong Cumulative long rate
-     * @return cumulativeShort Cumulative short rate
-     * @return lastUpdateTime Last update timestamp
-     * @return currentHourlyRate Current hourly rate in bps
-     * @return longsPayShorts True if longs pay shorts
-     * @return imbalanceBps Current imbalance in bps
-     */
-    function getFundingStats()
-        external
-        view
-        returns (
-            int256 cumulativeLong,
-            int256 cumulativeShort,
-            uint256 lastUpdateTime,
-            uint256 currentHourlyRate,
-            bool longsPayShorts,
-            uint256 imbalanceBps
-        )
-    {
-        VaultStorageLib.FundingStorage storage funding = _funding();
-
-        cumulativeLong = funding.cumulativeFundingRateLong;
-        cumulativeShort = funding.cumulativeFundingRateShort;
-        lastUpdateTime = funding.lastFundingUpdateTime;
 
         bool hasCounterparty;
-        (imbalanceBps, longsPayShorts, hasCounterparty) = FundingRateLib.calculateImbalance(
+        (imbalanceBps, isLongDominant, hasCounterparty) = PriceImpactLib.calculateImbalance(
             funding.totalLongExposure, funding.totalShortExposure
         );
-        currentHourlyRate = FundingRateLib.getHourlyRate(imbalanceBps, funding.fundingConfig);
+
+        impactBps = PriceImpactLib.getTieredImpactBps(imbalanceBps, funding.impactConfig);
     }
 
     /**
@@ -335,26 +202,48 @@ contract VaultFunding is VaultModuleBase {
 
         bool hasCounterparty;
         (imbalanceBps, longsAreDominant, hasCounterparty) =
-            FundingRateLib.calculateImbalance(longExposure, shortExposure);
+            PriceImpactLib.calculateImbalance(longExposure, shortExposure);
 
         maxDirectionalExposureBps = risk.maxDirectionalExposureBps;
+    }
+
+    /**
+     * @notice Get price impact statistics
+     * @return longExposure Total long OI
+     * @return shortExposure Total short OI
+     * @return currentImpactBps Current impact rate in bps
+     * @return isLongDominant True if longs are dominant
+     * @return imbalanceBps Current imbalance in bps
+     * @return totalFeesCollected Lifetime impact fees collected by vault
+     */
+    function getImpactStats()
+        external
+        view
+        returns (
+            uint256 longExposure,
+            uint256 shortExposure,
+            uint256 currentImpactBps,
+            bool isLongDominant,
+            uint256 imbalanceBps,
+            uint256 totalFeesCollected
+        )
+    {
+        VaultStorageLib.FundingStorage storage funding = _funding();
+
+        longExposure = funding.totalLongExposure;
+        shortExposure = funding.totalShortExposure;
+        totalFeesCollected = funding.totalImpactFeesCollected;
+
+        bool hasCounterparty;
+        (imbalanceBps, isLongDominant, hasCounterparty) =
+            PriceImpactLib.calculateImbalance(longExposure, shortExposure);
+
+        currentImpactBps = PriceImpactLib.getTieredImpactBps(imbalanceBps, funding.impactConfig);
     }
 
     // ========================================================================
     // EXPOSURE GETTERS (for compatibility)
     // ========================================================================
-
-    function cumulativeFundingRateLong() external view returns (int256) {
-        return _funding().cumulativeFundingRateLong;
-    }
-
-    function cumulativeFundingRateShort() external view returns (int256) {
-        return _funding().cumulativeFundingRateShort;
-    }
-
-    function lastFundingUpdateTime() external view returns (uint256) {
-        return _funding().lastFundingUpdateTime;
-    }
 
     function totalLongExposure() external view returns (uint256) {
         return _funding().totalLongExposure;
@@ -364,8 +253,12 @@ contract VaultFunding is VaultModuleBase {
         return _funding().totalShortExposure;
     }
 
-    function isFundingEnabled() external view returns (bool) {
-        return _funding().fundingEnabled;
+    function isImpactEnabled() external view returns (bool) {
+        return _funding().impactEnabled;
+    }
+
+    function totalImpactFeesCollected() external view returns (uint256) {
+        return _funding().totalImpactFeesCollected;
     }
 
     // ========================================================================
@@ -373,80 +266,74 @@ contract VaultFunding is VaultModuleBase {
     // ========================================================================
 
     /**
-     * @notice Set funding rate configuration
-     * @param tier1RateBps Rate for < 20% imbalance
-     * @param tier2RateBps Rate for 20-40% imbalance
-     * @param tier3RateBps Rate for 40-60% imbalance
-     * @param tier4RateBps Rate for 60-80% imbalance
-     * @param tier5RateBps Rate for > 80% imbalance
+     * @notice Set price impact tier configuration
+     * @param tier1ImpactBps Impact for < 20% imbalance
+     * @param tier2ImpactBps Impact for 20-40% imbalance
+     * @param tier3ImpactBps Impact for 40-60% imbalance
+     * @param tier4ImpactBps Impact for 60-80% imbalance
+     * @param tier5ImpactBps Impact for > 80% imbalance
      */
-    function setFundingConfig(
-        uint16 tier1RateBps,
-        uint16 tier2RateBps,
-        uint16 tier3RateBps,
-        uint16 tier4RateBps,
-        uint16 tier5RateBps
+    function setImpactConfig(
+        uint16 tier1ImpactBps,
+        uint16 tier2ImpactBps,
+        uint16 tier3ImpactBps,
+        uint16 tier4ImpactBps,
+        uint16 tier5ImpactBps
     ) external nonReentrant onlyVaultManagerOrHelper {
         VaultStorageLib.FundingStorage storage funding = _funding();
 
-        FundingRateLib.FundingConfig memory newConfig = FundingRateLib.FundingConfig({
-            tier1RateBps: tier1RateBps,
-            tier2RateBps: tier2RateBps,
-            tier3RateBps: tier3RateBps,
-            tier4RateBps: tier4RateBps,
-            tier5RateBps: tier5RateBps,
-            isEnabled: funding.fundingEnabled
+        PriceImpactLib.ImpactConfig memory newConfig = PriceImpactLib.ImpactConfig({
+            tier1ImpactBps: tier1ImpactBps,
+            tier2ImpactBps: tier2ImpactBps,
+            tier3ImpactBps: tier3ImpactBps,
+            tier4ImpactBps: tier4ImpactBps,
+            tier5ImpactBps: tier5ImpactBps,
+            isEnabled: funding.impactEnabled
         });
 
-        if (!FundingRateLib.validateConfig(newConfig)) {
+        if (!PriceImpactLib.validateConfig(newConfig)) {
             revert InvalidParameters();
         }
 
-        funding.fundingConfig = newConfig;
+        funding.impactConfig = newConfig;
 
-        emit FundingConfigUpdated(
-            tier1RateBps, tier2RateBps, tier3RateBps, tier4RateBps, tier5RateBps
+        emit ImpactConfigUpdated(
+            tier1ImpactBps, tier2ImpactBps, tier3ImpactBps, tier4ImpactBps, tier5ImpactBps
         );
     }
 
     /**
-     * @notice Enable or disable funding rate
-     * @param enabled True to enable funding
+     * @notice Enable or disable price impact
+     * @param enabled True to enable price impact
      */
-    function setFundingEnabled(bool enabled) external nonReentrant onlyVaultManagerOrHelper {
+    function setImpactEnabled(bool enabled) external nonReentrant onlyVaultManagerOrHelper {
         VaultStorageLib.FundingStorage storage funding = _funding();
-        funding.fundingEnabled = enabled;
-        funding.fundingConfig.isEnabled = enabled;
-        emit FundingEnabledUpdated(enabled);
+        funding.impactEnabled = enabled;
+        funding.impactConfig.isEnabled = enabled;
+        emit ImpactEnabledUpdated(enabled);
     }
 
     /**
-     * @notice Get funding configuration
-     * @return tier1RateBps Tier 1 rate
-     * @return tier2RateBps Tier 2 rate
-     * @return tier3RateBps Tier 3 rate
-     * @return tier4RateBps Tier 4 rate
-     * @return tier5RateBps Tier 5 rate
+     * @notice Get price impact configuration
      */
-    function getFundingConfig()
+    function getImpactConfig()
         external
         view
         returns (
-            uint16 tier1RateBps,
-            uint16 tier2RateBps,
-            uint16 tier3RateBps,
-            uint16 tier4RateBps,
-            uint16 tier5RateBps
+            uint16 tier1ImpactBps,
+            uint16 tier2ImpactBps,
+            uint16 tier3ImpactBps,
+            uint16 tier4ImpactBps,
+            uint16 tier5ImpactBps
         )
     {
         VaultStorageLib.FundingStorage storage funding = _funding();
         return (
-            funding.fundingConfig.tier1RateBps,
-            funding.fundingConfig.tier2RateBps,
-            funding.fundingConfig.tier3RateBps,
-            funding.fundingConfig.tier4RateBps,
-            funding.fundingConfig.tier5RateBps
+            funding.impactConfig.tier1ImpactBps,
+            funding.impactConfig.tier2ImpactBps,
+            funding.impactConfig.tier3ImpactBps,
+            funding.impactConfig.tier4ImpactBps,
+            funding.impactConfig.tier5ImpactBps
         );
     }
 }
-

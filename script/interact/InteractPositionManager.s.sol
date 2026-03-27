@@ -5,7 +5,7 @@ import "forge-std/Script.sol";
 import "forge-std/console.sol";
 import "../DeployHelper.s.sol";
 import "../../src/position-modular/PositionRouter.sol";
-import "../../src/libraries/PositionLib.sol";
+import "../../src/libraries/position/PositionLib.sol";
 
 contract InteractPositionManager is DeployHelper {
     PositionRouter public pm;

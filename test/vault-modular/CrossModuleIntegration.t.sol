@@ -61,16 +61,8 @@ contract CrossModuleIntegrationTest is BaseTestModular {
         VaultStorageLib.LPPosition memory lpPosition = vault.getLPPosition(user1);
         assertGt(lpPosition.shares, 0, "LP should have shares after deposit");
 
-        // Step 2: Skip 1 hour and update funding (VaultFunding module)
+        // Step 2: Skip time (funding is now settled upfront, no periodic update needed)
         vm.warp(block.timestamp + 1 hours);
-
-        // Update hourly funding (permissionless)
-        (int256 newLongRate, int256 newShortRate,,) = vault.updateHourlyFunding();
-
-        // Verify funding was updated
-        assertEq(
-            vault.lastFundingUpdateTime(), block.timestamp, "Funding update time should be current"
-        );
 
         // Step 3: Skip to next day for rewards (VaultRewards module)
         vm.warp(block.timestamp + 1 days);
@@ -118,8 +110,8 @@ contract CrossModuleIntegrationTest is BaseTestModular {
         vm.warp(block.timestamp + 1 hours);
 
         // These operations use the shared reentrancy guard
-        // If guard wasn't shared, they could potentially be called during each other
-        vault.updateHourlyFunding();
+        // Price impact is settled upfront; no periodic funding update needed
+        (uint256 impactBps,,) = vault.getCurrentImpactRate();
 
         // Add more liquidity (uses nonReentrant in VaultCore)
         vm.startPrank(user1);
@@ -202,14 +194,11 @@ contract CrossModuleIntegrationTest is BaseTestModular {
         );
         assertGt(afterDeposit.totalShares, initialShares, "Total shares should increase");
 
-        // Step 2: VaultFunding - Update funding rates
+        // Step 2: VaultFunding - Price impact is upfront; check impact stats
         vm.warp(block.timestamp + 2 hours);
-        vault.updateHourlyFunding();
+        (uint256 _impactBps,,) = vault.getCurrentImpactRate();
 
-        // Verify funding storage updated
-        assertEq(vault.lastFundingUpdateTime(), block.timestamp, "Funding timestamp should update");
-
-        // Core storage should be unchanged by funding update
+        // Core storage should be unchanged by impact query
         uint256 liquidityAfterFunding = vault.getVaultInfo().totalLiquidity;
         assertEq(
             liquidityAfterFunding,
@@ -260,9 +249,8 @@ contract CrossModuleIntegrationTest is BaseTestModular {
         assertGt(lp1.shares, 0, "User1 should have shares");
         assertGt(lp2.shares, 0, "User2 should have shares");
 
-        // Time passes, funding updates
+        // Time passes
         vm.warp(block.timestamp + 1 hours);
-        vault.updateHourlyFunding();
 
         // More time passes, rewards finalized
         vm.warp(block.timestamp + 1 days);
@@ -283,28 +271,25 @@ contract CrossModuleIntegrationTest is BaseTestModular {
     }
 
     // ========================================================================
-    // TEST 6: Funding Update After LP Operations
+    // TEST 6: Price Impact After LP Operations
     // ========================================================================
 
-    function test_FundingUpdate_AfterLiquidityChanges() public {
+    function test_ImpactStats_AfterLiquidityChanges() public {
         uint256 depositAmount = 1000 ether;
 
         // Add liquidity
         _addLiquidity(user1, depositAmount);
 
-        // Get initial funding state
-        (int256 initialLongRate, int256 initialShortRate) = vault.getCumulativeFundingRates();
+        // Get initial impact state
+        (uint256 initialImpactBps,,) = vault.getCurrentImpactRate();
 
         // Skip time
         vm.warp(block.timestamp + 1 hours);
 
-        // Update funding
-        (int256 newLongRate, int256 newShortRate,,) = vault.updateHourlyFunding();
+        // Impact stats should be queryable without revert
+        (uint256 newImpactBps,,) = vault.getCurrentImpactRate();
 
-        // Funding rates should be tracked (may be 0 if no exposure)
-        // The important thing is no revert occurs
-
-        // Add more liquidity after funding update
+        // Add more liquidity after impact query
         _addLiquidity(user1, depositAmount);
 
         // Verify all state is consistent
@@ -353,10 +338,9 @@ contract CrossModuleIntegrationTest is BaseTestModular {
         // Verify paused
         assertTrue(vault.paused(), "Vault should be paused");
 
-        // updateHourlyFunding should still work (doesn't have whenNotPaused)
+        // Price impact queries should still work while paused
         vm.warp(block.timestamp + 1 hours);
-        // Note: updateHourlyFunding uses permissionlessOrKeeper, no pause check
-        vault.updateHourlyFunding();
+        (uint256 _impactBps2,,) = vault.getCurrentImpactRate();
 
         // Unpause
         vm.prank(address(vaultManager));

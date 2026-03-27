@@ -59,8 +59,6 @@ contract PriceFeedManager is
     // PREDEFINED PROVIDER IDs (for common use)
     // ========================================================================
 
-    bytes32 public constant CHAINLINK_PROVIDER = keccak256("CHAINLINK");
-    bytes32 public constant BLOCKSENSE_PROVIDER = keccak256("BLOCKSENSE");
     bytes32 public constant PYTH_PROVIDER = keccak256("PYTH");
 
     // ========================================================================

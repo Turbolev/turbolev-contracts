@@ -58,5 +58,9 @@ node_scripts/
 src/legacy/
 legacy/
 
+# Mock contracts (local only)
+src/mock/
+test/mock/
+
 # Audit
 audit/

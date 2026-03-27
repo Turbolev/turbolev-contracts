@@ -339,7 +339,10 @@ contract VaultAccessControllerTest is BaseTestModular {
         // Create a second vault
         vm.prank(owner);
         address vault2 = vaultManager.createVault(
-            address(new MockERC20("T2", "T2")), DEFAULT_MIN_BET, DEFAULT_MAX_BET, DEFAULT_GRADUATION_THRESHOLD
+            address(new MockERC20("T2", "T2")),
+            DEFAULT_MIN_BET,
+            DEFAULT_MAX_BET,
+            DEFAULT_GRADUATION_THRESHOLD
         );
 
         // Grant EMERGENCY_ROLE to VaultAccessController

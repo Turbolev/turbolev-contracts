@@ -4,8 +4,7 @@ pragma solidity ^0.8.22;
 import "forge-std/Script.sol";
 import "./DeployHelper.s.sol";
 
-import "../src/oracles/BlocksenseOracle.sol";
-import "../src/oracles/ChainlinkOracle.sol";
+import "../src/oracles/PythOracle.sol";
 import "../src/SettlementEngine.sol";
 import "../src/PriceFeedManager.sol";
 import "../src/interfaces/IPriceFeedManager.sol";
@@ -35,8 +34,7 @@ import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
  */
 contract DeployAllModular is DeployHelper {
     // Implementations for upgradeable contracts
-    address public blocksenseOracleImpl;
-    address public chainlinkOracleImpl;
+    address public pythOracleImpl;
     address public settlementEngineImpl;
     address public vaultManagerImpl;
     address public priceFeedManagerImpl;
@@ -127,21 +125,14 @@ contract DeployAllModular is DeployHelper {
     function _deployOracles() internal {
         console.log("\n--- Phase 2: Deploying Oracles ---");
 
-        // BlocksenseOracle
-        blocksenseOracleImpl = address(new BlocksenseOracle());
-        bytes memory blocksenseInitData = abi.encodeWithSelector(
-            BlocksenseOracle.initialize.selector, owner, ORACLE_MAX_PRICE_AGE
+        // PythOracle
+        address pythContractAddr = vm.envAddress("PYTH_CONTRACT");
+        pythOracleImpl = address(new PythOracle());
+        bytes memory pythInitData = abi.encodeWithSelector(
+            PythOracle.initialize.selector, owner, pythContractAddr, ORACLE_MAX_PRICE_AGE
         );
-        blocksenseOracle =
-            payable(address(new ERC1967Proxy(blocksenseOracleImpl, blocksenseInitData)));
-        console.log("BlocksenseOracle deployed:", blocksenseOracle);
-
-        // ChainlinkOracle
-        chainlinkOracleImpl = address(new ChainlinkOracle());
-        bytes memory chainlinkInitData =
-            abi.encodeWithSelector(ChainlinkOracle.initialize.selector, ORACLE_MAX_PRICE_AGE);
-        chainlinkOracle = payable(address(new ERC1967Proxy(chainlinkOracleImpl, chainlinkInitData)));
-        console.log("ChainlinkOracle deployed:", chainlinkOracle);
+        pythOracle = payable(address(new ERC1967Proxy(pythOracleImpl, pythInitData)));
+        console.log("PythOracle deployed:", pythOracle);
 
         // PriceFeedManager
         priceFeedManagerImpl = address(new PriceFeedManager());
@@ -308,24 +299,14 @@ contract DeployAllModular is DeployHelper {
 
         PriceFeedManager manager = PriceFeedManager(payable(priceFeedManager));
 
-        // Register Chainlink Provider
-        IPriceFeedManager.OracleProvider memory chainlinkProvider = IPriceFeedManager.OracleProvider({
-            oracleContract: chainlinkOracle, oracleType: IBaseOracle.OracleType.PUSH, enabled: true
+        // Register Pyth Provider
+        IPriceFeedManager.OracleProvider memory pythProvider = IPriceFeedManager.OracleProvider({
+            oracleContract: pythOracle, oracleType: IBaseOracle.OracleType.PULL, enabled: true
         });
 
-        if (!manager.providerExists(manager.CHAINLINK_PROVIDER())) {
-            manager.registerOracleProvider(manager.CHAINLINK_PROVIDER(), chainlinkProvider);
-            console.log("[OK] Registered CHAINLINK_PROVIDER");
-        }
-
-        // Register Blocksense Provider
-        IPriceFeedManager.OracleProvider memory blocksenseProvider = IPriceFeedManager.OracleProvider({
-            oracleContract: blocksenseOracle, oracleType: IBaseOracle.OracleType.PUSH, enabled: true
-        });
-
-        if (!manager.providerExists(manager.BLOCKSENSE_PROVIDER())) {
-            manager.registerOracleProvider(manager.BLOCKSENSE_PROVIDER(), blocksenseProvider);
-            console.log("[OK] Registered BLOCKSENSE_PROVIDER");
+        if (!manager.providerExists(manager.PYTH_PROVIDER())) {
+            manager.registerOracleProvider(manager.PYTH_PROVIDER(), pythProvider);
+            console.log("[OK] Registered PYTH_PROVIDER");
         }
     }
 
@@ -336,8 +317,7 @@ contract DeployAllModular is DeployHelper {
     function _verifyDeployment() internal view {
         console.log("\n--- Phase 10: Verifying Deployment ---");
 
-        require(blocksenseOracle != address(0), "BlocksenseOracle not deployed");
-        require(chainlinkOracle != address(0), "ChainlinkOracle not deployed");
+        require(pythOracle != address(0), "PythOracle not deployed");
         require(settlementEngine != address(0), "SettlementEngine not deployed");
         require(positionManager != address(0), "PositionRouter not deployed");
         require(vaultManager != address(0), "VaultManager not deployed");
@@ -359,8 +339,7 @@ contract DeployAllModular is DeployHelper {
         console.log("TimelockController:", deployedTimelock);
         console.log("VaultAccessController:", vaultAccessController);
         console.log("\n--- Oracles ---");
-        console.log("BlocksenseOracle:", blocksenseOracle);
-        console.log("ChainlinkOracle:", chainlinkOracle);
+        console.log("PythOracle:", pythOracle);
         console.log("PriceFeedManager:", priceFeedManager);
         console.log("\n--- Core Contracts ---");
         console.log("SettlementEngine:", settlementEngine);

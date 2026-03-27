@@ -17,7 +17,7 @@ interface IPriceFeedManager {
      * @notice Oracle provider configuration
      */
     struct OracleProvider {
-        address oracleContract; // Oracle contract address (BlocksenseOracle, ChainlinkOracle, PythOracle, etc.)
+        address oracleContract; // Oracle contract address (e.g., PythOracle)
         IBaseOracle.OracleType oracleType; // PUSH or PULL
         bool enabled; // Whether this provider is enabled
     }
@@ -26,7 +26,7 @@ interface IPriceFeedManager {
      * @notice Price feed configuration for a project token
      * @param primaryProviderId ID of primary oracle provider
      * @param secondaryProviderId ID of secondary oracle provider (fallback)
-     * @param primaryFeed Feed address for primary provider (e.g., Chainlink Aggregator address)
+     * @param primaryFeed Feed address for primary provider (e.g., Pyth price feed ID as address)
      * @param secondaryFeed Feed address for secondary provider
      * @param usePullMode Whether to use pull mode for oracles that support it
      */

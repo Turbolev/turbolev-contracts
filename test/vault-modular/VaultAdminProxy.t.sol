@@ -235,40 +235,36 @@ contract VaultAdminProxyTest is BaseTestModular {
         // Treasury should be updated (no getter in interface, so we just verify no revert)
     }
 
-    function test_SetVaultFundingEnabled() public {
+    function test_SetVaultImpactEnabled() public {
         vm.startPrank(mockTimelockController);
         vaultAccessController.grantRole(VAULT_ADMIN_ROLE, admin);
         vm.stopPrank();
 
         vm.prank(admin);
-        vaultAdminProxy.setVaultFundingEnabled(address(projectToken), false);
+        vaultAdminProxy.setVaultImpactEnabled(address(projectToken), false);
 
-        assertFalse(IVaultRouter(testVault).fundingEnabled());
+        assertFalse(IVaultRouter(testVault).isImpactEnabled());
 
         vm.prank(admin);
-        vaultAdminProxy.setVaultFundingEnabled(address(projectToken), true);
+        vaultAdminProxy.setVaultImpactEnabled(address(projectToken), true);
 
-        assertTrue(IVaultRouter(testVault).fundingEnabled());
+        assertTrue(IVaultRouter(testVault).isImpactEnabled());
     }
 
-    function test_SetVaultFundingConfig() public {
+    function test_SetVaultImpactConfig() public {
         vm.startPrank(mockTimelockController);
         vaultAccessController.grantRole(VAULT_ADMIN_ROLE, admin);
         vm.stopPrank();
 
-        // Just verify the call succeeds without revert
-        // Note: getFundingConfig uses staticcall which reads from module's own storage,
-        // not the router's storage where the config is actually stored via delegatecall.
-        // This is a known limitation - the event emission confirms the values were set.
-        // Values must be <= MAX_FUNDING_RATE_BPS (10) and in ascending order.
+        // Values must be <= MAX_IMPACT_BPS (200) and in ascending order.
         vm.prank(admin);
-        vaultAdminProxy.setVaultFundingConfig(
+        vaultAdminProxy.setVaultImpactConfig(
             address(projectToken),
-            2, // tier1: 0.02%
-            4, // tier2: 0.04%
-            6, // tier3: 0.06%
-            8, // tier4: 0.08%
-            10 // tier5: 0.10% (max)
+            5, // tier1: 0.05%
+            15, // tier2: 0.15%
+            30, // tier3: 0.30%
+            50, // tier4: 0.50%
+            100 // tier5: 1.00%
         );
         // No assertion - just verify no revert
     }
@@ -380,20 +376,20 @@ contract VaultAdminProxyTest is BaseTestModular {
         // Verify no revert
     }
 
-    function test_SetFundingEnabledForAllVaults() public {
+    function test_SetImpactEnabledForAllVaults() public {
         vm.startPrank(mockTimelockController);
         vaultAccessController.grantRole(VAULT_ADMIN_ROLE, admin);
         vm.stopPrank();
 
         vm.prank(admin);
-        vaultAdminProxy.setFundingEnabledForAllVaults(false);
+        vaultAdminProxy.setImpactEnabledForAllVaults(false);
 
-        assertFalse(IVaultRouter(testVault).fundingEnabled());
+        assertFalse(IVaultRouter(testVault).isImpactEnabled());
 
         vm.prank(admin);
-        vaultAdminProxy.setFundingEnabledForAllVaults(true);
+        vaultAdminProxy.setImpactEnabledForAllVaults(true);
 
-        assertTrue(IVaultRouter(testVault).fundingEnabled());
+        assertTrue(IVaultRouter(testVault).isImpactEnabled());
     }
 
     function test_WithdrawFees() public {

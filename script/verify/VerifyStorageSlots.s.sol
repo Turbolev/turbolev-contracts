@@ -3,7 +3,7 @@ pragma solidity ^0.8.22;
 
 import "forge-std/Script.sol";
 import "forge-std/console.sol";
-import "../../src/vault-modular/libraries/VaultStorageLib.sol";
+import "../../src/libraries/vault/VaultStorageLib.sol";
 
 /**
  * @title VerifyStorageSlots

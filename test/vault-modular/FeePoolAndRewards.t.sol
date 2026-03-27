@@ -478,7 +478,7 @@ contract FeePoolAndRewardsTest is BaseTestModular {
         vm.stopPrank();
 
         // Change price slightly to make trader lose (but not liquidated)
-        mockRegistry.setPrice(address(projectToken), address(usdc), 98e18); // Price drops 2%
+        mockPyth.setPrice(projectTokenPriceId, 98e8, -8, block.timestamp); // Price drops 2%
 
         // Wait for min close time
         vm.warp(block.timestamp + 61);
@@ -527,7 +527,7 @@ contract FeePoolAndRewardsTest is BaseTestModular {
         vm.stopPrank();
 
         // Make trader lose slightly (vault wins)
-        mockRegistry.setPrice(address(projectToken), address(usdc), 97e18);
+        mockPyth.setPrice(projectTokenPriceId, 97e8, -8, block.timestamp);
 
         vm.warp(block.timestamp + 61);
 
@@ -582,7 +582,7 @@ contract FeePoolAndRewardsTest is BaseTestModular {
         vm.stopPrank();
 
         // Make trader lose slightly (avoid liquidation)
-        mockRegistry.setPrice(address(projectToken), address(usdc), 97e18);
+        mockPyth.setPrice(projectTokenPriceId, 97e8, -8, block.timestamp);
 
         vm.warp(block.timestamp + 61);
 
@@ -797,7 +797,7 @@ contract FeePoolAndRewardsTest is BaseTestModular {
         console.log("\nPHASE 3: Close Positions");
 
         // Small price change to avoid liquidation
-        mockRegistry.setPrice(address(projectToken), address(usdc), 99e18); // Price drops 1%
+        mockPyth.setPrice(projectTokenPriceId, 99e8, -8, block.timestamp); // Price drops 1%
 
         vm.warp(block.timestamp + 61);
 

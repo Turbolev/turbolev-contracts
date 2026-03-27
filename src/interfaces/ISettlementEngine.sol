@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.22;
 
-import "../libraries/PositionLib.sol";
+import "../libraries/position/PositionLib.sol";
 
 /**
  * @title ISettlementEngine
@@ -52,12 +52,7 @@ interface ISettlementEngine {
     function getSettlementConfig()
         external
         view
-        returns (
-            uint16 winMultiplierBps,
-            uint256 minBetAmount,
-            uint256 maxBetAmount,
-            bool paused
-        );
+        returns (uint16 winMultiplierBps, uint256 minBetAmount, uint256 maxBetAmount, bool paused);
 
     /**
      * @notice Get settlement price from Blocksense Oracle with custom max age

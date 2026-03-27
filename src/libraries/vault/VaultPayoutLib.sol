@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.22;
 
-import "./MathLib.sol";
+import "../math/MathLib.sol";
 
 /**
  * @title VaultPayoutLib

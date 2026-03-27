@@ -2,8 +2,8 @@
 pragma solidity ^0.8.22;
 
 import "../PositionModuleBase.sol";
-import "../../libraries/PositionLib.sol";
-import "../../libraries/MathLib.sol";
+import "../../libraries/position/PositionLib.sol";
+import "../../libraries/math/MathLib.sol";
 import "../../interfaces/IVaultManager.sol";
 import "../../interfaces/IAssetVault.sol";
 import "../../interfaces/ISettlementEngine.sol";
@@ -56,15 +56,11 @@ contract PositionCore is PositionModuleBase {
         uint256 closeTimestamp,
         uint256 pricePublishTime,
         PositionStorageLib.PositionClosedBy closedBy,
-        uint256 totalFee,
-        int256 fundingOwed
+        uint256 totalFee
     );
 
     event BetLiquidated(
-        uint64 indexed positionId,
-        address indexed user,
-        uint256 liquidationPrice,
-        uint256 timestamp
+        uint64 indexed positionId, address indexed user, uint256 liquidationPrice, uint256 timestamp
     );
 
     event MaintenanceMarginRatioUpdated(uint256 oldRatio, uint256 newRatio);
@@ -87,11 +83,14 @@ contract PositionCore is PositionModuleBase {
         uint256 timestamp
     );
 
-    event FundingSettled(
+    event PriceImpactApplied(
         uint64 indexed positionId,
         address indexed user,
-        int256 fundingAmount,
         uint8 direction,
+        uint256 markPrice,
+        uint256 executionPrice,
+        uint256 impactBps,
+        uint256 impactFee,
         uint256 timestamp
     );
 
@@ -260,12 +259,39 @@ contract PositionCore is PositionModuleBase {
         pos.initialMargin = amount;
         pos.addedMargin = 0;
 
-        // Store entry funding rates
-        (int256 entryLongRate, int256 entryShortRate) =
-            IAssetVault(vaultAddress).getCumulativeFundingRates();
-        pos.entryFundingRateLong = entryLongRate;
-        pos.entryFundingRateShort = entryShortRate;
-        pos.lastFundingSettlement = block.timestamp;
+        // Calculate and settle price impact upfront
+        // positionSize (notional) is used so impactFee is consistent with imbalance_ratio
+        (uint256 executionPrice, uint256 impactFee, uint256 impactBps, bool isCrowdedSide) =
+            IAssetVault(vaultAddress).getExecutionPrice(openPrice, direction, positionSize);
+
+        pos.executionPrice = executionPrice;
+        pos.impactFee = impactFee;
+
+        // Record impact fee in vault (fee stays in vault, reduces effective collateral)
+        if (impactFee > 0) {
+            IAssetVault(vaultAddress)
+                .recordImpactFee(
+                    positionId,
+                    msg.sender,
+                    direction,
+                    openPrice,
+                    executionPrice,
+                    impactBps,
+                    impactFee,
+                    isCrowdedSide
+                );
+
+            emit PriceImpactApplied(
+                positionId,
+                msg.sender,
+                direction,
+                openPrice,
+                executionPrice,
+                impactBps,
+                impactFee,
+                block.timestamp
+            );
+        }
 
         emit PositionOpened(
             positionId,
@@ -274,7 +300,7 @@ contract PositionCore is PositionModuleBase {
             amount,
             leverage,
             direction,
-            openPrice,
+            executionPrice,
             pos.liquidationPrice,
             positionSize,
             block.timestamp,
@@ -287,11 +313,12 @@ contract PositionCore is PositionModuleBase {
     /**
      * @notice Close position at current mark price (no slippage protection)
      */
-    function closePosition(
-        uint64 positionId,
-        uint256 deadline,
-        bytes calldata priceUpdateData
-    ) external payable nonReentrant whenNotPaused {
+    function closePosition(uint64 positionId, uint256 deadline, bytes calldata priceUpdateData)
+        external
+        payable
+        nonReentrant
+        whenNotPaused
+    {
         PositionStorageLib.CoreStorage storage core = PositionStorageLib.getCoreStorage();
         PositionLib.Position storage pos = core.positions[positionId];
 
@@ -514,32 +541,8 @@ contract PositionCore is PositionModuleBase {
         ) = ISettlementEngine(core.settlementEngine)
             .processSettlement(pos, closePrice, isLiquidation);
 
-        // Calculate funding adjustment
-        int256 fundingOwed = IAssetVault(vaultAddress)
-            .calculatePositionFunding(
-                pos.entryFundingRateLong, pos.entryFundingRateShort, pos.positionSize, pos.direction
-            );
-
-        // Adjust payout by funding
+        // No ongoing funding — impact fee was settled upfront at open.
         uint256 adjustedPayout = payout;
-        if (fundingOwed > 0) {
-            uint256 fundingDeduction = uint256(fundingOwed);
-            if (fundingDeduction >= adjustedPayout) {
-                adjustedPayout = 0;
-            } else {
-                adjustedPayout -= fundingDeduction;
-            }
-            vaultPnL += fundingOwed;
-        } else if (fundingOwed < 0) {
-            uint256 fundingReceived = uint256(-fundingOwed);
-            adjustedPayout += fundingReceived;
-            vaultPnL += fundingOwed;
-        }
-
-        // Emit funding event
-        if (fundingOwed != 0) {
-            emit FundingSettled(positionId, pos.user, fundingOwed, pos.direction, block.timestamp);
-        }
 
         // Update vault P&L
         uint256 closeFee = IVaultManager(core.vaultManager)
@@ -582,8 +585,7 @@ contract PositionCore is PositionModuleBase {
             block.timestamp,
             pricePublishTime,
             closedBy,
-            settlementFee + closeFee,
-            fundingOwed
+            settlementFee + closeFee
         );
     }
 

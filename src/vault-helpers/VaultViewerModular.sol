@@ -4,9 +4,9 @@ pragma solidity ^0.8.22;
 import "../interfaces/IVaultRouter.sol";
 import "../interfaces/IVaultManager.sol";
 import "../interfaces/IPriceFeedManager.sol";
-import "../libraries/VaultRiskLib.sol";
-import "../libraries/FundingRateLib.sol";
-import "../libraries/MathLib.sol";
+import "../libraries/vault/VaultRiskLib.sol";
+import "../libraries/math/PriceImpactLib.sol";
+import "../libraries/math/MathLib.sol";
 
 /**
  * @title VaultViewerModular
@@ -357,160 +357,53 @@ contract VaultViewerModular {
     }
 
     // ========================================================================
-    // FUNDING RATE FUNCTIONS
+    // PRICE IMPACT FUNCTIONS
     // ========================================================================
 
     /**
-     * @notice Get funding rate statistics
+     * @notice Get price impact statistics for a vault
      */
-    function getFundingStats(address vault)
+    function getImpactStats(address vault)
         external
         view
         returns (
-            int256 cumulativeLongRate,
-            int256 cumulativeShortRate,
-            uint256 lastUpdateTime,
-            uint256 currentHourlyRateBps,
-            bool longsPayShorts,
-            uint256 imbalanceBps
+            uint256 longExposure,
+            uint256 shortExposure,
+            uint256 currentImpactBps,
+            bool isLongDominant,
+            uint256 imbalanceBps,
+            uint256 totalFeesCollected
         )
     {
-        IVaultRouter v = IVaultRouter(vault);
-
-        (cumulativeLongRate, cumulativeShortRate) = v.getCumulativeFundingRates();
-        lastUpdateTime = v.lastFundingUpdateTime();
-
-        bool hasCounterparty;
-        (imbalanceBps, longsPayShorts, hasCounterparty) =
-            FundingRateLib.calculateImbalance(v.totalLongExposure(), v.totalShortExposure());
-
-        // Get funding config and create struct
-        (uint16 t1Rate, uint16 t2Rate, uint16 t3Rate, uint16 t4Rate, uint16 t5Rate) =
-            v.getFundingConfig();
-
-        FundingRateLib.FundingConfig memory config = FundingRateLib.FundingConfig({
-            tier1RateBps: t1Rate,
-            tier2RateBps: t2Rate,
-            tier3RateBps: t3Rate,
-            tier4RateBps: t4Rate,
-            tier5RateBps: t5Rate,
-            isEnabled: true // Assume enabled if we're querying
-        });
-        currentHourlyRateBps = FundingRateLib.getHourlyRate(imbalanceBps, config);
+        return IVaultRouter(vault).getImpactStats();
     }
 
     /**
-     * @notice Check if position is liquidatable due to funding
-     * @param vault Vault address
-     * @param collateral Position collateral
-     * @param entryRateLong Entry funding rate for long
-     * @param entryRateShort Entry funding rate for short
-     * @param positionSize Position size
-     * @param direction Position direction (1 = LONG, 2 = SHORT)
-     * @param maintenanceMarginRatio Maintenance margin ratio in bps
-     * @return isLiquidatable True if position should be liquidated
-     * @return fundingOwed Amount of funding owed
-     * @return effectiveCollateral Collateral after funding deduction
+     * @notice Get current price impact rate for a vault
      */
-    function checkFundingLiquidation(
-        address vault,
-        uint256 collateral,
-        int256 entryRateLong,
-        int256 entryRateShort,
-        uint256 positionSize,
-        uint8 direction,
-        uint256 maintenanceMarginRatio
-    ) external view returns (bool isLiquidatable, int256 fundingOwed, uint256 effectiveCollateral) {
-        IVaultRouter v = IVaultRouter(vault);
-
-        if (!v.fundingEnabled()) {
-            return (false, 0, collateral);
-        }
-
-        // Get cumulative rates from vault
-        (int256 cumulativeLongRate, int256 cumulativeShortRate) = v.getCumulativeFundingRates();
-
-        // Calculate funding owed using library (zero-sum is baked into cumulative rates)
-        fundingOwed = FundingRateLib.calculatePositionFunding(
-            entryRateLong,
-            entryRateShort,
-            cumulativeLongRate,
-            cumulativeShortRate,
-            positionSize,
-            direction
-        );
-
-        // Calculate effective collateral
-        bool isNegative;
-        (effectiveCollateral, isNegative) =
-            FundingRateLib.calculateEffectiveCollateral(collateral, fundingOwed);
-
-        if (isNegative) {
-            return (true, fundingOwed, 0);
-        }
-
-        // Check if below maintenance margin
-        isLiquidatable =
-            FundingRateLib.checkFundingLiquidation(collateral, fundingOwed, maintenanceMarginRatio);
-
-        return (isLiquidatable, fundingOwed, effectiveCollateral);
-    }
-
-    /**
-     * @notice Calculate position funding owed
-     * @dev Helper function using vault's cumulative rates
-     */
-    function calculatePositionFundingOwed(
-        address vault,
-        int256 entryRateLong,
-        int256 entryRateShort,
-        uint256 positionSize,
-        uint8 direction
-    ) external view returns (int256 fundingOwed) {
-        IVaultRouter v = IVaultRouter(vault);
-
-        if (!v.fundingEnabled()) {
-            return 0;
-        }
-
-        (int256 cumulativeLongRate, int256 cumulativeShortRate) = v.getCumulativeFundingRates();
-
-        return FundingRateLib.calculatePositionFunding(
-            entryRateLong,
-            entryRateShort,
-            cumulativeLongRate,
-            cumulativeShortRate,
-            positionSize,
-            direction
-        );
-    }
-
-    /**
-     * @notice Get current hourly funding rate based on imbalance
-     */
-    function getCurrentHourlyFundingRate(address vault)
+    function getCurrentImpactRate(address vault)
         external
         view
-        returns (uint256 rateBps, bool longsPayShorts, uint256 imbalanceBps, bool hasCounterparty)
+        returns (uint256 impactBps, bool isLongDominant, uint256 imbalanceBps)
     {
-        IVaultRouter v = IVaultRouter(vault);
+        return IVaultRouter(vault).getCurrentImpactRate();
+    }
 
-        (imbalanceBps, longsPayShorts, hasCounterparty) =
-            FundingRateLib.calculateImbalance(v.totalLongExposure(), v.totalShortExposure());
-
-        (uint16 t1Rate, uint16 t2Rate, uint16 t3Rate, uint16 t4Rate, uint16 t5Rate) =
-            v.getFundingConfig();
-
-        FundingRateLib.FundingConfig memory config = FundingRateLib.FundingConfig({
-            tier1RateBps: t1Rate,
-            tier2RateBps: t2Rate,
-            tier3RateBps: t3Rate,
-            tier4RateBps: t4Rate,
-            tier5RateBps: t5Rate,
-            isEnabled: true
-        });
-
-        rateBps = FundingRateLib.getHourlyRate(imbalanceBps, config);
+    /**
+     * @notice Simulate execution price for a new position
+     * @param positionSize Notional position size (collateral * leverage)
+     */
+    function simulateExecutionPrice(
+        address vault,
+        uint256 markPrice,
+        uint8 direction,
+        uint256 positionSize
+    )
+        external
+        view
+        returns (uint256 executionPrice, uint256 impactFee, uint256 impactBps, bool isCrowdedSide)
+    {
+        return IVaultRouter(vault).getExecutionPrice(markPrice, direction, positionSize);
     }
 
     // ========================================================================
@@ -816,29 +709,29 @@ contract VaultViewerModular {
     }
 
     /**
-     * @notice Get funding statistics for all vaults
+     * @notice Get price impact statistics for all vaults
      * @return vaultAddresses Array of vault addresses
-     * @return longRates Array of cumulative long rates
-     * @return shortRates Array of cumulative short rates
+     * @return longExposures Array of total long OI per vault
+     * @return shortExposures Array of total short OI per vault
      * @return imbalances Array of current imbalances in bps
-     * @return hourlyRates Array of current hourly rates in bps
+     * @return impactRates Array of current impact rates in bps
      */
-    function getAllVaultsFundingStats()
+    function getAllVaultsImpactStats()
         external
         view
         returns (
             address[] memory vaultAddresses,
-            int256[] memory longRates,
-            int256[] memory shortRates,
+            uint256[] memory longExposures,
+            uint256[] memory shortExposures,
             uint256[] memory imbalances,
-            uint256[] memory hourlyRates
+            uint256[] memory impactRates
         )
     {
         if (vaultManager == address(0)) {
             return (
                 new address[](0),
-                new int256[](0),
-                new int256[](0),
+                new uint256[](0),
+                new uint256[](0),
                 new uint256[](0),
                 new uint256[](0)
             );
@@ -847,103 +740,57 @@ contract VaultViewerModular {
         vaultAddresses = IVaultManager(vaultManager).getAllVaults();
         uint256 length = vaultAddresses.length;
 
-        longRates = new int256[](length);
-        shortRates = new int256[](length);
+        longExposures = new uint256[](length);
+        shortExposures = new uint256[](length);
         imbalances = new uint256[](length);
-        hourlyRates = new uint256[](length);
+        impactRates = new uint256[](length);
 
         for (uint256 i = 0; i < length; i++) {
-            try IVaultRouter(vaultAddresses[i]).getCumulativeFundingRates() returns (
-                int256 cumulativeLong, int256 cumulativeShort
+            try IVaultRouter(vaultAddresses[i]).getImpactStats() returns (
+                uint256 longExp,
+                uint256 shortExp,
+                uint256 currentImpactBps,
+                bool,
+                uint256 imbalanceBps,
+                uint256
             ) {
-                longRates[i] = cumulativeLong;
-                shortRates[i] = cumulativeShort;
-
-                // Calculate current imbalance and rate
-                uint256 longExp = IVaultRouter(vaultAddresses[i]).totalLongExposure();
-                uint256 shortExp = IVaultRouter(vaultAddresses[i]).totalShortExposure();
-
-                (uint256 imbalanceBps,,) = FundingRateLib.calculateImbalance(longExp, shortExp);
+                longExposures[i] = longExp;
+                shortExposures[i] = shortExp;
                 imbalances[i] = imbalanceBps;
-
-                // Get funding config and calculate hourly rate
-                try IVaultRouter(vaultAddresses[i]).getFundingConfig() returns (
-                    uint16 t1Rate, uint16 t2Rate, uint16 t3Rate, uint16 t4Rate, uint16 t5Rate
-                ) {
-                    FundingRateLib.FundingConfig memory config = FundingRateLib.FundingConfig({
-                        tier1RateBps: t1Rate,
-                        tier2RateBps: t2Rate,
-                        tier3RateBps: t3Rate,
-                        tier4RateBps: t4Rate,
-                        tier5RateBps: t5Rate,
-                        isEnabled: true
-                    });
-                    hourlyRates[i] = FundingRateLib.getHourlyRate(imbalanceBps, config);
-                } catch {
-                    hourlyRates[i] = 0;
-                }
+                impactRates[i] = currentImpactBps;
             } catch {
-                // Default values on failure
-                longRates[i] = 0;
-                shortRates[i] = 0;
+                longExposures[i] = 0;
+                shortExposures[i] = 0;
                 imbalances[i] = 0;
-                hourlyRates[i] = 0;
+                impactRates[i] = 0;
             }
         }
 
-        return (vaultAddresses, longRates, shortRates, imbalances, hourlyRates);
+        return (vaultAddresses, longExposures, shortExposures, imbalances, impactRates);
     }
 
     /**
-     * @notice Get funding info for a specific vault by project token
+     * @notice Get price impact info for a specific vault by project token
      * @param projectToken Project token address
-     * @return cumulativeLongRate Cumulative long rate
-     * @return cumulativeShortRate Cumulative short rate
-     * @return lastUpdateTime Last funding update time
-     * @return currentHourlyRateBps Current hourly rate in bps
-     * @return longsPayShorts True if longs pay shorts
-     * @return imbalanceBps Current imbalance in bps
      */
-    function getVaultFundingInfo(address projectToken)
+    function getVaultImpactInfo(address projectToken)
         external
         view
         returns (
-            int256 cumulativeLongRate,
-            int256 cumulativeShortRate,
-            uint256 lastUpdateTime,
-            uint256 currentHourlyRateBps,
-            bool longsPayShorts,
-            uint256 imbalanceBps
+            uint256 longExposure,
+            uint256 shortExposure,
+            uint256 currentImpactBps,
+            bool isLongDominant,
+            uint256 imbalanceBps,
+            uint256 totalFeesCollected
         )
     {
-        if (vaultManager == address(0)) return (0, 0, 0, 0, false, 0);
+        if (vaultManager == address(0)) return (0, 0, 0, false, 0, 0);
 
         address vault = IVaultManager(vaultManager).getVault(projectToken);
-        if (vault == address(0)) return (0, 0, 0, 0, false, 0);
+        if (vault == address(0)) return (0, 0, 0, false, 0, 0);
 
-        IVaultRouter v = IVaultRouter(vault);
-
-        (cumulativeLongRate, cumulativeShortRate) = v.getCumulativeFundingRates();
-        lastUpdateTime = v.lastFundingUpdateTime();
-
-        // Calculate current imbalance
-        uint256 longExp = v.totalLongExposure();
-        uint256 shortExp = v.totalShortExposure();
-        (imbalanceBps, longsPayShorts,) = FundingRateLib.calculateImbalance(longExp, shortExp);
-
-        // Get funding config and calculate hourly rate
-        (uint16 t1Rate, uint16 t2Rate, uint16 t3Rate, uint16 t4Rate, uint16 t5Rate) =
-            v.getFundingConfig();
-
-        FundingRateLib.FundingConfig memory config = FundingRateLib.FundingConfig({
-            tier1RateBps: t1Rate,
-            tier2RateBps: t2Rate,
-            tier3RateBps: t3Rate,
-            tier4RateBps: t4Rate,
-            tier5RateBps: t5Rate,
-            isEnabled: true
-        });
-        currentHourlyRateBps = FundingRateLib.getHourlyRate(imbalanceBps, config);
+        return IVaultRouter(vault).getImpactStats();
     }
 
     // ========================================================================
@@ -966,7 +813,7 @@ contract VaultViewerModular {
         uint256 pendingPayoutsValue;
         bool isPaused;
         bool isActive;
-        bool isFundingEnabled;
+        bool isImpactEnabled;
         uint256 healthScore; // 0-10000 (higher is healthier)
     }
 
@@ -1140,9 +987,9 @@ contract VaultViewerModular {
             // Default false
         }
 
-        // Check funding enabled
-        try v.fundingEnabled() returns (bool enabled) {
-            metrics.isFundingEnabled = enabled;
+        // Check price impact enabled
+        try v.isImpactEnabled() returns (bool enabled) {
+            metrics.isImpactEnabled = enabled;
         } catch {
             // Default false
         }

@@ -2,7 +2,7 @@
 pragma solidity ^0.8.22;
 
 import "./BaseTestModular.sol";
-import "../../src/libraries/VaultConfigLib.sol";
+import "../../src/libraries/vault/VaultConfigLib.sol";
 
 /**
  * @title RiskConfigSettersTest

@@ -2,7 +2,7 @@
 pragma solidity ^0.8.22;
 
 import "forge-std/Test.sol";
-import "../../src/libraries/VaultPayoutLib.sol";
+import "../../src/libraries/vault/VaultPayoutLib.sol";
 
 contract VaultPayoutLibTest is Test {
     // Constants from library

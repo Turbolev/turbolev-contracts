@@ -2,7 +2,7 @@
 pragma solidity ^0.8.22;
 
 import "./VaultConfigLib.sol";
-import "./MathLib.sol";
+import "../math/MathLib.sol";
 
 /**
  * @title VaultRiskLib

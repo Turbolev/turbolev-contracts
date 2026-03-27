@@ -159,8 +159,8 @@ contract VaultAdminProxy is Initializable, UUPSUpgradeable, ReentrancyGuardUpgra
 
     /**
      * @notice Batch update hourly funding rates for all vaults
-     * @dev Called by keeper every hour to update funding rates
-     * @return updatedCount Number of vaults successfully updated
+     * @dev Kept for interface compatibility; no-op since funding is now settled upfront.
+     * @return updatedCount Always returns 0 (no periodic update needed)
      */
     function batchUpdateHourlyFunding()
         external
@@ -168,30 +168,16 @@ contract VaultAdminProxy is Initializable, UUPSUpgradeable, ReentrancyGuardUpgra
         onlyVaultKeeper
         returns (uint256 updatedCount)
     {
-        address[] memory vaults = IVaultManager(vaultManager).getAllVaults();
-
-        for (uint256 i = 0; i < vaults.length; i++) {
-            // Check if vault is active
-            IVaultManager.VaultInfo memory info =
-                IVaultManager(vaultManager).getVaultInfo(vaults[i]);
-            if (!info.isActive) continue;
-
-            try IVaultRouter(vaults[i]).updateHourlyFunding() {
-                updatedCount++;
-            } catch {
-                // Skip failed vaults, continue with others
-                continue;
-            }
-        }
-
-        emit BatchFundingUpdated(updatedCount, block.timestamp);
-        return updatedCount;
+        // Price impact is settled upfront at order creation; no periodic update needed.
+        emit BatchFundingUpdated(0, block.timestamp);
+        return 0;
     }
 
     /**
      * @notice Update hourly funding for specific vaults
-     * @param vaults Array of vault addresses to update
-     * @return updatedCount Number of vaults successfully updated
+     * @dev Kept for interface compatibility; no-op since funding is now settled upfront.
+     * @param vaults Array of vault addresses (unused)
+     * @return updatedCount Always returns 0
      */
     function batchUpdateHourlyFundingForVaults(address[] calldata vaults)
         external
@@ -199,22 +185,9 @@ contract VaultAdminProxy is Initializable, UUPSUpgradeable, ReentrancyGuardUpgra
         onlyVaultKeeper
         returns (uint256 updatedCount)
     {
-        for (uint256 i = 0; i < vaults.length; i++) {
-            // Check if vault exists and is active
-            IVaultManager.VaultInfo memory info =
-                IVaultManager(vaultManager).getVaultInfo(vaults[i]);
-            if (info.vaultAddress == address(0) || !info.isActive) continue;
-
-            try IVaultRouter(vaults[i]).updateHourlyFunding() {
-                updatedCount++;
-            } catch {
-                // Skip failed vaults, continue with others
-                continue;
-            }
-        }
-
-        emit BatchFundingUpdated(updatedCount, block.timestamp);
-        return updatedCount;
+        // Price impact is settled upfront at order creation; no periodic update needed.
+        emit BatchFundingUpdated(0, block.timestamp);
+        return 0;
     }
 
     // ========================================================================
@@ -393,48 +366,47 @@ contract VaultAdminProxy is Initializable, UUPSUpgradeable, ReentrancyGuardUpgra
     }
 
     /**
-     * @notice Set funding configuration for a vault
+     * @notice Set price impact tier configuration for a vault
      * @param projectToken Project token address
-     * @param tier1RateBps Rate for < 20% imbalance
-     * @param tier2RateBps Rate for 20-40% imbalance
-     * @param tier3RateBps Rate for 40-60% imbalance
-     * @param tier4RateBps Rate for 60-80% imbalance
-     * @param tier5RateBps Rate for > 80% imbalance
+     * @param tier1ImpactBps Impact for < 20% imbalance
+     * @param tier2ImpactBps Impact for 20-40% imbalance
+     * @param tier3ImpactBps Impact for 40-60% imbalance
+     * @param tier4ImpactBps Impact for 60-80% imbalance
+     * @param tier5ImpactBps Impact for > 80% imbalance
      */
-    function setVaultFundingConfig(
+    function setVaultImpactConfig(
         address projectToken,
-        uint16 tier1RateBps,
-        uint16 tier2RateBps,
-        uint16 tier3RateBps,
-        uint16 tier4RateBps,
-        uint16 tier5RateBps
+        uint16 tier1ImpactBps,
+        uint16 tier2ImpactBps,
+        uint16 tier3ImpactBps,
+        uint16 tier4ImpactBps,
+        uint16 tier5ImpactBps
     ) external onlyVaultAdmin {
         address vault = _getVault(projectToken);
         IVaultRouter(vault)
-            .setFundingConfig(tier1RateBps, tier2RateBps, tier3RateBps, tier4RateBps, tier5RateBps);
+            .setImpactConfig(
+                tier1ImpactBps, tier2ImpactBps, tier3ImpactBps, tier4ImpactBps, tier5ImpactBps
+            );
         emit VaultFundingConfigUpdated(vault, block.timestamp);
     }
 
     /**
-     * @notice Enable or disable funding for a vault
+     * @notice Enable or disable price impact for a vault
      * @param projectToken Project token address
-     * @param enabled True to enable funding
+     * @param enabled True to enable price impact
      */
-    function setVaultFundingEnabled(address projectToken, bool enabled) external onlyVaultAdmin {
+    function setVaultImpactEnabled(address projectToken, bool enabled) external onlyVaultAdmin {
         address vault = _getVault(projectToken);
-        IVaultRouter(vault).setFundingEnabled(enabled);
+        IVaultRouter(vault).setImpactEnabled(enabled);
         emit VaultFundingEnabledUpdated(vault, enabled, block.timestamp);
     }
 
     /**
-     * @notice Enable funding for all vaults
-     * @param enabled True to enable funding
+     * @notice Enable or disable price impact for all vaults
+     * @param enabled True to enable price impact
      * @dev Emits events for both successful and failed updates
-     *      VaultFundingEnabledUpdated for successful updates
-     *      VaultFundingEnabledUpdateFailed for failed updates
-     *      BatchFundingEnabledUpdateCompleted with summary counts
      */
-    function setFundingEnabledForAllVaults(bool enabled) external nonReentrant onlyVaultAdmin {
+    function setImpactEnabledForAllVaults(bool enabled) external nonReentrant onlyVaultAdmin {
         address[] memory vaults = IVaultManager(vaultManager).getAllVaults();
         uint256 successCount = 0;
         uint256 failCount = 0;
@@ -444,18 +416,16 @@ contract VaultAdminProxy is Initializable, UUPSUpgradeable, ReentrancyGuardUpgra
                 IVaultManager(vaultManager).getVaultInfo(vaults[i]);
             if (!info.isActive) continue;
 
-            try IVaultRouter(vaults[i]).setFundingEnabled(enabled) {
+            try IVaultRouter(vaults[i]).setImpactEnabled(enabled) {
                 emit VaultFundingEnabledUpdated(vaults[i], enabled, block.timestamp);
                 successCount++;
             } catch {
-                // Log failed vaults instead of silently skipping
                 emit VaultFundingEnabledUpdateFailed(vaults[i], block.timestamp);
                 failCount++;
                 continue;
             }
         }
 
-        // Emit summary event
         emit BatchFundingEnabledUpdateCompleted(successCount, failCount, block.timestamp);
     }
 

@@ -3,8 +3,8 @@ pragma solidity ^0.8.22;
 
 import "forge-std/Test.sol";
 import "forge-std/console.sol";
-import "../../src/libraries/PositionLib.sol";
-import "../../src/libraries/MathLib.sol";
+import "../../src/libraries/position/PositionLib.sol";
+import "../../src/libraries/math/MathLib.sol";
 
 /**
  * @title PositionLibWrapper
@@ -643,9 +643,8 @@ contract PositionLibTest is Test {
             minCloseTime: block.timestamp + 60,
             initialMargin: 1e18,
             addedMargin: 0,
-            entryFundingRateLong: 0,
-            entryFundingRateShort: 0,
-            lastFundingSettlement: block.timestamp
+            impactFee: 0,
+            executionPrice: 0
         });
     }
 }

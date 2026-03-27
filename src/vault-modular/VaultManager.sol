@@ -694,7 +694,5 @@ contract VaultManager is
     function version() external pure returns (string memory) {
         return "3.1.0-modular";
     }
-
 }
-
 

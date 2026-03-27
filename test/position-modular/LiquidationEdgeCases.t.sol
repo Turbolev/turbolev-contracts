@@ -2,7 +2,7 @@
 pragma solidity ^0.8.22;
 
 import "../vault-modular/BaseTestModular.sol";
-import "../../src/libraries/PositionLib.sol";
+import "../../src/libraries/position/PositionLib.sol";
 
 /**
  * @title LiquidationEdgeCasesTest

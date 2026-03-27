@@ -3,10 +3,10 @@ pragma solidity ^0.8.22;
 
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import "./libraries/PositionStorageLib.sol";
+import "../libraries/position/PositionStorageLib.sol";
 import "../vault-modular/VaultAccessController.sol";
-import "../libraries/PositionLib.sol";
-import "../libraries/MathLib.sol";
+import "../libraries/position/PositionLib.sol";
+import "../libraries/math/MathLib.sol";
 import "../interfaces/IVaultManager.sol";
 import "../interfaces/IAssetVault.sol";
 import "../interfaces/ISettlementEngine.sol";
@@ -155,17 +155,13 @@ contract PositionRouter is Initializable, UUPSUpgradeable {
     /**
      * @notice Close position at current mark price
      */
-    function closePosition(
-        uint64 positionId,
-        uint256 deadline,
-        bytes calldata priceUpdateData
-    ) external payable {
+    function closePosition(uint64 positionId, uint256 deadline, bytes calldata priceUpdateData)
+        external
+        payable
+    {
         _delegateToCore(
             abi.encodeWithSignature(
-                "closePosition(uint64,uint256,bytes)",
-                positionId,
-                deadline,
-                priceUpdateData
+                "closePosition(uint64,uint256,bytes)", positionId, deadline, priceUpdateData
             )
         );
     }
@@ -322,25 +318,7 @@ contract PositionRouter is Initializable, UUPSUpgradeable {
             return true;
         }
 
-        // Check funding-based liquidation
-        if (core.vaultManager != address(0)) {
-            address vaultAddress = IVaultManager(core.vaultManager).getVault(pos.projectToken);
-            if (vaultAddress != address(0)) {
-                (bool fundingLiquidatable,,) = IAssetVault(vaultAddress)
-                    .checkFundingLiquidation(
-                        pos.amount,
-                        pos.entryFundingRateLong,
-                        pos.entryFundingRateShort,
-                        pos.positionSize,
-                        pos.direction,
-                        core.maintenanceMarginRatio
-                    );
-                if (fundingLiquidatable) {
-                    return true;
-                }
-            }
-        }
-
+        // Funding is settled upfront via price impact; no ongoing funding liquidation check needed.
         return false;
     }
 
@@ -360,30 +338,7 @@ contract PositionRouter is Initializable, UUPSUpgradeable {
             return (true, 1, 0, pos.amount); // reason 1 = price
         }
 
-        // Check funding-based liquidation
-        if (core.vaultManager != address(0)) {
-            address vaultAddress = IVaultManager(core.vaultManager).getVault(pos.projectToken);
-            if (vaultAddress != address(0)) {
-                (bool fundingLiquidatable, int256 _fundingOwed, uint256 _effectiveCollateral) = IAssetVault(
-                        vaultAddress
-                    )
-                    .checkFundingLiquidation(
-                        pos.amount,
-                        pos.entryFundingRateLong,
-                        pos.entryFundingRateShort,
-                        pos.positionSize,
-                        pos.direction,
-                        core.maintenanceMarginRatio
-                    );
-
-                if (fundingLiquidatable) {
-                    return (true, 2, _fundingOwed, _effectiveCollateral); // reason 2 = funding
-                }
-
-                return (false, 0, _fundingOwed, _effectiveCollateral);
-            }
-        }
-
+        // Funding is settled upfront via price impact; no ongoing funding liquidation check needed.
         return (false, 0, 0, pos.amount);
     }
 
@@ -427,52 +382,40 @@ contract PositionRouter is Initializable, UUPSUpgradeable {
     }
 
     /**
-     * @notice Get position funding information
+     * @notice Get position price impact information
+     * @dev Returns the upfront impact fee paid at open and current impact rate for reference
      */
-    function getPositionFundingInfo(uint64 positionId)
+    function getPositionImpactInfo(uint64 positionId)
         external
         view
         returns (
-            int256 fundingOwed,
-            uint256 effectiveCollateral,
-            uint256 hourlyFundingRate,
-            bool isLongPaying
+            uint256 impactFeePaid,
+            uint256 executionPrice,
+            uint256 currentImpactBps,
+            bool isLongDominant
         )
     {
         PositionStorageLib.CoreStorage storage core = PositionStorageLib.getCoreStorage();
         PositionLib.Position storage pos = core.positions[positionId];
         if (pos.user == address(0)) revert PositionNotFound();
 
+        impactFeePaid = pos.impactFee;
+        executionPrice = pos.executionPrice;
+
         if (core.vaultManager == address(0)) {
-            return (0, pos.amount, 0, false);
+            return (impactFeePaid, executionPrice, 0, false);
         }
 
         address vaultAddress = IVaultManager(core.vaultManager).getVault(pos.projectToken);
         if (vaultAddress == address(0)) {
-            return (0, pos.amount, 0, false);
+            return (impactFeePaid, executionPrice, 0, false);
         }
 
-        // Calculate funding owed
-        fundingOwed = IAssetVault(vaultAddress)
-            .calculatePositionFunding(
-                pos.entryFundingRateLong, pos.entryFundingRateShort, pos.positionSize, pos.direction
-            );
-
-        // Calculate effective collateral
-        if (fundingOwed > 0) {
-            uint256 deduction = uint256(fundingOwed);
-            effectiveCollateral = pos.amount > deduction ? pos.amount - deduction : 0;
-        } else {
-            effectiveCollateral = pos.amount + uint256(-fundingOwed);
-        }
-
-        // Get current funding rate
         uint256 imbalanceBps;
-        bool hasCounterparty;
-        (hourlyFundingRate, isLongPaying, imbalanceBps, hasCounterparty) =
-            IAssetVault(vaultAddress).getCurrentHourlyFundingRate();
+        (currentImpactBps, isLongDominant, imbalanceBps) =
+            IAssetVault(vaultAddress).getCurrentImpactRate();
 
-        return (fundingOwed, effectiveCollateral, hourlyFundingRate, isLongPaying);
+        return (impactFeePaid, executionPrice, currentImpactBps, isLongDominant);
     }
 
     /**

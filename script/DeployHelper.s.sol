@@ -23,8 +23,6 @@ contract DeployHelper is Script {
     // DEPLOYED CONTRACTS
     // ========================================================================
 
-    address payable public blocksenseOracle;
-    address payable public chainlinkOracle;
     address payable public settlementEngine;
     address payable public positionManager;
     address payable public vaultManager;
@@ -157,8 +155,6 @@ contract DeployHelper is Script {
         console.log("Admin:", admin);
         console.log("Deployer:", deployer);
         console.log("Backend:", backend);
-        console.log("BlocksenseOracle:", blocksenseOracle);
-        console.log("ChainlinkOracle:", chainlinkOracle);
         console.log("PythOracle:", pythOracle);
         console.log("SettlementEngine:", settlementEngine);
         console.log("PositionManager:", positionManager);
@@ -178,8 +174,6 @@ contract DeployHelper is Script {
     function _loadDeployedAddressesFromEnv() internal {
         // Try to load from environment (returns zero if not found)
         backend = vm.envOr("BACKEND_ADDRESS", address(0));
-        blocksenseOracle = payable(vm.envOr("BLOCKSENSE_ORACLE_ADDRESS", address(0)));
-        chainlinkOracle = payable(vm.envOr("CHAINLINK_ORACLE_ADDRESS", address(0)));
         pythOracle = payable(vm.envOr("PYTH_ORACLE_ADDRESS", address(0)));
         settlementEngine = payable(vm.envOr("SETTLEMENT_ENGINE_ADDRESS", address(0)));
         positionManager = payable(vm.envOr("POSITION_MANAGER_ADDRESS", address(0)));
@@ -267,8 +261,6 @@ contract DeployHelper is Script {
         json = string.concat(json, '  "owner": "', vm.toString(owner), '",\n');
         json = string.concat(json, '  "admin": "', vm.toString(admin), '",\n');
         json = string.concat(json, '  "backend": "', vm.toString(backend), '",\n');
-        json = string.concat(json, '  "blocksenseOracle": "', vm.toString(blocksenseOracle), '",\n');
-        json = string.concat(json, '  "chainlinkOracle": "', vm.toString(chainlinkOracle), '",\n');
         json = string.concat(json, '  "pythOracle": "', vm.toString(pythOracle), '",\n');
         json = string.concat(json, '  "settlementEngine": "', vm.toString(settlementEngine), '",\n');
         json = string.concat(json, '  "positionManager": "', vm.toString(positionManager), '",\n');
@@ -313,8 +305,6 @@ contract DeployHelper is Script {
         owner = vm.parseJsonAddress(json, ".owner");
         admin = vm.parseJsonAddress(json, ".admin");
         backend = vm.parseJsonAddress(json, ".backend");
-        blocksenseOracle = payable(vm.parseJsonAddress(json, ".blocksenseOracle"));
-        chainlinkOracle = payable(vm.parseJsonAddress(json, ".chainlinkOracle"));
         pythOracle = payable(vm.parseJsonAddress(json, ".pythOracle"));
         settlementEngine = payable(vm.parseJsonAddress(json, ".settlementEngine"));
         positionManager = payable(vm.parseJsonAddress(json, ".positionManager"));

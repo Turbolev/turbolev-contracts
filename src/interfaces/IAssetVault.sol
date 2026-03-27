@@ -538,131 +538,110 @@ interface IAssetVault {
     function getMaxProfitCapMultiplier() external view returns (uint8);
 
     // ========================================================================
-    // FUNDING RATE FUNCTIONS
+    // PRICE IMPACT FUNCTIONS
     // ========================================================================
 
     /**
-     * @notice Update hourly funding rates (called by keeper every hour)
-     * @return newLongRate New cumulative long rate
-     * @return newShortRate New cumulative short rate
-     * @return imbalanceBps Current imbalance in basis points
-     * @return hasCounterparty True if both Long and Short have OI
-     */
-    function updateHourlyFunding()
-        external
-        returns (
-            int256 newLongRate,
-            int256 newShortRate,
-            uint256 imbalanceBps,
-            bool hasCounterparty
-        );
-
-    /**
-     * @notice Get cumulative funding rates
-     * @return cumulativeLongRate Cumulative funding rate for Longs
-     * @return cumulativeShortRate Cumulative funding rate for Shorts
-     */
-    function getCumulativeFundingRates()
-        external
-        view
-        returns (int256 cumulativeLongRate, int256 cumulativeShortRate);
-
-    /**
-     * @notice Calculate funding owed by a position
-     * @param entryRateLong Position's entry cumulative long rate
-     * @param entryRateShort Position's entry cumulative short rate
-     * @param positionSize Position size
+     * @notice Calculate execution price and impact fee for a new position
+     * @param markPrice Current oracle mark price
      * @param direction Position direction (1 = LONG, 2 = SHORT)
-     * @return fundingOwed Funding amount (positive = owes, negative = receives)
+     * @param positionSize Notional position size (collateral * leverage)
+     * @return executionPrice Adjusted price for P&L calculation
+     * @return impactFee Fee collected by vault (= positionSize * impactBps / 10000)
+     * @return impactBps Applied impact in basis points
+     * @return isCrowdedSide True if user opened on the crowded (penalized) side
      */
-    function calculatePositionFunding(
-        int256 entryRateLong,
-        int256 entryRateShort,
-        uint256 positionSize,
-        uint8 direction
-    ) external view returns (int256 fundingOwed);
-
-    /**
-     * @notice Get current hourly funding rate based on imbalance
-     * @return rateBps Funding rate in basis points per hour
-     * @return longsPayShorts True if longs pay shorts
-     * @return imbalanceBps Current imbalance in basis points
-     * @return hasCounterparty True if both sides have OI
-     */
-    function getCurrentHourlyFundingRate()
+    function getExecutionPrice(uint256 markPrice, uint8 direction, uint256 positionSize)
         external
         view
-        returns (uint256 rateBps, bool longsPayShorts, uint256 imbalanceBps, bool hasCounterparty);
+        returns (uint256 executionPrice, uint256 impactFee, uint256 impactBps, bool isCrowdedSide);
 
     /**
-     * @notice Get funding rate statistics
-     * @return cumulativeLongRate Cumulative long rate
-     * @return cumulativeShortRate Cumulative short rate
-     * @return lastUpdateTime Last funding update timestamp
-     * @return currentHourlyRateBps Current hourly rate in bps
-     * @return longsPayShorts True if longs pay shorts
-     * @return imbalanceBps Current imbalance
-     */
-    function getFundingStats()
-        external
-        view
-        returns (
-            int256 cumulativeLongRate,
-            int256 cumulativeShortRate,
-            uint256 lastUpdateTime,
-            uint256 currentHourlyRateBps,
-            bool longsPayShorts,
-            uint256 imbalanceBps
-        );
-
-    /**
-     * @notice Check if position is liquidatable due to funding
-     * @param collateral Position collateral
-     * @param entryRateLong Entry funding rate for long
-     * @param entryRateShort Entry funding rate for short
-     * @param positionSize Position size
+     * @notice Record impact fee collected (called by PositionCore after open)
+     * @param positionId Position ID
+     * @param user User address
      * @param direction Position direction
-     * @param maintenanceMarginRatio Maintenance margin ratio in bps
-     * @return isLiquidatable True if position should be liquidated
-     * @return fundingOwed Amount of funding owed
-     * @return effectiveCollateral Collateral after funding deduction
+     * @param markPrice Oracle mark price
+     * @param executionPrice Adjusted execution price
+     * @param impactBps Applied impact bps
+     * @param impactFee Fee amount collected
+     * @param isCrowdedSide True if user was on crowded side
      */
-    function checkFundingLiquidation(
-        uint256 collateral,
-        int256 entryRateLong,
-        int256 entryRateShort,
-        uint256 positionSize,
+    function recordImpactFee(
+        uint64 positionId,
+        address user,
         uint8 direction,
-        uint256 maintenanceMarginRatio
-    ) external view returns (bool isLiquidatable, int256 fundingOwed, uint256 effectiveCollateral);
-
-    /**
-     * @notice Set funding rate configuration
-     * @param tier1RateBps Rate for < 20% imbalance
-     * @param tier2RateBps Rate for 20-40% imbalance
-     * @param tier3RateBps Rate for 40-60% imbalance
-     * @param tier4RateBps Rate for 60-80% imbalance
-     * @param tier5RateBps Rate for > 80% imbalance
-     */
-    function setFundingConfig(
-        uint16 tier1RateBps,
-        uint16 tier2RateBps,
-        uint16 tier3RateBps,
-        uint16 tier4RateBps,
-        uint16 tier5RateBps
+        uint256 markPrice,
+        uint256 executionPrice,
+        uint256 impactBps,
+        uint256 impactFee,
+        bool isCrowdedSide
     ) external;
 
     /**
-     * @notice Enable or disable funding rate
-     * @param enabled True to enable funding
+     * @notice Get current price impact rate based on OI imbalance
+     * @return impactBps Current impact rate in basis points
+     * @return isLongDominant True if longs are dominant
+     * @return imbalanceBps Current imbalance in basis points
      */
-    function setFundingEnabled(bool enabled) external;
+    function getCurrentImpactRate()
+        external
+        view
+        returns (uint256 impactBps, bool isLongDominant, uint256 imbalanceBps);
 
     /**
-     * @notice Check if funding is enabled
-     * @return True if funding is enabled
+     * @notice Get price impact statistics
+     * @return longExposure Total long OI
+     * @return shortExposure Total short OI
+     * @return currentImpactBps Current impact rate in bps
+     * @return isLongDominant True if longs are dominant
+     * @return imbalanceBps Current imbalance in bps
+     * @return totalFeesCollected Lifetime impact fees collected by vault
      */
-    function isFundingEnabled() external view returns (bool);
+    function getImpactStats()
+        external
+        view
+        returns (
+            uint256 longExposure,
+            uint256 shortExposure,
+            uint256 currentImpactBps,
+            bool isLongDominant,
+            uint256 imbalanceBps,
+            uint256 totalFeesCollected
+        );
+
+    /**
+     * @notice Set price impact tier configuration
+     * @param tier1ImpactBps Impact for < 20% imbalance
+     * @param tier2ImpactBps Impact for 20-40% imbalance
+     * @param tier3ImpactBps Impact for 40-60% imbalance
+     * @param tier4ImpactBps Impact for 60-80% imbalance
+     * @param tier5ImpactBps Impact for > 80% imbalance
+     */
+    function setImpactConfig(
+        uint16 tier1ImpactBps,
+        uint16 tier2ImpactBps,
+        uint16 tier3ImpactBps,
+        uint16 tier4ImpactBps,
+        uint16 tier5ImpactBps
+    ) external;
+
+    /**
+     * @notice Enable or disable price impact
+     * @param enabled True to enable price impact
+     */
+    function setImpactEnabled(bool enabled) external;
+
+    /**
+     * @notice Check if price impact is enabled
+     * @return True if price impact is enabled
+     */
+    function isImpactEnabled() external view returns (bool);
+
+    /**
+     * @notice Get total impact fees collected by vault
+     */
+    function totalImpactFeesCollected() external view returns (uint256);
 
     // ========================================================================
     // CONFIG VIEW FUNCTIONS (V2 - for VaultViewer)
@@ -719,38 +698,18 @@ interface IAssetVault {
     // Note: getFeeConfig() is defined above in FEE-RELATED FUNCTIONS section
 
     /**
-     * @notice Get funding rate configuration
+     * @notice Get price impact tier configuration
      */
-    function getFundingConfig()
+    function getImpactConfig()
         external
         view
         returns (
-            uint16 tier1RateBps,
-            uint16 tier2RateBps,
-            uint16 tier3RateBps,
-            uint16 tier4RateBps,
-            uint16 tier5RateBps
+            uint16 tier1ImpactBps,
+            uint16 tier2ImpactBps,
+            uint16 tier3ImpactBps,
+            uint16 tier4ImpactBps,
+            uint16 tier5ImpactBps
         );
-
-    /**
-     * @notice Get last funding update timestamp
-     */
-    function lastFundingUpdateTime() external view returns (uint256);
-
-    /**
-     * @notice Check if funding rate is enabled
-     */
-    function fundingEnabled() external view returns (bool);
-
-    /**
-     * @notice Get cumulative funding rate for longs
-     */
-    function cumulativeFundingRateLong() external view returns (int256);
-
-    /**
-     * @notice Get cumulative funding rate for shorts
-     */
-    function cumulativeFundingRateShort() external view returns (int256);
 
     /**
      * @notice Get claimable rewards for a user

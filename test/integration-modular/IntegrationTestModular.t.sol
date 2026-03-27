@@ -2,7 +2,7 @@
 pragma solidity ^0.8.22;
 
 import "../vault-modular/BaseTestModular.sol";
-import "../../src/libraries/PositionLib.sol";
+import "../../src/libraries/position/PositionLib.sol";
 
 /**
  * @title IntegrationTestModular
@@ -291,12 +291,16 @@ contract IntegrationTestModular is BaseTestModular {
         // Deploy a new mock token
         MockERC20 newToken = new MockERC20("New Token", "NEW");
 
-        // Configure price feed for new token
+        // Configure price feed for new token using Pyth
+        bytes32 newTokenPriceId = keccak256("NEW/USD");
+        mockPyth.setPrice(newTokenPriceId, 100e8, -8, block.timestamp);
+        pythOracle.setPriceFeedId(address(newToken), newTokenPriceId);
+
         IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
-            primaryProviderId: priceFeedManager.CHAINLINK_PROVIDER(),
-            secondaryProviderId: priceFeedManager.BLOCKSENSE_PROVIDER(),
-            primaryFeed: address(mockAdapter),
-            secondaryFeed: address(mockAdapter),
+            primaryProviderId: priceFeedManager.PYTH_PROVIDER(),
+            secondaryProviderId: bytes32(0),
+            primaryFeed: address(newToken),
+            secondaryFeed: address(0),
             usePullMode: false
         });
         priceFeedManager.setPriceFeedConfig(address(newToken), config);

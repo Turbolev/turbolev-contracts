@@ -81,14 +81,6 @@ contract DeploySettlementEngine is DeployHelper {
     function _reconnectContracts() internal {
         console.log("\n--- Reconnecting Contracts ---");
 
-        // Only reconnect if dependencies are available
-        if (_isContractDeployed(blocksenseOracle)) {
-            // DEPRECATED:             SettlementEngine(settlementEngine).setBlocksenseOracle(blocksenseOracle);
-            console.log("Reconnected BlocksenseOracle to SettlementEngine");
-        } else {
-            console.log("WARNING: BlocksenseOracle not set - skipping connection");
-        }
-
         if (_isContractDeployed(vaultManager)) {
             SettlementEngine(settlementEngine).setVaultManager(vaultManager);
             console.log("Reconnected VaultManager to SettlementEngine");

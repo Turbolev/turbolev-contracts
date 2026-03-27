@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.22;
 
-import { MathLib } from "./MathLib.sol";
+import { MathLib } from "../math/MathLib.sol";
 
 /**
  * @title PositionLib
@@ -98,10 +98,9 @@ library PositionLib {
         uint256 minCloseTime; // Flash loan protection: earliest close time
         uint256 initialMargin; // Original collateral (before any add margin)
         uint256 addedMargin; // Total margin added after position open
-        // ========== FUNDING RATE FIELDS ==========
-        int256 entryFundingRateLong; // Cumulative funding rate for Longs at position open
-        int256 entryFundingRateShort; // Cumulative funding rate for Shorts at position open
-        uint256 lastFundingSettlement; // Timestamp of last funding settlement
+        // ========== PRICE IMPACT FIELDS ==========
+        uint256 impactFee; // One-time skew fee paid at open (stays in vault)
+        uint256 executionPrice; // Adjusted open price after impact (used for P&L display)
     }
 
     // ========================================================================

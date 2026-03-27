@@ -2,8 +2,8 @@
 pragma solidity ^0.8.22;
 
 import "forge-std/Test.sol";
-import "../../src/libraries/VaultRiskLib.sol";
-import "../../src/libraries/VaultConfigLib.sol";
+import "../../src/libraries/vault/VaultRiskLib.sol";
+import "../../src/libraries/vault/VaultConfigLib.sol";
 
 // Wrapper contract to test library revert cases
 contract VaultRiskLibWrapper {

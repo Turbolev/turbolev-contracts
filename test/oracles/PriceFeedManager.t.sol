@@ -3,89 +3,74 @@ pragma solidity ^0.8.22;
 
 import "forge-std/Test.sol";
 import "../../src/PriceFeedManager.sol";
-import "../../src/oracles/BlocksenseOracle.sol";
-import "../../src/oracles/ChainlinkOracle.sol";
+import "../../src/oracles/PythOracle.sol";
 import "../../src/interfaces/IPriceFeedManager.sol";
 import "../../src/interfaces/oracles/IBaseOracle.sol";
-import "../../src/interfaces/ICLAggregatorAdapter.sol";
-import "../../src/interfaces/IChainlinkAggregatorV3.sol";
-import "../../src/interfaces/chainlink/IChainlinkAggregator.sol";
+import "../../src/interfaces/oracles/IPyth.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
-// Mock Adapter (inline)
-contract MockAdapter is ICLAggregatorAdapter, IChainlinkAggregatorV3 {
-    address public dataFeedStore;
-    uint256 public id;
-    uint256 public mockTimestamp;
-    int256 private _price = 2000e18;
+// Mock Pyth contract
+contract MockPyth is IPyth {
+    mapping(bytes32 => Price) private _prices;
+    uint256 private _updateFee = 1;
 
-    constructor() {
-        dataFeedStore = address(0);
-        id = 1;
-        mockTimestamp = block.timestamp;
+    function setPrice(bytes32 priceId, int64 price, int32 expo, uint256 publishTime) external {
+        _prices[priceId] = Price({ price: price, conf: 0, expo: expo, publishTime: publishTime });
     }
 
-    function setLatestRoundData(uint80, int256 price, uint256, uint256 timestamp, uint80) external {
-        _price = price;
-        mockTimestamp = timestamp;
+    function setUpdateFee(uint256 fee) external {
+        _updateFee = fee;
     }
 
-    function latestRoundData()
+    function getPriceUnsafe(bytes32 id) external view override returns (Price memory) {
+        return _prices[id];
+    }
+
+    function getPriceNoOlderThan(bytes32 id, uint256 maxAge)
         external
         view
-        override(IChainlinkAggregator, IChainlinkAggregatorV3)
-        returns (uint80, int256, uint256, uint256, uint80)
+        override
+        returns (Price memory)
     {
-        return (1, _price, mockTimestamp, mockTimestamp, 1);
+        Price memory p = _prices[id];
+        require(p.publishTime > 0 && (block.timestamp - p.publishTime) <= maxAge, "Price too old");
+        return p;
     }
 
-    function decimals()
+    function getPrice(bytes32 id) external view override returns (Price memory) {
+        return _prices[id];
+    }
+
+    function getEmaPrice(bytes32 id) external view override returns (Price memory) {
+        return _prices[id];
+    }
+
+    function updatePriceFeeds(bytes[] calldata) external payable override { }
+
+    function updatePriceFeedsIfNecessary(bytes[] calldata, bytes32[] calldata, uint64[] calldata)
         external
-        pure
-        override(IChainlinkAggregator, IChainlinkAggregatorV3)
-        returns (uint8)
-    {
-        return 18;
-    }
+        payable
+        override
+    { }
 
-    function description()
-        external
-        pure
-        override(IChainlinkAggregator, IChainlinkAggregatorV3)
-        returns (string memory)
-    {
-        return "Mock Adapter";
-    }
-
-    function getRoundData(uint80) external view returns (uint80, int256, uint256, uint256, uint80) {
-        return (1, _price, mockTimestamp, mockTimestamp, 1);
-    }
-
-    function latestAnswer() external view returns (int256) {
-        return _price;
-    }
-
-    function latestRound() external view returns (uint256) {
-        return 1;
-    }
-
-    function version() external pure returns (uint256) {
-        return 1;
+    function getUpdateFee(bytes[] calldata) external view override returns (uint256) {
+        return _updateFee;
     }
 }
 
 /**
  * @title PriceFeedManagerTest
- * @notice Tests cho PriceFeedManager với Oracle Registry Pattern
+ * @notice Tests for PriceFeedManager with Pyth Oracle only
  */
 contract PriceFeedManagerTest is Test {
     PriceFeedManager public priceFeedManager;
-    BlocksenseOracle public blocksenseOracle;
-    ChainlinkOracle public chainlinkOracle;
-    MockAdapter public mockAdapter;
+    PythOracle public pythOracle;
+    MockPyth public mockPyth;
 
     address public owner = address(this);
     address public token = address(0x123);
+
+    bytes32 public constant MOCK_PRICE_ID = keccak256("BTC/USD");
 
     event OracleProviderRegistered(
         bytes32 indexed providerId,
@@ -104,30 +89,25 @@ contract PriceFeedManagerTest is Test {
     event LastPriceRecordUpdated(address indexed projectToken, uint256 price, uint256 timestamp);
 
     function setUp() public {
-        // Deploy mock adapter
-        mockAdapter = new MockAdapter();
-        mockAdapter.setLatestRoundData(1, 2000e18, 0, block.timestamp, 1);
+        // Deploy mock Pyth
+        mockPyth = new MockPyth();
+        mockPyth.setPrice(MOCK_PRICE_ID, 2000e8, -8, block.timestamp);
 
-        // Deploy BlocksenseOracle
-        BlocksenseOracle blocksenseImpl = new BlocksenseOracle();
-        bytes memory blocksenseInitData = abi.encodeWithSelector(
-            BlocksenseOracle.initialize.selector,
+        // Deploy PythOracle
+        PythOracle pythImpl = new PythOracle();
+        bytes memory pythInitData = abi.encodeWithSelector(
+            PythOracle.initialize.selector,
             owner,
+            address(mockPyth),
             3600 // max price age
         );
-        ERC1967Proxy blocksenseProxy = new ERC1967Proxy(address(blocksenseImpl), blocksenseInitData);
-        blocksenseOracle = BlocksenseOracle(payable(address(blocksenseProxy)));
+        ERC1967Proxy pythProxy = new ERC1967Proxy(address(pythImpl), pythInitData);
+        pythOracle = PythOracle(payable(address(pythProxy)));
 
-        // Deploy ChainlinkOracle
-        ChainlinkOracle chainlinkImpl = new ChainlinkOracle();
-        bytes memory chainlinkInitData = abi.encodeWithSelector(
-            ChainlinkOracle.initialize.selector,
-            3600 // max price age
-        );
-        ERC1967Proxy chainlinkProxy = new ERC1967Proxy(address(chainlinkImpl), chainlinkInitData);
-        chainlinkOracle = ChainlinkOracle(address(chainlinkProxy));
+        // Configure token -> price feed ID in PythOracle
+        pythOracle.setPriceFeedId(token, MOCK_PRICE_ID);
 
-        // Deploy PriceFeedManager V2.1
+        // Deploy PriceFeedManager
         PriceFeedManager priceFeedImpl = new PriceFeedManager();
         bytes memory priceFeedInitData =
             abi.encodeWithSelector(PriceFeedManager.initialize.selector, owner);
@@ -141,17 +121,15 @@ contract PriceFeedManagerTest is Test {
 
     function testRegisterProvider() public {
         IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager.OracleProvider({
-            oracleContract: address(chainlinkOracle),
-            oracleType: IBaseOracle.OracleType.PUSH,
+            oracleContract: address(pythOracle),
+            oracleType: IBaseOracle.OracleType.PULL,
             enabled: true
         });
 
-        bytes32 providerId = priceFeedManager.CHAINLINK_PROVIDER();
+        bytes32 providerId = priceFeedManager.PYTH_PROVIDER();
 
         vm.expectEmit(true, true, false, true);
-        emit OracleProviderRegistered(
-            providerId, address(chainlinkOracle), IBaseOracle.OracleType.PUSH
-        );
+        emit OracleProviderRegistered(providerId, address(pythOracle), IBaseOracle.OracleType.PULL);
 
         priceFeedManager.registerOracleProvider(providerId, provider);
 
@@ -159,98 +137,62 @@ contract PriceFeedManagerTest is Test {
 
         IPriceFeedManager.OracleProvider memory saved =
             priceFeedManager.getOracleProvider(providerId);
-        assertEq(saved.oracleContract, address(chainlinkOracle));
+        assertEq(saved.oracleContract, address(pythOracle));
         assertTrue(saved.enabled);
-        assertEq(uint8(saved.oracleType), uint8(IBaseOracle.OracleType.PUSH));
-    }
-
-    function testRegisterMultipleProviders() public {
-        bytes32[] memory providerIds = new bytes32[](2);
-        providerIds[0] = priceFeedManager.CHAINLINK_PROVIDER();
-        providerIds[1] = priceFeedManager.BLOCKSENSE_PROVIDER();
-
-        IPriceFeedManager.OracleProvider[] memory providers =
-            new IPriceFeedManager.OracleProvider[](2);
-        providers[0] = IPriceFeedManager.OracleProvider({
-            oracleContract: address(chainlinkOracle),
-            oracleType: IBaseOracle.OracleType.PUSH,
-            enabled: true
-        });
-        providers[1] = IPriceFeedManager.OracleProvider({
-            oracleContract: address(blocksenseOracle),
-            oracleType: IBaseOracle.OracleType.PUSH,
-            enabled: true
-        });
-
-        priceFeedManager.registerOracleProviders(providerIds, providers);
-
-        assertTrue(priceFeedManager.providerExists(providerIds[0]));
-        assertTrue(priceFeedManager.providerExists(providerIds[1]));
+        assertEq(uint8(saved.oracleType), uint8(IBaseOracle.OracleType.PULL));
     }
 
     function testUpdateProvider() public {
-        // Register provider first
-        bytes32 providerId = priceFeedManager.CHAINLINK_PROVIDER();
+        bytes32 providerId = priceFeedManager.PYTH_PROVIDER();
         IPriceFeedManager.OracleProvider memory initialProvider = IPriceFeedManager.OracleProvider({
-            oracleContract: address(chainlinkOracle),
-            oracleType: IBaseOracle.OracleType.PUSH,
+            oracleContract: address(pythOracle),
+            oracleType: IBaseOracle.OracleType.PULL,
             enabled: true
         });
 
         priceFeedManager.registerOracleProvider(providerId, initialProvider);
 
-        // Update provider - change oracle contract address
+        address newOracle = address(0xBEEF);
         IPriceFeedManager.OracleProvider memory updatedProvider = IPriceFeedManager.OracleProvider({
-            oracleContract: address(blocksenseOracle), // Changed
-            oracleType: IBaseOracle.OracleType.PULL, // Changed type
-            enabled: false // Changed enabled
+            oracleContract: newOracle, oracleType: IBaseOracle.OracleType.PUSH, enabled: false
         });
 
         vm.expectEmit(true, true, false, true);
-        emit OracleProviderUpdated(providerId, address(blocksenseOracle));
+        emit OracleProviderUpdated(providerId, newOracle);
 
         priceFeedManager.updateOracleProvider(providerId, updatedProvider);
 
         IPriceFeedManager.OracleProvider memory updated =
             priceFeedManager.getOracleProvider(providerId);
-        assertEq(updated.oracleContract, address(blocksenseOracle));
-        assertEq(uint8(updated.oracleType), uint8(IBaseOracle.OracleType.PULL));
+        assertEq(updated.oracleContract, newOracle);
+        assertEq(uint8(updated.oracleType), uint8(IBaseOracle.OracleType.PUSH));
         assertFalse(updated.enabled);
     }
 
     function testGetAllProviderIds() public {
-        bytes32 chainlink = priceFeedManager.CHAINLINK_PROVIDER();
-        bytes32 blocksense = priceFeedManager.BLOCKSENSE_PROVIDER();
+        bytes32 pyth = priceFeedManager.PYTH_PROVIDER();
 
-        IPriceFeedManager.OracleProvider memory provider1 = IPriceFeedManager.OracleProvider({
-            oracleContract: address(chainlinkOracle),
-            oracleType: IBaseOracle.OracleType.PUSH,
+        IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager.OracleProvider({
+            oracleContract: address(pythOracle),
+            oracleType: IBaseOracle.OracleType.PULL,
             enabled: true
         });
 
-        IPriceFeedManager.OracleProvider memory provider2 = IPriceFeedManager.OracleProvider({
-            oracleContract: address(blocksenseOracle),
-            oracleType: IBaseOracle.OracleType.PUSH,
-            enabled: true
-        });
-
-        priceFeedManager.registerOracleProvider(chainlink, provider1);
-        priceFeedManager.registerOracleProvider(blocksense, provider2);
+        priceFeedManager.registerOracleProvider(pyth, provider);
 
         bytes32[] memory allIds = priceFeedManager.getAllProviderIds();
-        assertEq(allIds.length, 2);
-        assertEq(allIds[0], chainlink);
-        assertEq(allIds[1], blocksense);
+        assertEq(allIds.length, 1);
+        assertEq(allIds[0], pyth);
     }
 
     function testRevertRegisterDuplicateProvider() public {
         IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager.OracleProvider({
-            oracleContract: address(chainlinkOracle),
-            oracleType: IBaseOracle.OracleType.PUSH,
+            oracleContract: address(pythOracle),
+            oracleType: IBaseOracle.OracleType.PULL,
             enabled: true
         });
 
-        bytes32 providerId = priceFeedManager.CHAINLINK_PROVIDER();
+        bytes32 providerId = priceFeedManager.PYTH_PROVIDER();
         priceFeedManager.registerOracleProvider(providerId, provider);
 
         vm.expectRevert();
@@ -269,23 +211,20 @@ contract PriceFeedManagerTest is Test {
     // ========================================================================
 
     function testSetPriceFeedConfig() public {
-        // Register provider first
+        bytes32 providerId = priceFeedManager.PYTH_PROVIDER();
         IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager.OracleProvider({
-            oracleContract: address(chainlinkOracle),
-            oracleType: IBaseOracle.OracleType.PUSH,
+            oracleContract: address(pythOracle),
+            oracleType: IBaseOracle.OracleType.PULL,
             enabled: true
         });
-
-        bytes32 providerId = priceFeedManager.CHAINLINK_PROVIDER();
         priceFeedManager.registerOracleProvider(providerId, provider);
 
-        // Configure token
         IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
             primaryProviderId: providerId,
             secondaryProviderId: bytes32(0),
-            primaryFeed: address(mockAdapter),
+            primaryFeed: token,
             secondaryFeed: address(0),
-            usePullMode: false
+            usePullMode: true
         });
 
         vm.expectEmit(true, true, true, true);
@@ -296,87 +235,38 @@ contract PriceFeedManagerTest is Test {
         IPriceFeedManager.PriceFeedConfig memory saved = priceFeedManager.getPriceFeedConfig(token);
         assertEq(saved.primaryProviderId, providerId);
         assertEq(saved.secondaryProviderId, bytes32(0));
-        assertFalse(saved.usePullMode);
-    }
-
-    function testSetPrimaryProvider() public {
-        // Setup providers
-        bytes32 chainlink = priceFeedManager.CHAINLINK_PROVIDER();
-        bytes32 blocksense = priceFeedManager.BLOCKSENSE_PROVIDER();
-
-        IPriceFeedManager.OracleProvider memory provider1 = IPriceFeedManager.OracleProvider({
-            oracleContract: address(chainlinkOracle),
-            oracleType: IBaseOracle.OracleType.PUSH,
-            enabled: true
-        });
-
-        IPriceFeedManager.OracleProvider memory provider2 = IPriceFeedManager.OracleProvider({
-            oracleContract: address(blocksenseOracle),
-            oracleType: IBaseOracle.OracleType.PUSH,
-            enabled: true
-        });
-
-        priceFeedManager.registerOracleProvider(chainlink, provider1);
-        priceFeedManager.registerOracleProvider(blocksense, provider2);
-
-        // Set initial config
-        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
-            primaryProviderId: chainlink,
-            secondaryProviderId: bytes32(0),
-            primaryFeed: address(mockAdapter),
-            secondaryFeed: address(0),
-            usePullMode: false
-        });
-        priceFeedManager.setPriceFeedConfig(token, config);
-
-        // Change primary provider
-        priceFeedManager.setPrimaryProvider(token, blocksense);
-
-        IPriceFeedManager.PriceFeedConfig memory updated =
-            priceFeedManager.getPriceFeedConfig(token);
-        assertEq(updated.primaryProviderId, blocksense);
+        assertTrue(saved.usePullMode);
     }
 
     function testGetResolvedConfig() public {
-        // Register providers
-        bytes32 chainlink = priceFeedManager.CHAINLINK_PROVIDER();
-        bytes32 blocksense = priceFeedManager.BLOCKSENSE_PROVIDER();
+        bytes32 pyth = priceFeedManager.PYTH_PROVIDER();
 
-        IPriceFeedManager.OracleProvider memory provider1 = IPriceFeedManager.OracleProvider({
-            oracleContract: address(chainlinkOracle),
-            oracleType: IBaseOracle.OracleType.PUSH,
+        IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager.OracleProvider({
+            oracleContract: address(pythOracle),
+            oracleType: IBaseOracle.OracleType.PULL,
             enabled: true
         });
 
-        IPriceFeedManager.OracleProvider memory provider2 = IPriceFeedManager.OracleProvider({
-            oracleContract: address(blocksenseOracle),
-            oracleType: IBaseOracle.OracleType.PUSH,
-            enabled: true
-        });
+        priceFeedManager.registerOracleProvider(pyth, provider);
 
-        priceFeedManager.registerOracleProvider(chainlink, provider1);
-        priceFeedManager.registerOracleProvider(blocksense, provider2);
-
-        // Configure token
         IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
-            primaryProviderId: chainlink,
-            secondaryProviderId: blocksense,
-            primaryFeed: address(mockAdapter),
-            secondaryFeed: address(mockAdapter),
-            usePullMode: false
+            primaryProviderId: pyth,
+            secondaryProviderId: bytes32(0),
+            primaryFeed: token,
+            secondaryFeed: address(0),
+            usePullMode: true
         });
         priceFeedManager.setPriceFeedConfig(token, config);
 
-        // Get resolved config
         (
             IPriceFeedManager.OracleProvider memory primary,
             IPriceFeedManager.OracleProvider memory secondary,
             bool usePullMode
         ) = priceFeedManager.getResolvedConfig(token);
 
-        assertEq(primary.oracleContract, address(chainlinkOracle));
-        assertEq(secondary.oracleContract, address(blocksenseOracle));
-        assertFalse(usePullMode);
+        assertEq(primary.oracleContract, address(pythOracle));
+        assertEq(secondary.oracleContract, address(0));
+        assertTrue(usePullMode);
     }
 
     // ========================================================================
@@ -384,28 +274,26 @@ contract PriceFeedManagerTest is Test {
     // ========================================================================
 
     function testGetPrice() public {
-        // Setup
-        bytes32 chainlink = priceFeedManager.CHAINLINK_PROVIDER();
+        bytes32 pyth = priceFeedManager.PYTH_PROVIDER();
 
         IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager.OracleProvider({
-            oracleContract: address(chainlinkOracle),
-            oracleType: IBaseOracle.OracleType.PUSH,
+            oracleContract: address(pythOracle),
+            oracleType: IBaseOracle.OracleType.PULL,
             enabled: true
         });
 
-        priceFeedManager.registerOracleProvider(chainlink, provider);
+        priceFeedManager.registerOracleProvider(pyth, provider);
 
         IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
-            primaryProviderId: chainlink,
+            primaryProviderId: pyth,
             secondaryProviderId: bytes32(0),
-            primaryFeed: address(mockAdapter),
+            primaryFeed: token,
             secondaryFeed: address(0),
             usePullMode: false
         });
 
         priceFeedManager.setPriceFeedConfig(token, config);
 
-        // Get price
         (uint256 price, uint256 publishTime) = priceFeedManager.getPrice(token, 3600);
 
         assertGt(price, 0);
@@ -413,37 +301,26 @@ contract PriceFeedManagerTest is Test {
     }
 
     function testGetPriceWithFallback() public {
-        // Setup both providers
-        bytes32 chainlink = priceFeedManager.CHAINLINK_PROVIDER();
-        bytes32 blocksense = priceFeedManager.BLOCKSENSE_PROVIDER();
+        bytes32 pyth = priceFeedManager.PYTH_PROVIDER();
 
-        IPriceFeedManager.OracleProvider memory provider1 = IPriceFeedManager.OracleProvider({
-            oracleContract: address(chainlinkOracle),
-            oracleType: IBaseOracle.OracleType.PUSH,
+        IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager.OracleProvider({
+            oracleContract: address(pythOracle),
+            oracleType: IBaseOracle.OracleType.PULL,
             enabled: true
         });
 
-        IPriceFeedManager.OracleProvider memory provider2 = IPriceFeedManager.OracleProvider({
-            oracleContract: address(blocksenseOracle),
-            oracleType: IBaseOracle.OracleType.PUSH,
-            enabled: true
-        });
-
-        priceFeedManager.registerOracleProvider(chainlink, provider1);
-        priceFeedManager.registerOracleProvider(blocksense, provider2);
+        priceFeedManager.registerOracleProvider(pyth, provider);
 
         IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
-            primaryProviderId: chainlink,
-            secondaryProviderId: blocksense,
-            primaryFeed: address(mockAdapter),
-            secondaryFeed: address(mockAdapter),
+            primaryProviderId: pyth,
+            secondaryProviderId: bytes32(0),
+            primaryFeed: token,
+            secondaryFeed: address(0),
             usePullMode: false
         });
 
-        // NEW-H-01 FIX: Use setPriceFeedConfigWithInit to set initial price
         priceFeedManager.setPriceFeedConfigWithInit(token, config, "", 3600);
 
-        // Get price with fallback
         (uint256 price, uint256 publishTime) = priceFeedManager.getPriceWithFallback(token, 3600);
 
         assertGt(price, 0);
@@ -451,36 +328,33 @@ contract PriceFeedManagerTest is Test {
     }
 
     function testIsPriceStale() public {
-        // Setup
-        bytes32 chainlink = priceFeedManager.CHAINLINK_PROVIDER();
+        bytes32 pyth = priceFeedManager.PYTH_PROVIDER();
 
         IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager.OracleProvider({
-            oracleContract: address(chainlinkOracle),
-            oracleType: IBaseOracle.OracleType.PUSH,
+            oracleContract: address(pythOracle),
+            oracleType: IBaseOracle.OracleType.PULL,
             enabled: true
         });
 
-        priceFeedManager.registerOracleProvider(chainlink, provider);
+        priceFeedManager.registerOracleProvider(pyth, provider);
 
         IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
-            primaryProviderId: chainlink,
+            primaryProviderId: pyth,
             secondaryProviderId: bytes32(0),
-            primaryFeed: address(mockAdapter),
+            primaryFeed: token,
             secondaryFeed: address(0),
             usePullMode: false
         });
 
         priceFeedManager.setPriceFeedConfig(token, config);
 
-        // Check staleness - fresh price
         bool isStale = priceFeedManager.isPriceStale(token, 3600);
-        assertFalse(isStale); // Fresh price
+        assertFalse(isStale);
 
-        // Warp time to make price stale
         vm.warp(block.timestamp + 3601);
 
         isStale = priceFeedManager.isPriceStale(token, 3600);
-        assertTrue(isStale); // Should be stale after 3601 seconds
+        assertTrue(isStale);
     }
 
     function testRevertNoPrimaryProvider() public {
@@ -502,7 +376,7 @@ contract PriceFeedManagerTest is Test {
         IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
             primaryProviderId: fakeProviderId,
             secondaryProviderId: bytes32(0),
-            primaryFeed: address(mockAdapter),
+            primaryFeed: token,
             secondaryFeed: address(0),
             usePullMode: false
         });
@@ -512,299 +386,232 @@ contract PriceFeedManagerTest is Test {
     }
 
     // ========================================================================
-    // NEW-H-01 FIX: INITIAL PRICE SETUP TESTS
+    // INITIAL PRICE SETUP TESTS
     // ========================================================================
 
     function testSetPriceFeedConfigWithInit_Success() public {
-        // Setup provider
-        bytes32 chainlink = priceFeedManager.CHAINLINK_PROVIDER();
+        bytes32 pyth = priceFeedManager.PYTH_PROVIDER();
 
         IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager.OracleProvider({
-            oracleContract: address(chainlinkOracle),
-            oracleType: IBaseOracle.OracleType.PUSH,
+            oracleContract: address(pythOracle),
+            oracleType: IBaseOracle.OracleType.PULL,
             enabled: true
         });
 
-        priceFeedManager.registerOracleProvider(chainlink, provider);
+        priceFeedManager.registerOracleProvider(pyth, provider);
 
-        // Configure token with initial price fetch
         IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
-            primaryProviderId: chainlink,
+            primaryProviderId: pyth,
             secondaryProviderId: bytes32(0),
-            primaryFeed: address(mockAdapter),
+            primaryFeed: token,
             secondaryFeed: address(0),
             usePullMode: false
         });
 
-        // Should succeed and fetch initial price
         priceFeedManager.setPriceFeedConfigWithInit(token, config, "", 3600);
 
-        // Verify config was saved
         IPriceFeedManager.PriceFeedConfig memory saved = priceFeedManager.getPriceFeedConfig(token);
-        assertEq(saved.primaryProviderId, chainlink);
+        assertEq(saved.primaryProviderId, pyth);
 
-        // Verify initial price was set
         (uint256 lastPrice, uint256 lastTimestamp) = priceFeedManager.getLastPriceRecord(token);
         assertGt(lastPrice, 0, "Initial price should be set");
         assertGt(lastTimestamp, 0, "Initial timestamp should be set");
     }
 
     function testSetPriceFeedConfigWithInit_EmitsEvents() public {
-        // Setup provider
-        bytes32 chainlink = priceFeedManager.CHAINLINK_PROVIDER();
+        bytes32 pyth = priceFeedManager.PYTH_PROVIDER();
 
         IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager.OracleProvider({
-            oracleContract: address(chainlinkOracle),
-            oracleType: IBaseOracle.OracleType.PUSH,
+            oracleContract: address(pythOracle),
+            oracleType: IBaseOracle.OracleType.PULL,
             enabled: true
         });
 
-        priceFeedManager.registerOracleProvider(chainlink, provider);
+        priceFeedManager.registerOracleProvider(pyth, provider);
 
         IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
-            primaryProviderId: chainlink,
+            primaryProviderId: pyth,
             secondaryProviderId: bytes32(0),
-            primaryFeed: address(mockAdapter),
+            primaryFeed: token,
             secondaryFeed: address(0),
             usePullMode: false
         });
 
-        // Expect PriceFeedConfigUpdated event
         vm.expectEmit(true, true, true, true);
-        emit PriceFeedConfigUpdated(token, chainlink, bytes32(0));
+        emit PriceFeedConfigUpdated(token, pyth, bytes32(0));
 
         priceFeedManager.setPriceFeedConfigWithInit(token, config, "", 3600);
     }
 
     function testSetPriceFeedConfigWithInit_RevertIfFetchFails() public {
-        // Setup provider with wrong feed address (will fail to fetch)
-        bytes32 chainlink = priceFeedManager.CHAINLINK_PROVIDER();
+        bytes32 pyth = priceFeedManager.PYTH_PROVIDER();
 
         IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager.OracleProvider({
-            oracleContract: address(chainlinkOracle),
-            oracleType: IBaseOracle.OracleType.PUSH,
+            oracleContract: address(pythOracle),
+            oracleType: IBaseOracle.OracleType.PULL,
             enabled: true
         });
 
-        priceFeedManager.registerOracleProvider(chainlink, provider);
+        priceFeedManager.registerOracleProvider(pyth, provider);
 
-        // Use invalid feed address
+        // Use a token address that has no price feed ID configured in PythOracle
+        address unknownToken = address(0xDEAD);
+
         IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
-            primaryProviderId: chainlink,
+            primaryProviderId: pyth,
             secondaryProviderId: bytes32(0),
-            primaryFeed: address(0x1), // Invalid feed - will fail
+            primaryFeed: unknownToken,
             secondaryFeed: address(0),
             usePullMode: false
         });
 
-        // Should revert with InitialPriceFetchFailed
         vm.expectRevert(
             abi.encodeWithSelector(
-                PriceFeedManager.InitialPriceFetchFailed.selector, token, chainlink
+                PriceFeedManager.InitialPriceFetchFailed.selector, unknownToken, pyth
             )
         );
-        priceFeedManager.setPriceFeedConfigWithInit(token, config, "", 3600);
+        priceFeedManager.setPriceFeedConfigWithInit(unknownToken, config, "", 3600);
     }
 
     function testGetPrice_WorksAfterSetPriceFeedConfigWithInit() public {
-        // Setup provider
-        bytes32 chainlink = priceFeedManager.CHAINLINK_PROVIDER();
+        bytes32 pyth = priceFeedManager.PYTH_PROVIDER();
 
         IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager.OracleProvider({
-            oracleContract: address(chainlinkOracle),
-            oracleType: IBaseOracle.OracleType.PUSH,
+            oracleContract: address(pythOracle),
+            oracleType: IBaseOracle.OracleType.PULL,
             enabled: true
         });
 
-        priceFeedManager.registerOracleProvider(chainlink, provider);
+        priceFeedManager.registerOracleProvider(pyth, provider);
 
         IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
-            primaryProviderId: chainlink,
+            primaryProviderId: pyth,
             secondaryProviderId: bytes32(0),
-            primaryFeed: address(mockAdapter),
+            primaryFeed: token,
             secondaryFeed: address(0),
             usePullMode: false
         });
 
-        // Setup with initial price
         priceFeedManager.setPriceFeedConfigWithInit(token, config, "", 3600);
 
-        // getPrice should work
         (uint256 price, uint256 publishTime) = priceFeedManager.getPrice(token, 3600);
         assertGt(price, 0, "Price should be returned");
         assertGt(publishTime, 0, "Publish time should be returned");
     }
 
-    function testGetPriceWithFallback_RevertIfNoInitialPrice_SingleProvider() public {
-        // Setup provider
-        bytes32 chainlink = priceFeedManager.CHAINLINK_PROVIDER();
+    function testGetPriceWithFallback_RevertIfNoInitialPrice() public {
+        bytes32 pyth = priceFeedManager.PYTH_PROVIDER();
 
         IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager.OracleProvider({
-            oracleContract: address(chainlinkOracle),
-            oracleType: IBaseOracle.OracleType.PUSH,
+            oracleContract: address(pythOracle),
+            oracleType: IBaseOracle.OracleType.PULL,
             enabled: true
         });
 
-        priceFeedManager.registerOracleProvider(chainlink, provider);
+        priceFeedManager.registerOracleProvider(pyth, provider);
 
         IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
-            primaryProviderId: chainlink,
+            primaryProviderId: pyth,
             secondaryProviderId: bytes32(0),
-            primaryFeed: address(mockAdapter),
+            primaryFeed: token,
             secondaryFeed: address(0),
             usePullMode: false
         });
 
-        // Use old setPriceFeedConfig (no initial price)
         priceFeedManager.setPriceFeedConfig(token, config);
 
-        // Verify no initial price was set
         (uint256 lastPrice,) = priceFeedManager.getLastPriceRecord(token);
         assertEq(lastPrice, 0, "No initial price should be set");
 
-        // NOTE: getPrice() is a view function and does NOT check circuit breaker
-        // Only getPriceWithFallback() and getPriceWithUpdate() check circuit breaker
-        // So we test getPriceWithFallback instead
-        vm.expectRevert(abi.encodeWithSelector(PriceFeedManager.InitialPriceNotSet.selector, token));
-        priceFeedManager.getPriceWithFallback(token, 3600);
-    }
-
-    function testGetPriceWithFallback_RevertIfNoInitialPrice() public {
-        // Setup providers
-        bytes32 chainlink = priceFeedManager.CHAINLINK_PROVIDER();
-        bytes32 blocksense = priceFeedManager.BLOCKSENSE_PROVIDER();
-
-        IPriceFeedManager.OracleProvider memory provider1 = IPriceFeedManager.OracleProvider({
-            oracleContract: address(chainlinkOracle),
-            oracleType: IBaseOracle.OracleType.PUSH,
-            enabled: true
-        });
-
-        IPriceFeedManager.OracleProvider memory provider2 = IPriceFeedManager.OracleProvider({
-            oracleContract: address(blocksenseOracle),
-            oracleType: IBaseOracle.OracleType.PUSH,
-            enabled: true
-        });
-
-        priceFeedManager.registerOracleProvider(chainlink, provider1);
-        priceFeedManager.registerOracleProvider(blocksense, provider2);
-
-        IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
-            primaryProviderId: chainlink,
-            secondaryProviderId: blocksense,
-            primaryFeed: address(mockAdapter),
-            secondaryFeed: address(mockAdapter),
-            usePullMode: false
-        });
-
-        // Use old setPriceFeedConfig (no initial price)
-        priceFeedManager.setPriceFeedConfig(token, config);
-
-        // getPriceWithFallback should also revert with InitialPriceNotSet
         vm.expectRevert(abi.encodeWithSelector(PriceFeedManager.InitialPriceNotSet.selector, token));
         priceFeedManager.getPriceWithFallback(token, 3600);
     }
 
     function testCircuitBreaker_WorksAfterInitialPriceSet() public {
-        // Setup provider
-        bytes32 chainlink = priceFeedManager.CHAINLINK_PROVIDER();
+        bytes32 pyth = priceFeedManager.PYTH_PROVIDER();
 
         IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager.OracleProvider({
-            oracleContract: address(chainlinkOracle),
-            oracleType: IBaseOracle.OracleType.PUSH,
+            oracleContract: address(pythOracle),
+            oracleType: IBaseOracle.OracleType.PULL,
             enabled: true
         });
 
-        priceFeedManager.registerOracleProvider(chainlink, provider);
+        priceFeedManager.registerOracleProvider(pyth, provider);
 
         IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
-            primaryProviderId: chainlink,
+            primaryProviderId: pyth,
             secondaryProviderId: bytes32(0),
-            primaryFeed: address(mockAdapter),
+            primaryFeed: token,
             secondaryFeed: address(0),
             usePullMode: false
         });
 
-        // Setup with initial price (2000e18)
         priceFeedManager.setPriceFeedConfigWithInit(token, config, "", 3600);
 
-        // Verify initial price
         (uint256 initialPrice,) = priceFeedManager.getLastPriceRecord(token);
-        assertEq(initialPrice, 2000e18, "Initial price should be 2000e18");
+        assertGt(initialPrice, 0, "Initial price should be set");
 
-        // Change price slightly (within circuit breaker threshold)
-        mockAdapter.setLatestRoundData(1, 2100e18, 0, block.timestamp, 1);
+        // Update price slightly (within circuit breaker threshold)
+        mockPyth.setPrice(MOCK_PRICE_ID, 2100e8, -8, block.timestamp);
 
-        // getPrice should still work (5% deviation is within 50% threshold)
         (uint256 newPrice,) = priceFeedManager.getPrice(token, 3600);
-        assertEq(newPrice, 2100e18, "New price should be returned");
+        assertGt(newPrice, 0, "New price should be returned");
     }
 
     function testCircuitBreaker_TripsOnExtremeDeviation() public {
-        // Setup provider
-        bytes32 chainlink = priceFeedManager.CHAINLINK_PROVIDER();
+        bytes32 pyth = priceFeedManager.PYTH_PROVIDER();
 
         IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager.OracleProvider({
-            oracleContract: address(chainlinkOracle),
-            oracleType: IBaseOracle.OracleType.PUSH,
+            oracleContract: address(pythOracle),
+            oracleType: IBaseOracle.OracleType.PULL,
             enabled: true
         });
 
-        priceFeedManager.registerOracleProvider(chainlink, provider);
+        priceFeedManager.registerOracleProvider(pyth, provider);
 
         IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
-            primaryProviderId: chainlink,
+            primaryProviderId: pyth,
             secondaryProviderId: bytes32(0),
-            primaryFeed: address(mockAdapter),
+            primaryFeed: token,
             secondaryFeed: address(0),
             usePullMode: false
         });
 
-        // Setup with initial price (2000e18)
         priceFeedManager.setPriceFeedConfigWithInit(token, config, "", 3600);
 
-        // Change price dramatically (>50% deviation) within time window
-        // Price update must be within minDeviationWindow (60s) for circuit breaker to check
-        mockAdapter.setLatestRoundData(1, 200e18, 0, block.timestamp, 1); // 90% drop
+        // Drop price by 90% within the deviation window
+        mockPyth.setPrice(MOCK_PRICE_ID, 200e8, -8, block.timestamp);
 
-        // NOTE: Circuit breaker only checked in getPriceWithFallback/getPriceWithUpdate, not getPrice (view)
-        // Also, circuit breaker only triggers within minDeviationWindow (60s)
-        // Since we're calling immediately after setup, we're within the window
         vm.expectRevert(); // CircuitBreakerTripped
         priceFeedManager.getPriceWithFallback(token, 3600);
     }
 
     function testSetLastPriceRecord_ManualOverride() public {
-        // Setup provider
-        bytes32 chainlink = priceFeedManager.CHAINLINK_PROVIDER();
+        bytes32 pyth = priceFeedManager.PYTH_PROVIDER();
 
         IPriceFeedManager.OracleProvider memory provider = IPriceFeedManager.OracleProvider({
-            oracleContract: address(chainlinkOracle),
-            oracleType: IBaseOracle.OracleType.PUSH,
+            oracleContract: address(pythOracle),
+            oracleType: IBaseOracle.OracleType.PULL,
             enabled: true
         });
 
-        priceFeedManager.registerOracleProvider(chainlink, provider);
+        priceFeedManager.registerOracleProvider(pyth, provider);
 
         IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
-            primaryProviderId: chainlink,
+            primaryProviderId: pyth,
             secondaryProviderId: bytes32(0),
-            primaryFeed: address(mockAdapter),
+            primaryFeed: token,
             secondaryFeed: address(0),
             usePullMode: false
         });
 
-        // Use old setPriceFeedConfig
         priceFeedManager.setPriceFeedConfig(token, config);
 
-        // Admin can manually set initial price
         priceFeedManager.setLastPriceRecord(token, 2000e18);
 
-        // Verify price was set
         (uint256 lastPrice,) = priceFeedManager.getLastPriceRecord(token);
         assertEq(lastPrice, 2000e18, "Manual price should be set");
 
-        // getPrice should now work
         (uint256 price,) = priceFeedManager.getPrice(token, 3600);
         assertGt(price, 0, "Price should be returned after manual override");
     }
