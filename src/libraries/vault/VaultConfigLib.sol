@@ -84,7 +84,7 @@ library VaultConfigLib {
     // DEFAULT VALUES - MAX PROFIT CAP CONFIG
     // ========================================================================
 
-    uint8 constant DEFAULT_MAX_PROFIT_CAP_MULTIPLIER = 3; // 3x collateral
+    uint8 constant DEFAULT_MAX_PROFIT_CAP_MULTIPLIER = 2; // 2x collateral
     uint8 constant MIN_MAX_PROFIT_CAP_MULTIPLIER = 1; // 1x minimum
     uint8 constant MAX_MAX_PROFIT_CAP_MULTIPLIER = 10; // 10x maximum
 

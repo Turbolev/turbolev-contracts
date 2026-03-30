@@ -411,7 +411,7 @@ contract RiskConfigSettersTest is BaseTestModular {
         _enableTrading();
         _graduateVault();
 
-        // Set maxProfitCapMultiplier to 5x (instead of default 3x)
+        // Set maxProfitCapMultiplier to 5x (instead of default 2x)
         vm.prank(address(vaultManager));
         vault.setMaxProfitCapMultiplier(5);
 
@@ -482,7 +482,7 @@ contract RiskConfigSettersTest is BaseTestModular {
         _enableTrading();
         _graduateVault();
 
-        // Open position with default config (3x profit multiplier)
+        // Open position with default config (2x profit multiplier)
         vm.startPrank(user1);
         projectToken.approve(address(positionManager), 10 ether);
         positionManager.openPosition(
@@ -490,17 +490,17 @@ contract RiskConfigSettersTest is BaseTestModular {
         );
         vm.stopPrank();
 
-        // Check position has 3x maxProfitCap
+        // Check position has 2x maxProfitCap
         PositionLib.Position memory pos1 = positionManager.getPosition(1);
-        assertEq(pos1.maxProfitCap, 30 ether, "First position should have 3x cap");
+        assertEq(pos1.maxProfitCap, 20 ether, "First position should have 2x cap");
 
         // Change config to 10x
         vm.prank(address(vaultManager));
         vault.setMaxProfitCapMultiplier(10);
 
-        // Existing position should still have 3x cap (immutable at open time)
+        // Existing position should still have 2x cap (immutable at open time)
         PositionLib.Position memory pos1After = positionManager.getPosition(1);
-        assertEq(pos1After.maxProfitCap, 30 ether, "Existing position cap should not change");
+        assertEq(pos1After.maxProfitCap, 20 ether, "Existing position cap should not change");
 
         // New position should have 10x cap
         vm.startPrank(user2);

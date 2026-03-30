@@ -44,7 +44,7 @@ contract SettlementEngine is
     /// @notice Default max bet amount (1000 ether)
     uint256 public constant DEFAULT_MAX_BET_AMOUNT = 1000 ether;
 
-    /// @notice Default max profit cap in bps (0 = disabled, only 3x collateral cap applies)
+    /// @notice Default max profit cap in bps (0 = disabled, only 2x collateral cap applies)
     uint16 public constant DEFAULT_MAX_PROFIT_CAP_BPS = 0;
 
     // ========================================================================
@@ -264,8 +264,8 @@ contract SettlementEngine is
             uint256 profit = uint256(pnl);
 
             // Apply profit cap
-            // Cap 1: 3× collateral (stored in position at open time)
-            uint256 cap1 = position.maxProfitCap; // 3× collateral
+            // Cap 1: 2× collateral (stored in position at open time)
+            uint256 cap1 = position.maxProfitCap; // 2× collateral
 
             // Cap 2: % of vault TVL (disabled by default, maxProfitCapBps = 0)
             uint256 cap2 = _calculateVaultCap(position.projectToken);

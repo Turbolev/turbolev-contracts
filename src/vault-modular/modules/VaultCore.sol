@@ -1046,7 +1046,7 @@ contract VaultCore is VaultModuleBase {
 
     /**
      * @notice Set max profit cap multiplier (per-vault)
-     * @param multiplier New multiplier (e.g., 3 = 3x collateral)
+     * @param multiplier New multiplier (e.g., 2 = 2x collateral)
      */
     function setMaxProfitCapMultiplier(uint8 multiplier) external onlyVaultManagerOrHelper {
         if (!VaultConfigLib.validateMaxProfitCapMultiplier(multiplier)) {

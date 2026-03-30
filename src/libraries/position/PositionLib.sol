@@ -67,8 +67,8 @@ library PositionLib {
     // and allows oracle prices to update (Chainlink heartbeat ~20s)
     uint256 public constant MIN_POSITION_HOLD_TIME = 30; // 30 seconds
 
-    // Maximum profit is capped at 3× the collateral amount
-    uint256 public constant MAX_PROFIT_CAP_MULTIPLIER = 3;
+    // Maximum profit is capped at 2× the collateral amount
+    uint256 public constant MAX_PROFIT_CAP_MULTIPLIER = 2;
 
     // Maximum number of times a position can request to close before auto-cancellation
     uint8 public constant MAX_CLOSE_REQUESTS = 3;
