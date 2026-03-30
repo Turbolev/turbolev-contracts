@@ -118,7 +118,8 @@ contract VaultRewards is VaultModuleBase {
                             totalShares: snapshot.totalShares,
                             netPnL: finalizedPnL,
                             stakedAt: lpPos.stakedAt,
-                            dayStartTimestamp: dayStartTimestamp
+                            dayStartTimestamp: dayStartTimestamp,
+                            lastTopUpAt: lpPos.lastTopUpAt
                         })
                     );
 
@@ -192,7 +193,8 @@ contract VaultRewards is VaultModuleBase {
                     totalShares: snapshot.totalShares,
                     netPnL: finalizedPnL,
                     stakedAt: lpPos.stakedAt,
-                    dayStartTimestamp: dayStartTimestamp
+                    dayStartTimestamp: dayStartTimestamp,
+                    lastTopUpAt: lpPos.lastTopUpAt
                 })
             );
 
@@ -237,7 +239,7 @@ contract VaultRewards is VaultModuleBase {
         VaultStorageLib.LPPosition storage lpPos = core.lpPositions[msg.sender];
         uint256 rewardAmount = rewards.claimableRewards[msg.sender];
 
-        if (rewardAmount == 0 || lpPos.shares == 0) revert NoRewardsToClaim();
+        if (rewardAmount == 0) revert NoRewardsToClaim();
 
         // Get vault balance and use library to cap rewards
         uint256 vaultBalance = IERC20(core.projectToken).balanceOf(address(this));
@@ -359,7 +361,8 @@ contract VaultRewards is VaultModuleBase {
                     totalShares: core.vaultInfo.totalShares,
                     netPnL: rewards.dailyNetPnL,
                     stakedAt: lpPos.stakedAt,
-                    dayStartTimestamp: dayStartTimestamp
+                    dayStartTimestamp: dayStartTimestamp,
+                    lastTopUpAt: lpPos.lastTopUpAt
                 })
             );
 

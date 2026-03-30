@@ -8,6 +8,7 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./VaultRouter.sol";
 import "./VaultAccessController.sol";
 import "../interfaces/IVaultManager.sol";
@@ -33,6 +34,7 @@ contract VaultManager is
     PausableUpgradeable,
     UUPSUpgradeable
 {
+    using SafeERC20 for IERC20;
     // ========================================================================
     // STATE VARIABLES
     // ========================================================================
@@ -327,7 +329,7 @@ contract VaultManager is
         uint8 direction
     ) external payable onlyPositionManager {
         address vaultAddress = _getVault(_projectToken);
-        IERC20(_projectToken).transferFrom(positionManager, vaultAddress, amount);
+        IERC20(_projectToken).safeTransferFrom(positionManager, vaultAddress, amount);
         IVaultRouter(vaultAddress)
             .depositFromBet(positionId, amount, positionSize, isMarginAdd, direction);
         emit CollateralDepositedFromBet(

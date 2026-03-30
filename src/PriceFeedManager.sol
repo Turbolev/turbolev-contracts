@@ -633,6 +633,74 @@ contract PriceFeedManager is
     }
 
     /**
+     * @notice Get price and run circuit breaker check (non-view, for state-changing flows)
+     * @param projectToken Project token address
+     * @param maxAge Maximum acceptable price age in seconds
+     * @return price Settlement price (scaled to 18 decimals)
+     * @return publishTime When price was last updated
+     * @dev Use this in all state-changing flows that do not have priceUpdateData.
+     *      Equivalent to getPrice() but also validates against the circuit breaker,
+     *      protecting against flash crashes or price manipulation.
+     */
+    function getPriceChecked(address projectToken, uint256 maxAge)
+        external
+        override
+        whenNotPaused
+        returns (uint256 price, uint256 publishTime)
+    {
+        PriceFeedConfig memory config = priceFeedConfigs[projectToken];
+
+        uint256 fetchedPrice;
+        uint256 fetchedTime;
+        bool priceFound = false;
+
+        // Try primary provider
+        if (config.primaryProviderId != bytes32(0)) {
+            OracleProvider memory primary = oracleProviders[config.primaryProviderId];
+            (bool success, uint256 primaryPrice, uint256 primaryTime) =
+                _tryGetPriceFromProvider(primary, config.primaryFeed, maxAge);
+
+            if (success) {
+                fetchedPrice = primaryPrice;
+                fetchedTime = primaryTime;
+                priceFound = true;
+            }
+        }
+
+        // Try secondary provider if primary failed
+        if (!priceFound && config.secondaryProviderId != bytes32(0)) {
+            OracleProvider memory secondary = oracleProviders[config.secondaryProviderId];
+            (bool success, uint256 secondaryPrice, uint256 secondaryTime) =
+                _tryGetPriceFromProvider(secondary, config.secondaryFeed, maxAge);
+
+            if (success) {
+                emit PriceFallbackUsed(
+                    projectToken,
+                    config.primaryProviderId,
+                    config.secondaryProviderId,
+                    "Primary provider failed, using secondary"
+                );
+                fetchedPrice = secondaryPrice;
+                fetchedTime = secondaryTime;
+                priceFound = true;
+            }
+        }
+
+        if (!priceFound) {
+            revert InvalidOraclePrice();
+        }
+
+        // Run circuit breaker — revert if price deviation is abnormal
+        if (!_checkCircuitBreaker(projectToken, fetchedPrice)) {
+            LastPriceRecord memory lastRecord = lastPriceRecords[projectToken];
+            uint256 deviationBps = _calculateDeviationBps(lastRecord.price, fetchedPrice);
+            revert CircuitBreakerTripped(deviationBps, circuitBreakerConfig.maxDeviationBps);
+        }
+
+        return (fetchedPrice, fetchedTime);
+    }
+
+    /**
      * @notice Get price with fallback and emit event (non-view version)
      * @param projectToken Project token address
      * @param maxAge Maximum acceptable price age in seconds

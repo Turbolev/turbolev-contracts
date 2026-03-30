@@ -60,6 +60,7 @@ contract PythOracle is
     );
     event MaxPriceAgeUpdated(uint256 oldAge, uint256 newAge);
     event DefaultModeUpdated(OracleType oldMode, OracleType newMode);
+    event ETHWithdrawn(address indexed recipient, uint256 amount);
 
     // ========================================================================
     // ERRORS
@@ -74,6 +75,8 @@ contract PythOracle is
     error PriceFeedNotConfigured();
     error RefundFailed();
     error LengthMismatch();
+    error NoETHBalance();
+    error ETHTransferFailed();
 
     // ========================================================================
     // CONSTRUCTOR / INITIALIZER
@@ -482,6 +485,21 @@ contract PythOracle is
      * @notice Authorize upgrade (UUPS pattern)
      */
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner { }
+
+    /**
+     * @notice Withdraw ETH accidentally sent to this contract
+     * @param recipient Address to receive the ETH
+     * @dev Normal overpayments during oracle updates are already refunded inline.
+     *      This function only recovers ETH sent directly outside the update flow.
+     */
+    function withdrawETH(address payable recipient) external onlyOwner {
+        if (recipient == address(0)) revert InvalidAddress();
+        uint256 balance = address(this).balance;
+        if (balance == 0) revert NoETHBalance();
+        (bool success,) = recipient.call{ value: balance }("");
+        if (!success) revert ETHTransferFailed();
+        emit ETHWithdrawn(recipient, balance);
+    }
 
     /**
      * @notice Receive function to accept ETH

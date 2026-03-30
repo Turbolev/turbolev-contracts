@@ -165,6 +165,7 @@ contract VaultCore is VaultModuleBase {
     error DirectTransferNotAllowed();
     error InvalidPositionId();
     error UserMismatch();
+    error AlreadyInitialized();
 
     // ========================================================================
     // CONSTANTS
@@ -202,6 +203,9 @@ contract VaultCore is VaultModuleBase {
         VaultStorageLib.CoreStorage storage core = _core();
         VaultStorageLib.RiskStorage storage risk = _risk();
         VaultStorageLib.FundingStorage storage funding = _funding();
+
+        // Guard against re-initialization: projectToken is set on first init and never reset
+        if (core.projectToken != address(0)) revert AlreadyInitialized();
 
         // Validate addresses
         if (_projectToken == address(0)) revert InvalidAddress();
@@ -307,10 +311,15 @@ contract VaultCore is VaultModuleBase {
         // Update LP position
         VaultStorageLib.LPPosition storage lpPos = core.lpPositions[msg.sender];
         if (lpPos.user == address(0)) {
+            // First deposit: record stakedAt, lastTopUpAt stays 0
             lpPos.user = msg.sender;
             lpPos.stakedAt = block.timestamp;
             core.vaultLPs.push(msg.sender);
             core.lpIndex[msg.sender] = core.vaultLPs.length;
+        } else {
+            // Top-up: record lastTopUpAt so new shares cannot inherit the old stakedAt
+            // for same-day reward eligibility. Eligibility uses max(stakedAt, lastTopUpAt).
+            lpPos.lastTopUpAt = block.timestamp;
         }
 
         lpPos.shares += shares;

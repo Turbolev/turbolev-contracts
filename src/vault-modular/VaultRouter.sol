@@ -707,7 +707,8 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
                     totalShares: core.vaultInfo.totalShares,
                     netPnL: rewards.dailyNetPnL,
                     stakedAt: lpPos.stakedAt,
-                    dayStartTimestamp: dayStartTimestamp
+                    dayStartTimestamp: dayStartTimestamp,
+                    lastTopUpAt: lpPos.lastTopUpAt
                 })
             );
 
@@ -1094,7 +1095,9 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
 
         // Check no pending operations before allowing module swap
         uint256 pendingPositions = core.vaultInfo.pendingPositions;
-        uint256 pendingPayouts = core.pendingPayoutQueue.length;
+        uint256 pendingPayouts = core.pendingPayoutQueue.length > core.queueStartIndex
+            ? core.pendingPayoutQueue.length - core.queueStartIndex
+            : 0;
         if (pendingPositions > 0 || pendingPayouts > 0) {
             revert PendingOperationsExist(pendingPositions, pendingPayouts);
         }

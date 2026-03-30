@@ -97,6 +97,11 @@ library VaultStorageLib {
         uint256 totalRewardsClaimed;
         uint256 lastProcessedDay;
         uint256 pendingRewards;
+        // Tracks the most recent top-up timestamp (0 if never topped up).
+        // Used to prevent an already-eligible LP from gaming same-day rewards
+        // by topping up just before finalizeDailyReward().
+        // Eligibility for new shares uses max(stakedAt, lastTopUpAt).
+        uint256 lastTopUpAt;
     }
 
     /// @notice Daily snapshot for rewards

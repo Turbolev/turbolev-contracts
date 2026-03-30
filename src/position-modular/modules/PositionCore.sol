@@ -188,7 +188,7 @@ contract PositionCore is PositionModuleBase {
             );
         } else {
             (openPrice, pricePublishTime) =
-                IPriceFeedManager(core.priceFeedManager).getPrice(projectToken, maxAge);
+                IPriceFeedManager(core.priceFeedManager).getPriceChecked(projectToken, maxAge);
         }
 
         if (openPrice == 0) revert InvalidPrice();
@@ -401,7 +401,7 @@ contract PositionCore is PositionModuleBase {
         if (core.priceFeedManager != address(0)) {
             uint256 maxAge = _calculateMaxAge(deadline);
             (uint256 currentPrice,) =
-                IPriceFeedManager(core.priceFeedManager).getPrice(pos.projectToken, maxAge);
+                IPriceFeedManager(core.priceFeedManager).getPriceChecked(pos.projectToken, maxAge);
 
             // Check maxAcceptablePrice
             if (maxAcceptablePrice > 0) {
@@ -417,12 +417,9 @@ contract PositionCore is PositionModuleBase {
             }
         }
 
-        // Handle payment
-        if (pos.tokenAddress == address(0)) {
-            if (msg.value != marginAmount) revert InvalidAmount();
-        } else {
-            IERC20(pos.tokenAddress).safeTransferFrom(msg.sender, address(this), marginAmount);
-        }
+        // Handle payment — tokenAddress is always an ERC20 (address(0) is rejected at openPosition)
+        if (pos.tokenAddress == address(0)) revert InvalidAddress();
+        IERC20(pos.tokenAddress).safeTransferFrom(msg.sender, address(this), marginAmount);
 
         // Update position
         pos.amount += marginAmount;
@@ -441,19 +438,9 @@ contract PositionCore is PositionModuleBase {
 
         // Forward margin to VaultManager
         if (core.vaultManager != address(0)) {
-            bool useProjectToken = (pos.tokenAddress != address(0));
-            if (useProjectToken && pos.tokenAddress != address(0)) {
-                IERC20(pos.tokenAddress).forceApprove(core.vaultManager, marginAmount);
-            }
-
+            IERC20(pos.tokenAddress).forceApprove(core.vaultManager, marginAmount);
             IVaultManager(core.vaultManager)
-            .depositFromBet{
-                value: useProjectToken && pos.tokenAddress == address(0)
-                    ? marginAmount
-                    : (!useProjectToken ? marginAmount : 0)
-            }(
-                pos.projectToken, positionId, marginAmount, 0, true, pos.direction
-            );
+                .depositFromBet(pos.projectToken, positionId, marginAmount, 0, true, pos.direction);
         }
 
         emit MarginAdded(
@@ -491,7 +478,7 @@ contract PositionCore is PositionModuleBase {
         if (core.priceFeedManager == address(0)) revert InvalidAddress();
         uint256 maxAge = _calculateMaxAge(deadline);
         (uint256 closePrice, uint256 pricePublishTime) =
-            IPriceFeedManager(core.priceFeedManager).getPrice(pos.projectToken, maxAge);
+            IPriceFeedManager(core.priceFeedManager).getPriceChecked(pos.projectToken, maxAge);
         if (closePrice == 0) revert InvalidPrice();
 
         if (isLiquidation) {
