@@ -439,7 +439,7 @@ contract VaultCore is VaultModuleBase {
         uint256 positionSize,
         bool isMarginAdd,
         uint8 direction
-    ) external onlyVaultManagerOrHelper {
+    ) external onlyVaultManagerOrHelper nonReentrant {
         if (amount == 0) revert InvalidAmount();
 
         VaultStorageLib.CoreStorage storage core = _core();

@@ -397,6 +397,12 @@ contract PositionCore is PositionModuleBase {
         if (pos.state != PositionLib.POSITION_STATE_OPEN) revert PositionNotOpen();
         if (marginAmount == 0) revert InvalidAmount();
 
+        // VaultManager must be set before accepting any token transfer
+        if (core.vaultManager == address(0)) revert VaultManagerNotSet();
+
+        // Margin cannot exceed positionSize — prevents leverage truncation to 0
+        if (pos.amount + marginAmount > pos.positionSize) revert ExcessiveMargin();
+
         // Get current price to verify not liquidated
         if (core.priceFeedManager != address(0)) {
             uint256 maxAge = _calculateMaxAge(deadline);
@@ -426,7 +432,8 @@ contract PositionCore is PositionModuleBase {
         pos.addedMargin += marginAmount;
         pos.lastModifiedTimestamp = block.timestamp;
 
-        // Recalculate liquidation price
+        // Recalculate liquidation price with safe leverage floor
+        // pos.amount <= pos.positionSize is guaranteed by ExcessiveMargin check above
         uint8 effectiveLeverage = uint8(pos.positionSize / pos.amount);
         if (effectiveLeverage < PositionLib.MIN_LEVERAGE) {
             effectiveLeverage = uint8(PositionLib.MIN_LEVERAGE);
@@ -436,12 +443,10 @@ contract PositionCore is PositionModuleBase {
             pos.openPrice, pos.direction, effectiveLeverage, core.maintenanceMarginRatio
         );
 
-        // Forward margin to VaultManager
-        if (core.vaultManager != address(0)) {
-            IERC20(pos.tokenAddress).forceApprove(core.vaultManager, marginAmount);
-            IVaultManager(core.vaultManager)
-                .depositFromBet(pos.projectToken, positionId, marginAmount, 0, true, pos.direction);
-        }
+        // Forward margin to VaultManager (guaranteed non-zero by check above)
+        IERC20(pos.tokenAddress).forceApprove(core.vaultManager, marginAmount);
+        IVaultManager(core.vaultManager)
+            .depositFromBet(pos.projectToken, positionId, marginAmount, 0, true, pos.direction);
 
         emit MarginAdded(
             positionId,

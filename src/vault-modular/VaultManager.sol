@@ -124,6 +124,7 @@ contract VaultManager is
 
     error InvalidAddress();
     error VaultNotFound();
+    error VaultNotActive();
     error NotPositionManager();
     error DuplicateProjectToken();
     error DirectTransferNotAllowed();
@@ -689,6 +690,9 @@ contract VaultManager is
         address vault = vaultsByProjectToken[_projectToken];
         if (vault == address(0) || vault.code.length == 0) {
             revert VaultNotFound();
+        }
+        if (!vaultInfos[vault].isActive) {
+            revert VaultNotActive();
         }
         return vault;
     }

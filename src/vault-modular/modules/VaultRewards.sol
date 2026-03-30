@@ -50,6 +50,7 @@ contract VaultRewards is VaultModuleBase {
     // ========================================================================
 
     error DailySnapshotAlreadyProcessed();
+    error SnapshotNotYetProcessed();
     error TooEarlyForSnapshot();
     error NoRewardsToClaim();
     error InsufficientLiquidity();
@@ -164,8 +165,9 @@ contract VaultRewards is VaultModuleBase {
 
         uint256 today = VaultRewardsLib.getDayFromTimestamp(block.timestamp);
 
+        // Snapshot must exist before processing remaining LPs
         if (!rewards.dailySnapshots[today].isProcessed) {
-            revert DailySnapshotAlreadyProcessed();
+            revert SnapshotNotYetProcessed();
         }
 
         VaultStorageLib.DailySnapshot storage snapshot = rewards.dailySnapshots[today];

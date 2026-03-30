@@ -58,6 +58,8 @@ abstract contract PositionModuleBase {
     error PositionPaused();
     error PositionNotPaused();
     error ReentrancyGuardReentrantCall();
+    error VaultManagerNotSet();
+    error ExcessiveMargin();
 
     // ========================================================================
     // MODIFIERS - ACCESS CONTROL

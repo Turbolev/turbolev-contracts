@@ -440,11 +440,10 @@ library MathLib {
      * @param b Second multiplicand (signed, typically position size cast to int256)
      * @param denominator Divisor (signed, must be positive)
      * @return result (a * b) / denominator without intermediate overflow
-     * @dev Prevents overflow in funding rate calculations.
-     *      Handles sign separately, uses mulDiv for magnitude
+     * @dev Handles sign separately, uses mulDiv for magnitude to prevent intermediate overflow.
      *
-     * Example usage in FundingRateLib:
-     *   fundingOwed = MathLib.mulDivSigned(rateDiff, int256(positionSize), int256(FUNDING_PRECISION));
+     * Example usage:
+     *   result = MathLib.mulDivSigned(rateDiff, int256(positionSize), int256(PRECISION));
      */
     function mulDivSigned(int256 a, int256 b, int256 denominator)
         internal

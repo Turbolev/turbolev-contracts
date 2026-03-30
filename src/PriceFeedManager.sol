@@ -858,6 +858,12 @@ contract PriceFeedManager is
             revert CircuitBreakerTripped(deviationBps, circuitBreakerConfig.maxDeviationBps);
         }
 
+        // Refund any ETH not consumed by the oracle fee
+        if (address(this).balance > 0) {
+            (bool sent,) = payable(msg.sender).call{ value: address(this).balance }("");
+            if (!sent) revert RefundFailed();
+        }
+
         return (fetchedPrice, fetchedTime);
     }
 

@@ -52,7 +52,7 @@ interface ISettlementEngine {
     function getSettlementConfig()
         external
         view
-        returns (uint16 winMultiplierBps, uint256 minBetAmount, uint256 maxBetAmount, bool paused);
+        returns (uint256 minBetAmount, uint256 maxBetAmount, bool paused);
 
     /**
      * @notice Get settlement price from Blocksense Oracle with custom max age
@@ -78,18 +78,6 @@ interface ISettlementEngine {
     function getSettlementPriceWithFallback(address projectToken, uint256 maxAge)
         external
         returns (uint256 closePrice, uint256 publishTime);
-
-    /**
-     * @notice Set ChainlinkOracle address (for fallback)
-     * @param chainlinkOracle ChainlinkOracle contract address
-     */
-    function setChainlinkOracle(address chainlinkOracle) external;
-
-    /**
-     * @notice Get ChainlinkOracle address
-     * @return oracle ChainlinkOracle contract address
-     */
-    function chainlinkOracle() external view returns (address oracle);
 
     /**
      * @notice Get max profit cap in basis points
