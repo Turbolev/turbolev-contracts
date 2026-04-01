@@ -96,6 +96,9 @@ contract PositionCore is PositionModuleBase {
 
     event Paused(address account);
     event Unpaused(address account);
+    event OraclePriceFetchFailed(
+        uint64 indexed positionId, address indexed projectToken, bytes reason
+    );
 
     // ========================================================================
     // INITIALIZER
@@ -158,7 +161,8 @@ contract PositionCore is PositionModuleBase {
             revert InvalidLeverage();
         }
         if (
-            direction != PositionLib.BET_DIRECTION_UP && direction != PositionLib.BET_DIRECTION_DOWN
+            direction != PositionLib.BET_DIRECTION_LONG
+                && direction != PositionLib.BET_DIRECTION_SHORT
         ) {
             revert InvalidDirection();
         }
@@ -188,7 +192,7 @@ contract PositionCore is PositionModuleBase {
             );
         } else {
             (openPrice, pricePublishTime) =
-                IPriceFeedManager(core.priceFeedManager).getPrice(projectToken, maxAge);
+                IPriceFeedManager(core.priceFeedManager).getPriceChecked(projectToken, maxAge);
         }
 
         if (openPrice == 0) revert InvalidPrice();
@@ -333,7 +337,6 @@ contract PositionCore is PositionModuleBase {
         if (core.priceFeedManager == address(0)) revert InvalidAddress();
 
         // Get current mark price
-        bool priceSuccess = false;
         uint256 closePrice;
         uint256 pricePublishTime;
 
@@ -345,8 +348,10 @@ contract PositionCore is PositionModuleBase {
             ) {
                 closePrice = _price;
                 pricePublishTime = _publishTime;
-                priceSuccess = true;
-            } catch { }
+            } catch (bytes memory reason) {
+                emit OraclePriceFetchFailed(positionId, pos.projectToken, reason);
+                revert OracleFetchFailed(reason);
+            }
         } else {
             try IPriceFeedManager(core.priceFeedManager)
                 .getPrice(pos.projectToken, maxAge) returns (
@@ -354,11 +359,13 @@ contract PositionCore is PositionModuleBase {
             ) {
                 closePrice = _price;
                 pricePublishTime = _publishTime;
-                priceSuccess = true;
-            } catch { }
+            } catch (bytes memory reason) {
+                emit OraclePriceFetchFailed(positionId, pos.projectToken, reason);
+                revert OracleFetchFailed(reason);
+            }
         }
 
-        if (!priceSuccess || closePrice == 0) {
+        if (closePrice == 0) {
             revert PriceStale();
         }
 
@@ -397,11 +404,17 @@ contract PositionCore is PositionModuleBase {
         if (pos.state != PositionLib.POSITION_STATE_OPEN) revert PositionNotOpen();
         if (marginAmount == 0) revert InvalidAmount();
 
+        // VaultManager must be set before accepting any token transfer
+        if (core.vaultManager == address(0)) revert VaultManagerNotSet();
+
+        // Margin cannot exceed positionSize — prevents leverage truncation to 0
+        if (pos.amount + marginAmount > pos.positionSize) revert ExcessiveMargin();
+
         // Get current price to verify not liquidated
         if (core.priceFeedManager != address(0)) {
             uint256 maxAge = _calculateMaxAge(deadline);
             (uint256 currentPrice,) =
-                IPriceFeedManager(core.priceFeedManager).getPrice(pos.projectToken, maxAge);
+                IPriceFeedManager(core.priceFeedManager).getPriceChecked(pos.projectToken, maxAge);
 
             // Check maxAcceptablePrice
             if (maxAcceptablePrice > 0) {
@@ -417,19 +430,17 @@ contract PositionCore is PositionModuleBase {
             }
         }
 
-        // Handle payment
-        if (pos.tokenAddress == address(0)) {
-            if (msg.value != marginAmount) revert InvalidAmount();
-        } else {
-            IERC20(pos.tokenAddress).safeTransferFrom(msg.sender, address(this), marginAmount);
-        }
+        // Handle payment — tokenAddress is always an ERC20 (address(0) is rejected at openPosition)
+        if (pos.tokenAddress == address(0)) revert InvalidAddress();
+        IERC20(pos.tokenAddress).safeTransferFrom(msg.sender, address(this), marginAmount);
 
         // Update position
         pos.amount += marginAmount;
         pos.addedMargin += marginAmount;
         pos.lastModifiedTimestamp = block.timestamp;
 
-        // Recalculate liquidation price
+        // Recalculate liquidation price with safe leverage floor
+        // pos.amount <= pos.positionSize is guaranteed by ExcessiveMargin check above
         uint8 effectiveLeverage = uint8(pos.positionSize / pos.amount);
         if (effectiveLeverage < PositionLib.MIN_LEVERAGE) {
             effectiveLeverage = uint8(PositionLib.MIN_LEVERAGE);
@@ -439,22 +450,10 @@ contract PositionCore is PositionModuleBase {
             pos.openPrice, pos.direction, effectiveLeverage, core.maintenanceMarginRatio
         );
 
-        // Forward margin to VaultManager
-        if (core.vaultManager != address(0)) {
-            bool useProjectToken = (pos.tokenAddress != address(0));
-            if (useProjectToken && pos.tokenAddress != address(0)) {
-                IERC20(pos.tokenAddress).forceApprove(core.vaultManager, marginAmount);
-            }
-
-            IVaultManager(core.vaultManager)
-            .depositFromBet{
-                value: useProjectToken && pos.tokenAddress == address(0)
-                    ? marginAmount
-                    : (!useProjectToken ? marginAmount : 0)
-            }(
-                pos.projectToken, positionId, marginAmount, 0, true, pos.direction
-            );
-        }
+        // Forward margin to VaultManager (guaranteed non-zero by check above)
+        IERC20(pos.tokenAddress).forceApprove(core.vaultManager, marginAmount);
+        IVaultManager(core.vaultManager)
+            .depositFromBet(pos.projectToken, positionId, marginAmount, 0, true, pos.direction);
 
         emit MarginAdded(
             positionId,
@@ -491,7 +490,7 @@ contract PositionCore is PositionModuleBase {
         if (core.priceFeedManager == address(0)) revert InvalidAddress();
         uint256 maxAge = _calculateMaxAge(deadline);
         (uint256 closePrice, uint256 pricePublishTime) =
-            IPriceFeedManager(core.priceFeedManager).getPrice(pos.projectToken, maxAge);
+            IPriceFeedManager(core.priceFeedManager).getPriceChecked(pos.projectToken, maxAge);
         if (closePrice == 0) revert InvalidPrice();
 
         if (isLiquidation) {
@@ -530,7 +529,7 @@ contract PositionCore is PositionModuleBase {
         address vaultAddress = IVaultManager(core.vaultManager).getVault(pos.projectToken);
         if (vaultAddress == address(0)) revert InvalidAddress();
 
-        // Process settlement
+        // Process settlement — SettlementEngine reads position data directly from this router
         (
             bool won,
             uint256 payout,
@@ -539,12 +538,10 @@ contract PositionCore is PositionModuleBase {
             int256 vaultPnL,
             uint8 finalState,
         ) = ISettlementEngine(core.settlementEngine)
-            .processSettlement(pos, closePrice, isLiquidation);
+            .processSettlement(positionId, closePrice, isLiquidation);
 
         // No ongoing funding — impact fee was settled upfront at open.
-        uint256 adjustedPayout = payout;
-
-        // Update vault P&L
+        // Pass payout so vault caps closeFee at payout (M-18 fix).
         uint256 closeFee = IVaultManager(core.vaultManager)
             .updateVaultPnLWithLeverage(
                 pos.projectToken,
@@ -553,15 +550,12 @@ contract PositionCore is PositionModuleBase {
                 vaultPnL,
                 pos.positionSize,
                 pos.direction,
-                pos.user
+                pos.user,
+                payout
             );
 
-        // Deduct close fee
-        if (closeFee > 0 && adjustedPayout > closeFee) {
-            adjustedPayout -= closeFee;
-        } else if (closeFee > 0) {
-            adjustedPayout = 0;
-        }
+        // closeFee is already capped at payout by VaultCore, so subtraction is always safe.
+        uint256 adjustedPayout = payout - closeFee;
 
         // Execute payout
         if (adjustedPayout > 0) {

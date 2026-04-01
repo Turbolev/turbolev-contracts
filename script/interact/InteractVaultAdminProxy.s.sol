@@ -82,29 +82,6 @@ contract InteractVaultAdminProxy is Script {
     }
 
     // ========================================================================
-    // BATCH OPERATIONS (KEEPER)
-    // ========================================================================
-
-    function batchUpdateFunding() public {
-        console.log("\n=== Batch Update Funding ===");
-
-        vm.startBroadcast(deployer);
-        uint256 updated = adminProxy.batchUpdateHourlyFunding();
-        vm.stopBroadcast();
-
-        console.log("Vaults updated:", updated);
-    }
-
-    function batchUpdateFundingForVaults(address[] calldata vaults) public {
-        console.log("\n=== Batch Update Funding for Vaults ===");
-
-        vm.startBroadcast(deployer);
-        uint256 updated = adminProxy.batchUpdateHourlyFundingForVaults(vaults);
-        vm.stopBroadcast();
-
-        console.log("Vaults updated:", updated);
-    }
-
     // ========================================================================
     // VAULT ADMIN OPERATIONS
     // ========================================================================

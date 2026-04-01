@@ -47,10 +47,6 @@ library PositionLib {
     uint8 public constant BET_DIRECTION_LONG = 1; // Long (predict price increase)
     uint8 public constant BET_DIRECTION_SHORT = 2; // Short (predict price decrease)
 
-    // Legacy aliases for backward compatibility
-    uint8 public constant BET_DIRECTION_UP = 1; // Alias for LONG
-    uint8 public constant BET_DIRECTION_DOWN = 2; // Alias for SHORT
-
     // ========================================================================
     // LEVERAGE & LIQUIDATION CONSTANTS
     // ========================================================================
@@ -67,8 +63,8 @@ library PositionLib {
     // and allows oracle prices to update (Chainlink heartbeat ~20s)
     uint256 public constant MIN_POSITION_HOLD_TIME = 30; // 30 seconds
 
-    // Maximum profit is capped at 3× the collateral amount
-    uint256 public constant MAX_PROFIT_CAP_MULTIPLIER = 3;
+    // Maximum profit is capped at 2× the collateral amount
+    uint256 public constant MAX_PROFIT_CAP_MULTIPLIER = 2;
 
     // Maximum number of times a position can request to close before auto-cancellation
     uint8 public constant MAX_CLOSE_REQUESTS = 3;
@@ -80,7 +76,7 @@ library PositionLib {
     struct Position {
         uint64 positionId; // 8 bytes
         uint8 leverage; // 1 byte - Leverage multiplier (1-100)
-        uint8 direction; // 1 byte - BET_DIRECTION_UP or BET_DIRECTION_DOWN
+        uint8 direction; // 1 byte - BET_DIRECTION_LONG or BET_DIRECTION_SHORT
         uint8 state; // 1 byte - POSITION_STATE_*
         uint8 closeRequestCount; // 1 byte
         uint8 maxCloseRequests; // 1 byte
@@ -150,9 +146,11 @@ library PositionLib {
         // If MMR = 20%, then liquidation at 80% loss
         uint256 liquidationThreshold = MathLib.BASIS_POINTS - maintenanceMarginRatio;
 
-        // Calculate price deviation percentage
-        // priceDeviationBps = liquidationThreshold / leverage
-        uint256 priceDeviationBps = liquidationThreshold / leverage;
+        // Calculate price deviation percentage with round-up to favor the user.
+        // floor(liquidationThreshold / leverage) would trigger liquidation slightly earlier
+        // than the exact math warrants. Rounding up gives the user the full benefit of their
+        // margin, so liquidation only occurs at or beyond the mathematically correct threshold.
+        uint256 priceDeviationBps = MathLib.divRoundUp(liquidationThreshold, leverage);
 
         if (direction == BET_DIRECTION_LONG) {
             // LONG: liquidation when price decreases

@@ -40,6 +40,12 @@ contract PythOracle is
     /// @notice Maximum acceptable price age for push mode (seconds)
     uint256 public maxPriceAge;
 
+    /// @notice Minimum allowed maxPriceAge (10 seconds)
+    uint256 public constant MIN_PRICE_AGE = 10;
+
+    /// @notice Maximum allowed maxPriceAge (1 hour)
+    uint256 public constant MAX_PRICE_AGE = 3600;
+
     /// @notice Default operating mode
     OracleType public defaultMode;
 
@@ -60,6 +66,7 @@ contract PythOracle is
     );
     event MaxPriceAgeUpdated(uint256 oldAge, uint256 newAge);
     event DefaultModeUpdated(OracleType oldMode, OracleType newMode);
+    event ETHWithdrawn(address indexed recipient, uint256 amount);
 
     // ========================================================================
     // ERRORS
@@ -74,6 +81,10 @@ contract PythOracle is
     error PriceFeedNotConfigured();
     error RefundFailed();
     error LengthMismatch();
+    error NoETHBalance();
+    error ETHTransferFailed();
+    error InvalidPriceAge();
+    error InvalidExponent();
 
     // ========================================================================
     // CONSTRUCTOR / INITIALIZER
@@ -97,6 +108,7 @@ contract PythOracle is
         if (initialOwner == address(0) || _pythContract == address(0)) {
             revert InvalidAddress();
         }
+        if (_maxPriceAge < MIN_PRICE_AGE || _maxPriceAge > MAX_PRICE_AGE) revert InvalidPriceAge();
 
         __Ownable_init(initialOwner);
         __Pausable_init();
@@ -166,7 +178,8 @@ contract PythOracle is
      * @param feed Token address (maps to Pyth price feed ID)
      * @return price Latest price (scaled to 18 decimals)
      * @return updatedAt Timestamp when price was published
-     * @dev Reads from already-updated prices on Pyth contract
+     * @dev Uses getPriceNoOlderThan with maxPriceAge to enforce staleness check.
+     *      Reverts if the on-chain price is older than maxPriceAge seconds.
      */
     function getPrice(address feed)
         external
@@ -178,7 +191,7 @@ contract PythOracle is
         bytes32 priceId = priceFeedIds[feed];
         if (priceId == bytes32(0)) revert PriceFeedNotConfigured();
 
-        IPyth.Price memory pythPrice = IPyth(pythContract).getPriceUnsafe(priceId);
+        IPyth.Price memory pythPrice = IPyth(pythContract).getPriceNoOlderThan(priceId, maxPriceAge);
 
         if (pythPrice.price <= 0) revert InvalidPrice();
 
@@ -365,25 +378,27 @@ contract PythOracle is
      * @dev Pyth price = price * 10^expo
      * @dev We want: price * 10^18
      * @dev So: price * 10^expo * 10^(18-expo) = price * 10^18
+     * @dev expo must be in [-18, 0] — Pyth real-world feeds always use negative exponents.
+     *      Positive exponents are not valid for price feeds and would cause overflow.
      */
     function _scalePythPrice(int64 price, int32 expo) internal pure returns (int256 scaledPrice) {
+        // Pyth price feeds always have non-positive exponents (e.g. -8 for USD pairs).
+        // A positive exponent is either a malformed feed or an oracle attack — reject it.
+        if (expo > 0 || expo < -18) revert InvalidExponent();
+
         int256 price256 = int256(price);
         int256 expo256 = int256(expo);
 
         // Target is 18 decimals
         // Formula: scaled = price * 10^(18 + expo)
         // If expo = -8: scaled = price * 10^(18 + (-8)) = price * 10^10
-        int256 targetDecimals = 18;
-        int256 adjustment = targetDecimals + expo256;
+        int256 adjustment = 18 + expo256; // adjustment in [0, 18] given expo in [-18, 0]
 
         if (adjustment == 0) {
             return price256;
-        } else if (adjustment > 0) {
-            // Need to multiply
-            return price256 * int256(10 ** uint256(adjustment));
         } else {
-            // Need to divide
-            return price256 / int256(10 ** uint256(-adjustment));
+            // adjustment > 0: multiply (safe — max 10^18, well within int256)
+            return price256 * int256(10 ** uint256(adjustment));
         }
     }
 
@@ -437,9 +452,10 @@ contract PythOracle is
 
     /**
      * @notice Set maximum price age
-     * @param _maxPriceAge New maximum price age in seconds
+     * @param _maxPriceAge New maximum price age in seconds (must be between MIN_PRICE_AGE and MAX_PRICE_AGE)
      */
     function setMaxPriceAge(uint256 _maxPriceAge) external onlyOwner {
+        if (_maxPriceAge < MIN_PRICE_AGE || _maxPriceAge > MAX_PRICE_AGE) revert InvalidPriceAge();
         uint256 oldAge = maxPriceAge;
         maxPriceAge = _maxPriceAge;
         emit MaxPriceAgeUpdated(oldAge, _maxPriceAge);
@@ -482,6 +498,21 @@ contract PythOracle is
      * @notice Authorize upgrade (UUPS pattern)
      */
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner { }
+
+    /**
+     * @notice Withdraw ETH accidentally sent to this contract
+     * @param recipient Address to receive the ETH
+     * @dev Normal overpayments during oracle updates are already refunded inline.
+     *      This function only recovers ETH sent directly outside the update flow.
+     */
+    function withdrawETH(address payable recipient) external onlyOwner {
+        if (recipient == address(0)) revert InvalidAddress();
+        uint256 balance = address(this).balance;
+        if (balance == 0) revert NoETHBalance();
+        (bool success,) = recipient.call{ value: balance }("");
+        if (!success) revert ETHTransferFailed();
+        emit ETHWithdrawn(recipient, balance);
+    }
 
     /**
      * @notice Receive function to accept ETH

@@ -14,6 +14,10 @@ import "./interfaces/IAssetVault.sol";
 import "./interfaces/IPriceFeedManager.sol";
 import "./interfaces/IVaultAccessController.sol";
 
+interface IPositionRouter {
+    function getPosition(uint64 positionId) external view returns (PositionLib.Position memory);
+}
+
 /**
  * @title SettlementEngine
  * @notice Contract for handling settlement and payout calculation - Upgradeable
@@ -35,24 +39,18 @@ contract SettlementEngine is
     // CONSTANTS
     // ========================================================================
 
-    /// @notice Default win multiplier in bps (3x)
-    uint16 public constant DEFAULT_WIN_MULTIPLIER_BPS = 30_000;
-
     /// @notice Default min bet amount (0.001 ether)
     uint256 public constant DEFAULT_MIN_BET_AMOUNT = 0.001 ether;
 
     /// @notice Default max bet amount (1000 ether)
     uint256 public constant DEFAULT_MAX_BET_AMOUNT = 1000 ether;
 
-    /// @notice Default max profit cap in bps (0 = disabled, only 3x collateral cap applies)
+    /// @notice Default max profit cap in bps (0 = disabled, only 2x collateral cap applies)
     uint16 public constant DEFAULT_MAX_PROFIT_CAP_BPS = 0;
 
     // ========================================================================
     // STATE VARIABLES
     // ========================================================================
-
-    /// @notice Win multiplier in bps (19500 = 1.95x)
-    uint16 public winMultiplierBps;
 
     /// @notice Minimum bet amount (wei)
     uint256 public minBetAmount;
@@ -110,7 +108,7 @@ contract SettlementEngine is
         uint256 timestamp
     );
 
-    event ConfigUpdated(uint16 winMultiplierBps, uint256 minBetAmount, uint256 maxBetAmount);
+    event ConfigUpdated(uint256 minBetAmount, uint256 maxBetAmount);
 
     event PositionManagerUpdated(address indexed oldAddress, address indexed newAddress);
     event VaultManagerUpdated(address indexed oldAddress, address indexed newAddress);
@@ -175,7 +173,6 @@ contract SettlementEngine is
         __UUPSUpgradeable_init();
 
         // Default config
-        winMultiplierBps = DEFAULT_WIN_MULTIPLIER_BPS;
         minBetAmount = DEFAULT_MIN_BET_AMOUNT;
         maxBetAmount = DEFAULT_MAX_BET_AMOUNT;
         maxProfitCapBps = DEFAULT_MAX_PROFIT_CAP_BPS;
@@ -200,23 +197,30 @@ contract SettlementEngine is
     // ========================================================================
 
     /**
-     * @notice Calculate potential payout (for display)
-     * @param amount Bet amount
-     * @return potentialPayout Max possible payout
+     * @notice Calculate potential payout for display purposes
+     * @param amount Collateral amount
+     * @param leverage Leverage multiplier (e.g. 10 = 10x)
+     * @param maxProfitCap Maximum profit cap set at position open (2× collateral by default)
+     * @return potentialPayout Max possible payout (collateral + capped profit)
+     * @dev Payout = collateral + min(leverage × collateral, maxProfitCap).
+     *      This reflects the actual settlement logic in processSettlement.
      */
-    function calculatePotentialPayout(uint256 amount)
+    function calculatePotentialPayout(uint256 amount, uint8 leverage, uint256 maxProfitCap)
         external
-        view
+        pure
         returns (uint256 potentialPayout)
     {
-        potentialPayout = (amount * winMultiplierBps) / MathLib.BASIS_POINTS;
-        return potentialPayout;
+        uint256 maxProfit = amount * leverage;
+        if (maxProfitCap > 0 && maxProfitCap < maxProfit) {
+            maxProfit = maxProfitCap;
+        }
+        return amount + maxProfit;
     }
 
     /**
      * @notice Process settlement logic with synthetic leverage
      * @dev Main settlement function - calculates payout, fees, and P&L
-     * @param position Position data
+     * @param positionId Position ID — position data is read directly from PositionRouter
      * @param closePrice Close price
      * @param isLiquidation True if this is a liquidation
      * @return won Whether user won
@@ -227,11 +231,7 @@ contract SettlementEngine is
      * @return finalState Final position state
      * @return excessProfit Excess profit from capped trades
      */
-    function processSettlement(
-        PositionLib.Position calldata position,
-        uint256 closePrice,
-        bool isLiquidation
-    )
+    function processSettlement(uint64 positionId, uint256 closePrice, bool isLiquidation)
         external
         onlyPositionManager
         whenNotPaused
@@ -245,6 +245,10 @@ contract SettlementEngine is
             uint256 excessProfit
         )
     {
+        // Read position directly from PositionRouter to prevent caller from passing forged data
+        PositionLib.Position memory position =
+            IPositionRouter(positionManager).getPosition(positionId);
+
         // Calculate P&L with leverage
         (pnl,) = PositionLib.calculateUnrealizedPnL(position, closePrice);
 
@@ -264,8 +268,8 @@ contract SettlementEngine is
             uint256 profit = uint256(pnl);
 
             // Apply profit cap
-            // Cap 1: 3× collateral (stored in position at open time)
-            uint256 cap1 = position.maxProfitCap; // 3× collateral
+            // Cap 1: 2× collateral (stored in position at open time)
+            uint256 cap1 = position.maxProfitCap; // 2× collateral
 
             // Cap 2: % of vault TVL (disabled by default, maxProfitCapBps = 0)
             uint256 cap2 = _calculateVaultCap(position.projectToken);
@@ -371,21 +375,18 @@ contract SettlementEngine is
     /**
      * @notice Update settlement config
      */
-    function updateConfig(uint16 _winMultiplierBps, uint256 _minBetAmount, uint256 _maxBetAmount)
+    function updateConfig(uint256 _minBetAmount, uint256 _maxBetAmount)
         external
         onlyOwner
         whenNotPaused
     {
-        if (_winMultiplierBps < MathLib.BASIS_POINTS) revert InvalidConfig(); // Min 1x multiplier (10000 bps)
-        if (_winMultiplierBps > MathLib.BASIS_POINTS * 100) revert InvalidConfig(); // Max 100x multiplier
         if (_minBetAmount == 0) revert InvalidConfig();
         if (_maxBetAmount < _minBetAmount) revert InvalidConfig();
 
-        winMultiplierBps = _winMultiplierBps;
         minBetAmount = _minBetAmount;
         maxBetAmount = _maxBetAmount;
 
-        emit ConfigUpdated(_winMultiplierBps, _minBetAmount, _maxBetAmount);
+        emit ConfigUpdated(_minBetAmount, _maxBetAmount);
     }
 
     /**
@@ -553,14 +554,9 @@ contract SettlementEngine is
     function getSettlementConfig()
         external
         view
-        returns (
-            uint16 _winMultiplierBps,
-            uint256 _minBetAmount,
-            uint256 _maxBetAmount,
-            bool _paused
-        )
+        returns (uint256 _minBetAmount, uint256 _maxBetAmount, bool _paused)
     {
-        return (winMultiplierBps, minBetAmount, maxBetAmount, paused());
+        return (minBetAmount, maxBetAmount, paused());
     }
 
     /**

@@ -112,7 +112,8 @@ interface IAssetVault {
         int256 vaultPnL,
         uint256 positionSize,
         uint8 direction,
-        address user
+        address user,
+        uint256 payout
     ) external returns (uint256 closeFee);
 
     function updateVaultParams(uint256 _minBetAmount, uint256 _maxBetAmount) external;
@@ -124,7 +125,7 @@ interface IAssetVault {
      * @param leverage Leverage multiplier
      * @param direction Position direction (1 = LONG, 2 = SHORT)
      */
-    function checkPositionRisk(uint256 positionSize, uint8 leverage, uint8 direction) external view;
+    function checkPositionRisk(uint256 positionSize, uint16 leverage, uint8 direction) external view;
 
     /**
      * @notice Get vault info
@@ -527,7 +528,7 @@ interface IAssetVault {
 
     /**
      * @notice Set max profit cap multiplier (per-vault)
-     * @param multiplier New multiplier (e.g., 3 = 3x collateral)
+     * @param multiplier New multiplier (e.g., 2 = 2x collateral)
      */
     function setMaxProfitCapMultiplier(uint8 multiplier) external;
 

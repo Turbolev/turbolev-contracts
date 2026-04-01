@@ -58,6 +58,9 @@ abstract contract PositionModuleBase {
     error PositionPaused();
     error PositionNotPaused();
     error ReentrancyGuardReentrantCall();
+    error VaultManagerNotSet();
+    error ExcessiveMargin();
+    error OracleFetchFailed(bytes reason);
 
     // ========================================================================
     // MODIFIERS - ACCESS CONTROL

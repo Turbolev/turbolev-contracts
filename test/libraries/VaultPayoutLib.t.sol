@@ -150,42 +150,32 @@ contract VaultPayoutLibTest is Test {
     // ========================================================================
 
     function test_CalculatePnLUpdate_VaultGains() public pure {
-        // Vault gains (trader loses)
+        // Vault gains (trader loses) — closeFee pre-calculated and passed in
         VaultPayoutLib.PnLUpdateParams memory params = VaultPayoutLib.PnLUpdateParams({
-            collateral: 100 ether,
+            closeFee: 0.5 ether, // 0.5% of 100 ether collateral, pre-calculated by VaultCore
             vaultPnL: 50 ether, // Positive = vault gains
-            closeFeeBps: 50, // 0.5%
             currentLifetimePnL: 0,
             isNegativePnL: false
         });
 
         VaultPayoutLib.PnLUpdateResult memory result = VaultPayoutLib.calculatePnLUpdate(params);
 
-        assertEq(result.closeFee, 0.5 ether);
-        assertEq(result.liquidityChange, 50 ether);
-        assertTrue(result.isLiquidityIncrease);
         assertEq(result.newLifetimePnL, 50.5 ether); // 50 + 0.5 fee
         assertFalse(result.newIsNegativePnL);
     }
 
     function test_CalculatePnLUpdate_VaultLoses() public pure {
-        // Vault loses (trader wins)
+        // Vault loses (trader wins) — net loss = 50 - 0.5 = 49.5
         VaultPayoutLib.PnLUpdateParams memory params = VaultPayoutLib.PnLUpdateParams({
-            collateral: 100 ether,
+            closeFee: 0.5 ether,
             vaultPnL: -50 ether, // Negative = vault loses
-            closeFeeBps: 50,
             currentLifetimePnL: 100 ether,
             isNegativePnL: false
         });
 
         VaultPayoutLib.PnLUpdateResult memory result = VaultPayoutLib.calculatePnLUpdate(params);
 
-        assertEq(result.closeFee, 0.5 ether);
-        assertEq(result.liquidityChange, 0); // Losses handled via payout
-        assertFalse(result.isLiquidityIncrease);
-
-        // Loss 50 - closeFee 0.5 = net loss 49.5
-        // 100 - 49.5 = 50.5
+        // net loss = 50 - 0.5 = 49.5; 100 - 49.5 = 50.5
         assertEq(result.newLifetimePnL, 50.5 ether);
         assertFalse(result.newIsNegativePnL);
     }
@@ -193,17 +183,15 @@ contract VaultPayoutLibTest is Test {
     function test_CalculatePnLUpdate_FlipsToNegative() public pure {
         // Large loss flips lifetime PnL to negative
         VaultPayoutLib.PnLUpdateParams memory params = VaultPayoutLib.PnLUpdateParams({
-            collateral: 100 ether,
+            closeFee: 0.5 ether,
             vaultPnL: -200 ether,
-            closeFeeBps: 50,
             currentLifetimePnL: 50 ether,
             isNegativePnL: false
         });
 
         VaultPayoutLib.PnLUpdateResult memory result = VaultPayoutLib.calculatePnLUpdate(params);
 
-        // Loss 200 - fee 0.5 = 199.5 net loss
-        // 50 (current) - 199.5 = -149.5, flip sign: 149.5 negative
+        // net loss = 200 - 0.5 = 199.5; 50 - 199.5 = -149.5 → flip sign
         assertTrue(result.newIsNegativePnL);
         assertEq(result.newLifetimePnL, 149.5 ether);
     }
@@ -211,9 +199,8 @@ contract VaultPayoutLibTest is Test {
     function test_CalculatePnLUpdate_RecoverFromNegative() public pure {
         // Vault gain recovers from negative lifetime PnL
         VaultPayoutLib.PnLUpdateParams memory params = VaultPayoutLib.PnLUpdateParams({
-            collateral: 100 ether,
+            closeFee: 0,
             vaultPnL: 200 ether, // Large gain
-            closeFeeBps: 0,
             currentLifetimePnL: 50 ether,
             isNegativePnL: true // Currently negative
         });
@@ -227,32 +214,72 @@ contract VaultPayoutLibTest is Test {
 
     function test_CalculatePnLUpdate_ZeroFee() public pure {
         VaultPayoutLib.PnLUpdateParams memory params = VaultPayoutLib.PnLUpdateParams({
-            collateral: 100 ether,
-            vaultPnL: 50 ether,
-            closeFeeBps: 0, // No fee
-            currentLifetimePnL: 0,
-            isNegativePnL: false
+            closeFee: 0, vaultPnL: 50 ether, currentLifetimePnL: 0, isNegativePnL: false
         });
 
         VaultPayoutLib.PnLUpdateResult memory result = VaultPayoutLib.calculatePnLUpdate(params);
 
-        assertEq(result.closeFee, 0);
         assertEq(result.newLifetimePnL, 50 ether);
     }
 
-    function test_CalculatePnLUpdate_ZeroCollateral() public pure {
+    function test_CalculatePnLUpdate_ZeroCloseFee() public pure {
+        // Zero closeFee (e.g. payout was 0)
         VaultPayoutLib.PnLUpdateParams memory params = VaultPayoutLib.PnLUpdateParams({
-            collateral: 0,
-            vaultPnL: 50 ether,
-            closeFeeBps: 50,
-            currentLifetimePnL: 0,
+            closeFee: 0, vaultPnL: 50 ether, currentLifetimePnL: 0, isNegativePnL: false
+        });
+
+        VaultPayoutLib.PnLUpdateResult memory result = VaultPayoutLib.calculatePnLUpdate(params);
+
+        assertEq(result.newLifetimePnL, 50 ether);
+    }
+
+    // M-21 fix: when vault loses and closeFee >= loss, surplus closeFee must be recorded
+    function test_CalculatePnLUpdate_M21_FeeCoversLoss_NetGain() public pure {
+        // closeFee = 10, vaultPnL = -3 (vault loses 3 but collects 10 in fee)
+        // net effect = +7 for vault
+        VaultPayoutLib.PnLUpdateParams memory params = VaultPayoutLib.PnLUpdateParams({
+            closeFee: 10 ether,
+            vaultPnL: -3 ether,
+            currentLifetimePnL: 100 ether,
             isNegativePnL: false
         });
 
         VaultPayoutLib.PnLUpdateResult memory result = VaultPayoutLib.calculatePnLUpdate(params);
 
-        assertEq(result.closeFee, 0); // No collateral = no fee
-        assertEq(result.newLifetimePnL, 50 ether);
+        // net gain = 10 - 3 = 7; 100 + 7 = 107
+        assertFalse(result.newIsNegativePnL);
+        assertEq(result.newLifetimePnL, 107 ether);
+    }
+
+    function test_CalculatePnLUpdate_M21_FeeExactlyCoversLoss() public pure {
+        // closeFee = loss exactly → net gain = 0, lifetimePnL unchanged
+        VaultPayoutLib.PnLUpdateParams memory params = VaultPayoutLib.PnLUpdateParams({
+            closeFee: 5 ether,
+            vaultPnL: -5 ether,
+            currentLifetimePnL: 100 ether,
+            isNegativePnL: false
+        });
+
+        VaultPayoutLib.PnLUpdateResult memory result = VaultPayoutLib.calculatePnLUpdate(params);
+
+        assertFalse(result.newIsNegativePnL);
+        assertEq(result.newLifetimePnL, 100 ether); // no change
+    }
+
+    function test_CalculatePnLUpdate_M21_FeeCoversLoss_RecoverFromNegative() public pure {
+        // Vault currently negative, closeFee > loss → net gain flips back to positive
+        VaultPayoutLib.PnLUpdateParams memory params = VaultPayoutLib.PnLUpdateParams({
+            closeFee: 20 ether,
+            vaultPnL: -5 ether,
+            currentLifetimePnL: 10 ether, // currently -10
+            isNegativePnL: true
+        });
+
+        VaultPayoutLib.PnLUpdateResult memory result = VaultPayoutLib.calculatePnLUpdate(params);
+
+        // net gain = 20 - 5 = 15; -10 + 15 = +5 → flip to positive
+        assertFalse(result.newIsNegativePnL);
+        assertEq(result.newLifetimePnL, 5 ether);
     }
 
     // ========================================================================

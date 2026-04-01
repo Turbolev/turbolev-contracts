@@ -176,10 +176,11 @@ interface IVaultRouter {
         int256 vaultPnL,
         uint256 positionSize,
         uint8 direction,
-        address user
+        address user,
+        uint256 payout
     ) external returns (uint256 closeFee);
 
-    function checkPositionRisk(uint256 positionSize, uint8 leverage, uint8 direction) external view;
+    function checkPositionRisk(uint256 positionSize, uint16 leverage, uint8 direction) external view;
 
     function setTradingEnabled(bool enabled) external;
     function setPositionManager(address positionManager) external;

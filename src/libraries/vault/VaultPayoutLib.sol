@@ -34,19 +34,15 @@ library VaultPayoutLib {
     }
 
     struct PnLUpdateParams {
-        uint256 collateral;
+        uint256 closeFee;
         int256 vaultPnL;
-        uint256 closeFeeBps;
         uint256 currentLifetimePnL;
         bool isNegativePnL;
     }
 
     struct PnLUpdateResult {
-        uint256 closeFee;
         uint256 newLifetimePnL;
         bool newIsNegativePnL;
-        uint256 liquidityChange;
-        bool isLiquidityIncrease;
     }
 
     // ========================================================================
@@ -107,32 +103,25 @@ library VaultPayoutLib {
     }
 
     /**
-     * @notice Calculate updated PnL after position settlement
+     * @notice Calculate updated lifetime PnL after position settlement.
+     * @dev closeFee must already be capped at payout by the caller (VaultCore.updateVaultPnL).
+     *      When the vault loses (vaultPnL < 0), closeFee offsets the loss.
+     *      Any surplus closeFee beyond the loss is treated as a net gain for the vault
+     *      (it was collected into feePool and must be reflected in lifetimePnL — M-21 fix).
      * @param params PnL update parameters
-     * @return result PnL update result
+     * @return result Updated lifetime PnL
      */
     function calculatePnLUpdate(PnLUpdateParams memory params)
         internal
         pure
         returns (PnLUpdateResult memory result)
     {
-        // Calculate close fee
-        if (params.closeFeeBps > 0 && params.collateral > 0) {
-            result.closeFee = (params.collateral * params.closeFeeBps) / MathLib.BASIS_POINTS;
-        }
-
-        // Initialize with current values
         result.newLifetimePnL = params.currentLifetimePnL;
         result.newIsNegativePnL = params.isNegativePnL;
 
         if (params.vaultPnL >= 0) {
-            // Vault gained (trader lost)
-            uint256 lossAmount = uint256(params.vaultPnL);
-            result.liquidityChange = lossAmount;
-            result.isLiquidityIncrease = true;
-
-            // Update lifetime P&L (including close fee as profit)
-            uint256 totalGain = lossAmount + result.closeFee;
+            // Vault gained (trader lost) — total gain includes close fee
+            uint256 totalGain = uint256(params.vaultPnL) + params.closeFee;
             if (params.isNegativePnL) {
                 if (totalGain >= params.currentLifetimePnL) {
                     result.newLifetimePnL = totalGain - params.currentLifetimePnL;
@@ -144,28 +133,35 @@ library VaultPayoutLib {
                 result.newLifetimePnL = params.currentLifetimePnL + totalGain;
             }
         } else {
-            // Vault lost (trader won)
+            // Vault lost (trader won) — close fee offsets the loss
             uint256 loss = uint256(-params.vaultPnL);
 
-            // Close fee partially offsets vault loss
-            if (loss > result.closeFee) {
-                loss -= result.closeFee;
-            } else {
-                loss = 0;
-            }
-
-            result.liquidityChange = 0; // No liquidity change for losses (handled via payout)
-            result.isLiquidityIncrease = false;
-
-            // Update lifetime P&L
-            if (params.isNegativePnL) {
-                result.newLifetimePnL = params.currentLifetimePnL + loss;
-            } else {
-                if (loss >= params.currentLifetimePnL) {
-                    result.newLifetimePnL = loss - params.currentLifetimePnL;
-                    result.newIsNegativePnL = true;
+            if (params.closeFee >= loss) {
+                // Close fee fully covers the loss; net effect is a gain for the vault.
+                // The surplus (closeFee - loss) must be recorded in lifetimePnL — M-21 fix.
+                uint256 netGain = params.closeFee - loss;
+                if (params.isNegativePnL) {
+                    if (netGain >= params.currentLifetimePnL) {
+                        result.newLifetimePnL = netGain - params.currentLifetimePnL;
+                        result.newIsNegativePnL = false;
+                    } else {
+                        result.newLifetimePnL = params.currentLifetimePnL - netGain;
+                    }
                 } else {
-                    result.newLifetimePnL = params.currentLifetimePnL - loss;
+                    result.newLifetimePnL = params.currentLifetimePnL + netGain;
+                }
+            } else {
+                // Close fee partially offsets the loss
+                uint256 netLoss = loss - params.closeFee;
+                if (params.isNegativePnL) {
+                    result.newLifetimePnL = params.currentLifetimePnL + netLoss;
+                } else {
+                    if (netLoss >= params.currentLifetimePnL) {
+                        result.newLifetimePnL = netLoss - params.currentLifetimePnL;
+                        result.newIsNegativePnL = true;
+                    } else {
+                        result.newLifetimePnL = params.currentLifetimePnL - netLoss;
+                    }
                 }
             }
         }

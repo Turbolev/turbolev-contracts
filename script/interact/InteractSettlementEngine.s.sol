@@ -17,7 +17,6 @@ contract InteractSettlementEngine is DeployHelper {
 
     function viewConfig() public view {
         console.log("\n=== Settlement Engine Config ===");
-        console.log("Win Multiplier BPS:", se.winMultiplierBps());
         console.log("Min Bet Amount:", se.minBetAmount());
         console.log("Max Bet Amount:", se.maxBetAmount());
         console.log("Max Profit Cap BPS:", se.maxProfitCapBps());

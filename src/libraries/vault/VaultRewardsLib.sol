@@ -48,6 +48,10 @@ library VaultRewardsLib {
         int256 netPnL;
         uint256 stakedAt;
         uint256 dayStartTimestamp;
+        // Timestamp of the most recent top-up (0 if never topped up).
+        // Eligibility uses max(stakedAt, lastTopUpAt) to prevent gaming
+        // rewards by topping up just before finalizeDailyReward().
+        uint256 lastTopUpAt;
     }
 
     struct LPRewardResult {
@@ -74,8 +78,14 @@ library VaultRewardsLib {
             return LPRewardResult({ reward: 0, isEligible: false });
         }
 
-        // Check if user was staked for at least 1 day before this reward day
-        if (params.stakedAt + REWARD_MIN_STAKE_PERIOD > params.dayStartTimestamp) {
+        // Eligibility timestamp: use the later of stakedAt and lastTopUpAt.
+        // This ensures that shares added via a top-up on the same day as
+        // finalizeDailyReward() must wait the full REWARD_MIN_STAKE_PERIOD
+        // before earning rewards, preventing same-day reward gaming.
+        uint256 eligibilityTimestamp =
+            params.lastTopUpAt > params.stakedAt ? params.lastTopUpAt : params.stakedAt;
+
+        if (eligibilityTimestamp + REWARD_MIN_STAKE_PERIOD > params.dayStartTimestamp) {
             return LPRewardResult({ reward: 0, isEligible: false });
         }
 
@@ -166,16 +176,19 @@ library VaultRewardsLib {
 
     /**
      * @notice Check if LP is eligible for rewards
-     * @param stakedAt Timestamp when LP staked
+     * @param stakedAt Timestamp when LP first staked
+     * @param lastTopUpAt Timestamp of most recent top-up (0 if never topped up)
      * @param dayStartTimestamp Start of the reward day
      * @return isEligible True if LP is eligible
+     * @dev Uses max(stakedAt, lastTopUpAt) as the effective eligibility start
      */
-    function isEligibleForRewards(uint256 stakedAt, uint256 dayStartTimestamp)
+    function isEligibleForRewards(uint256 stakedAt, uint256 lastTopUpAt, uint256 dayStartTimestamp)
         internal
         pure
         returns (bool)
     {
-        return stakedAt + REWARD_MIN_STAKE_PERIOD <= dayStartTimestamp;
+        uint256 eligibilityTimestamp = lastTopUpAt > stakedAt ? lastTopUpAt : stakedAt;
+        return eligibilityTimestamp + REWARD_MIN_STAKE_PERIOD <= dayStartTimestamp;
     }
 
     /**

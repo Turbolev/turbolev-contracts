@@ -158,6 +158,7 @@ contract VaultCore is VaultModuleBase {
     error InvalidAmount();
     error DepositTooSmall();
     error InsufficientLiquidity();
+    error InsufficientAvailableLiquidity(uint256 requested, uint256 available);
     error TransferFailed();
     error ZeroPayoutAmount();
     error NativeTokenNotAllowed();
@@ -165,6 +166,7 @@ contract VaultCore is VaultModuleBase {
     error DirectTransferNotAllowed();
     error InvalidPositionId();
     error UserMismatch();
+    error AlreadyInitialized();
 
     // ========================================================================
     // CONSTANTS
@@ -202,6 +204,9 @@ contract VaultCore is VaultModuleBase {
         VaultStorageLib.CoreStorage storage core = _core();
         VaultStorageLib.RiskStorage storage risk = _risk();
         VaultStorageLib.FundingStorage storage funding = _funding();
+
+        // Guard against re-initialization: projectToken is set on first init and never reset
+        if (core.projectToken != address(0)) revert AlreadyInitialized();
 
         // Validate addresses
         if (_projectToken == address(0)) revert InvalidAddress();
@@ -307,10 +312,15 @@ contract VaultCore is VaultModuleBase {
         // Update LP position
         VaultStorageLib.LPPosition storage lpPos = core.lpPositions[msg.sender];
         if (lpPos.user == address(0)) {
+            // First deposit: record stakedAt, lastTopUpAt stays 0
             lpPos.user = msg.sender;
             lpPos.stakedAt = block.timestamp;
             core.vaultLPs.push(msg.sender);
             core.lpIndex[msg.sender] = core.vaultLPs.length;
+        } else {
+            // Top-up: record lastTopUpAt so new shares cannot inherit the old stakedAt
+            // for same-day reward eligibility. Eligibility uses max(stakedAt, lastTopUpAt).
+            lpPos.lastTopUpAt = block.timestamp;
         }
 
         lpPos.shares += shares;
@@ -373,7 +383,13 @@ contract VaultCore is VaultModuleBase {
             netPayout = grossAmount - withdrawalFee;
         }
 
-        if (grossAmount > core.vaultInfo.totalLiquidity) revert InsufficientLiquidity();
+        uint256 availableLiquidity = core.vaultInfo.totalLiquidity
+            > core.vaultInfo.totalPendingPayoutAmount
+            ? core.vaultInfo.totalLiquidity - core.vaultInfo.totalPendingPayoutAmount
+            : 0;
+        if (grossAmount > availableLiquidity) {
+            revert InsufficientAvailableLiquidity(grossAmount, availableLiquidity);
+        }
 
         // Update state - keep user address for reward claiming
         lpPos.shares = 0;
@@ -430,7 +446,7 @@ contract VaultCore is VaultModuleBase {
         uint256 positionSize,
         bool isMarginAdd,
         uint8 direction
-    ) external onlyVaultManagerOrHelper {
+    ) external onlyVaultManagerOrHelper nonReentrant {
         if (amount == 0) revert InvalidAmount();
 
         VaultStorageLib.CoreStorage storage core = _core();
@@ -532,6 +548,7 @@ contract VaultCore is VaultModuleBase {
             core.pendingPayoutUsers[positionId] = user;
             core.pendingPayoutQueue.push(positionId);
             core.vaultInfo.pendingPositions++;
+            core.vaultInfo.totalPendingPayoutAmount += amount;
             emit PayoutQueued(positionId, user, amount, true, block.timestamp);
             return;
         }
@@ -578,14 +595,17 @@ contract VaultCore is VaultModuleBase {
         int256 vaultPnL,
         uint256 positionSize,
         uint8 direction,
-        address user
+        address user,
+        uint256 payout
     ) external onlyVaultManagerOrHelper returns (uint256 closeFee) {
         VaultStorageLib.CoreStorage storage core = _core();
         VaultStorageLib.FundingStorage storage funding = _funding();
         VaultStorageLib.RewardsStorage storage rewards = _rewards();
 
-        // Calculate close fee (returned to caller for deduction from payout)
-        closeFee = VaultPayoutLib.calculateCloseFee(collateral, core.feeConfig.closePositionFeeBps);
+        // Calculate close fee, capped at payout so vault never collects more than user has (M-18 fix)
+        uint256 rawCloseFee =
+            VaultPayoutLib.calculateCloseFee(collateral, core.feeConfig.closePositionFeeBps);
+        closeFee = (payout > 0 && rawCloseFee > payout) ? payout : rawCloseFee;
 
         if (closeFee > 0) {
             // Close fee goes to feePool (separate from LP liquidity)
@@ -595,10 +615,10 @@ contract VaultCore is VaultModuleBase {
         }
 
         // Calculate PnL update for lifetime tracking (stats only)
+        // Pass the already-capped closeFee directly to avoid double-capping
         VaultPayoutLib.PnLUpdateParams memory pnlParams = VaultPayoutLib.PnLUpdateParams({
-            collateral: collateral,
+            closeFee: closeFee,
             vaultPnL: vaultPnL,
-            closeFeeBps: core.feeConfig.closePositionFeeBps,
             currentLifetimePnL: core.vaultInfo.lifetimePnL,
             isNegativePnL: core.vaultInfo.isNegativePnL
         });
@@ -676,7 +696,7 @@ contract VaultCore is VaultModuleBase {
     /**
      * @notice Check if position can be opened
      */
-    function checkPositionRisk(uint256 positionSize, uint8 leverage, uint8 direction)
+    function checkPositionRisk(uint256 positionSize, uint16 leverage, uint8 direction)
         external
         view
     {
@@ -791,6 +811,7 @@ contract VaultCore is VaultModuleBase {
      * @notice Set treasury address
      */
     function setTreasury(address _treasury) external onlyVaultManagerOrHelper {
+        if (_treasury == address(0)) revert InvalidAddress();
         VaultStorageLib.CoreStorage storage core = _core();
         address oldTreasury = core.treasury;
         core.treasury = _treasury;
@@ -1037,7 +1058,7 @@ contract VaultCore is VaultModuleBase {
 
     /**
      * @notice Set max profit cap multiplier (per-vault)
-     * @param multiplier New multiplier (e.g., 3 = 3x collateral)
+     * @param multiplier New multiplier (e.g., 2 = 2x collateral)
      */
     function setMaxProfitCapMultiplier(uint8 multiplier) external onlyVaultManagerOrHelper {
         if (!VaultConfigLib.validateMaxProfitCapMultiplier(multiplier)) {
@@ -1087,6 +1108,13 @@ contract VaultCore is VaultModuleBase {
         return _core().positionPayouts[positionId];
     }
 
+    function getAvailableLiquidity() external view returns (uint256) {
+        VaultStorageLib.CoreStorage storage core = _core();
+        uint256 total = core.vaultInfo.totalLiquidity;
+        uint256 pending = core.vaultInfo.totalPendingPayoutAmount;
+        return total > pending ? total - pending : 0;
+    }
+
     // ========================================================================
     // INTERNAL FUNCTIONS
     // ========================================================================
@@ -1095,6 +1123,14 @@ contract VaultCore is VaultModuleBase {
         VaultStorageLib.CoreStorage storage core = _core();
         uint256 index = core.lpIndex[lp];
         if (index == 0) return;
+
+        // During finalization, skip swap-and-pop to preserve array order and indices.
+        // shares are already zeroed by removeLiquidity, so finalize will skip this LP via
+        // the `if (lpPos.shares == 0) continue` guard.
+        if (_rewards().isFinalizing) {
+            delete core.lpIndex[lp];
+            return;
+        }
 
         uint256 lastIndex = core.vaultLPs.length;
         if (index < lastIndex) {
@@ -1152,6 +1188,7 @@ contract VaultCore is VaultModuleBase {
             delete core.pendingPayoutUsers[positionId];
             delete core.betCollateral[positionId];
             core.vaultInfo.pendingPositions--;
+            core.vaultInfo.totalPendingPayoutAmount -= amount;
 
             IERC20(core.projectToken).safeTransfer(user, amount);
 

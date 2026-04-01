@@ -184,6 +184,20 @@ interface IPriceFeedManager {
      */
     function isPriceStale(address projectToken, uint256 maxAge) external view returns (bool isStale);
 
+    /**
+     * @notice Get price and run circuit breaker check (non-view, for state-changing flows)
+     * @param projectToken Project token address
+     * @param maxAge Maximum acceptable price age in seconds
+     * @return price Settlement price (scaled to 18 decimals)
+     * @return publishTime When price was last updated
+     * @dev Same as getPrice but also runs the circuit breaker. Use this in all
+     *      state-changing flows (open, close, addMargin, adminClose, settlement)
+     *      that do not have priceUpdateData available.
+     */
+    function getPriceChecked(address projectToken, uint256 maxAge)
+        external
+        returns (uint256 price, uint256 publishTime);
+
     // ========================================================================
     // HELPER FUNCTIONS
     // ========================================================================
