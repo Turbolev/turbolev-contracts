@@ -74,7 +74,8 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
 
     /**
      * @notice Initialize the vault router
-     * @param _projectToken Project token address
+     * @param _priceToken Token whose price is tracked by the oracle (e.g. SEI, ETH)
+     * @param _collateralToken Token used for LP liquidity and user collateral (e.g. USDC, USDT)
      * @param _vaultManager VaultManager address
      * @param _positionManager PositionManager address
      * @param _accessController VaultAccessController address
@@ -86,7 +87,8 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
      * @param _graduationThreshold Graduation threshold
      */
     function initialize(
-        address _projectToken,
+        address _priceToken,
+        address _collateralToken,
         address _vaultManager,
         address _positionManager,
         address _accessController,
@@ -100,7 +102,8 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
         __UUPSUpgradeable_init();
 
         // Validate addresses
-        if (_projectToken == address(0)) revert InvalidAddress();
+        if (_priceToken == address(0)) revert InvalidAddress();
+        if (_collateralToken == address(0)) revert InvalidAddress();
         if (_vaultManager == address(0)) revert InvalidAddress();
         if (_positionManager == address(0)) revert InvalidAddress();
         if (_accessController == address(0)) revert InvalidAddress();
@@ -118,8 +121,9 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
         // Initialize core module via delegatecall
         (bool success,) = _coreModule.delegatecall(
             abi.encodeWithSignature(
-                "initialize(address,address,address,address,uint256,uint256,uint256)",
-                _projectToken,
+                "initialize(address,address,address,address,address,uint256,uint256,uint256)",
+                _priceToken,
+                _collateralToken,
                 _vaultManager,
                 _positionManager,
                 _accessController,
@@ -130,7 +134,7 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
         );
         if (!success) revert DelegateCallFailed();
 
-        emit Initialized(_projectToken, _accessController, block.timestamp);
+        emit Initialized(_priceToken, _accessController, block.timestamp);
     }
 
     // ========================================================================
@@ -236,7 +240,6 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
         VaultStorageLib.FundingStorage storage funding = VaultStorageLib.getFundingStorage();
         VaultStorageLib.RiskStorage storage risk = VaultStorageLib.getRiskStorage();
 
-        uint16 vaultMaxLeverage = _calculateMaxLeverage(core.vaultInfo.totalLiquidity, risk);
         uint16 currentMultiplier = _calculateRiskMultiplier(core.vaultInfo.totalLiquidity, risk);
 
         VaultRiskLib.RiskCheckParams memory params = VaultRiskLib.RiskCheckParams({
@@ -251,35 +254,11 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
             totalLongExposure: funding.totalLongExposure,
             totalShortExposure: funding.totalShortExposure,
             maxDirectionalExposureBps: risk.maxDirectionalExposureBps,
-            vaultMaxLeverage: vaultMaxLeverage,
-            totalOIRiskMultiplierBps: currentMultiplier,
-            utilizationTier1Bps: risk.utilizationConfig.tier1Bps,
-            utilizationTier2Bps: risk.utilizationConfig.tier2Bps,
-            utilizationTier3Bps: risk.utilizationConfig.tier3Bps,
-            leverageFactorTier1Bps: risk.utilizationConfig.factorTier1Bps,
-            leverageFactorTier2Bps: risk.utilizationConfig.factorTier2Bps,
-            leverageFactorTier3Bps: risk.utilizationConfig.factorTier3Bps,
-            leverageFactorEmergencyBps: risk.utilizationConfig.factorEmergencyBps
+            vaultMaxLeverage: risk.maxLeverage,
+            totalOIRiskMultiplierBps: currentMultiplier
         });
 
         VaultRiskLib.checkPositionRisk(params);
-    }
-
-    /**
-     * @notice Calculate max leverage based on TVL tier
-     */
-    function _calculateMaxLeverage(uint256 tvl, VaultStorageLib.RiskStorage storage risk)
-        internal
-        view
-        returns (uint16)
-    {
-        if (tvl < risk.leverageTier1Threshold) {
-            return risk.tier1MaxLeverage;
-        } else if (tvl < risk.leverageTier2Threshold) {
-            return risk.tier2MaxLeverage;
-        } else {
-            return risk.tier3MaxLeverage;
-        }
     }
 
     /**
@@ -377,25 +356,10 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
     // ========================================================================
 
     /**
-     * @notice Set leverage tier configuration
+     * @notice Set maximum leverage (admin-configurable)
      */
-    function setLeverageTierConfig(
-        uint256 tier1Threshold,
-        uint256 tier2Threshold,
-        uint16 tier1MaxLeverage,
-        uint16 tier2MaxLeverage,
-        uint16 tier3MaxLeverage
-    ) external {
-        _delegateToCore(
-            abi.encodeWithSignature(
-                "setLeverageTierConfig(uint256,uint256,uint16,uint16,uint16)",
-                tier1Threshold,
-                tier2Threshold,
-                tier1MaxLeverage,
-                tier2MaxLeverage,
-                tier3MaxLeverage
-            )
-        );
+    function setMaxLeverage(uint16 newMaxLeverage) external {
+        _delegateToCore(abi.encodeWithSignature("setMaxLeverage(uint16)", newMaxLeverage));
     }
 
     /**
@@ -432,32 +396,6 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
     function setMaxDirectionalExposure(uint16 maxDirectionalExposureBps) external {
         _delegateToCore(
             abi.encodeWithSignature("setMaxDirectionalExposure(uint16)", maxDirectionalExposureBps)
-        );
-    }
-
-    /**
-     * @notice Set utilization-based leverage configuration
-     */
-    function setUtilizationConfig(
-        uint16 tier1Bps,
-        uint16 tier2Bps,
-        uint16 tier3Bps,
-        uint16 factorTier1Bps,
-        uint16 factorTier2Bps,
-        uint16 factorTier3Bps,
-        uint16 factorEmergencyBps
-    ) external {
-        _delegateToCore(
-            abi.encodeWithSignature(
-                "setUtilizationConfig(uint16,uint16,uint16,uint16,uint16,uint16,uint16)",
-                tier1Bps,
-                tier2Bps,
-                tier3Bps,
-                factorTier1Bps,
-                factorTier2Bps,
-                factorTier3Bps,
-                factorEmergencyBps
-            )
         );
     }
 
@@ -753,10 +691,17 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
     }
 
     /**
-     * @notice Get project token
+     * @notice Get price token (token whose price is tracked by the oracle)
      */
-    function projectToken() external view returns (address) {
+    function priceToken() external view returns (address) {
         return VaultStorageLib.getCoreStorage().projectToken;
+    }
+
+    /**
+     * @notice Get collateral token (token used for LP liquidity and user collateral)
+     */
+    function collateralToken() external view returns (address) {
+        return VaultStorageLib.getCoreStorage().collateralToken;
     }
 
     /**
@@ -974,60 +919,11 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
     }
 
     /**
-     * @notice Get leverage tier configuration
-     * @return tier1Threshold TVL threshold for tier 1
-     * @return tier2Threshold TVL threshold for tier 2
-     * @return tier1MaxLeverage Max leverage for tier 1
-     * @return tier2MaxLeverage Max leverage for tier 2
-     * @return tier3MaxLeverage Max leverage for tier 3
+     * @notice Get maximum leverage (fixed, admin-configurable)
+     * @return maxLeverage Current maximum leverage
      */
-    function getLeverageTierConfig()
-        external
-        view
-        returns (
-            uint256 tier1Threshold,
-            uint256 tier2Threshold,
-            uint16 tier1MaxLeverage,
-            uint16 tier2MaxLeverage,
-            uint16 tier3MaxLeverage
-        )
-    {
-        VaultStorageLib.RiskStorage storage risk = VaultStorageLib.getRiskStorage();
-        return (
-            risk.leverageTier1Threshold,
-            risk.leverageTier2Threshold,
-            risk.tier1MaxLeverage,
-            risk.tier2MaxLeverage,
-            risk.tier3MaxLeverage
-        );
-    }
-
-    /**
-     * @notice Get utilization-based leverage configuration
-     */
-    function getUtilizationConfig()
-        external
-        view
-        returns (
-            uint16 tier1Bps,
-            uint16 tier2Bps,
-            uint16 tier3Bps,
-            uint16 factorTier1Bps,
-            uint16 factorTier2Bps,
-            uint16 factorTier3Bps,
-            uint16 factorEmergencyBps
-        )
-    {
-        VaultStorageLib.RiskStorage storage risk = VaultStorageLib.getRiskStorage();
-        return (
-            risk.utilizationConfig.tier1Bps,
-            risk.utilizationConfig.tier2Bps,
-            risk.utilizationConfig.tier3Bps,
-            risk.utilizationConfig.factorTier1Bps,
-            risk.utilizationConfig.factorTier2Bps,
-            risk.utilizationConfig.factorTier3Bps,
-            risk.utilizationConfig.factorEmergencyBps
-        );
+    function getMaxLeverage() external view returns (uint16 maxLeverage) {
+        return VaultStorageLib.getRiskStorage().maxLeverage;
     }
 
     /**

@@ -131,7 +131,14 @@ contract IntegrationTestModular is BaseTestModular {
         vm.startPrank(trader1);
         projectToken.approve(address(positionManager), 100 ether);
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), 10 ether, 5, 1, type(uint256).max, block.timestamp + 1 hours, ""
+            address(projectToken),
+            address(projectToken),
+            10 ether,
+            5,
+            1,
+            type(uint256).max,
+            block.timestamp + 1 hours,
+            ""
         );
         vm.warp(block.timestamp + 61 seconds);
         positionManager.closePosition(1, block.timestamp + 1 hours, "");
@@ -163,6 +170,7 @@ contract IntegrationTestModular is BaseTestModular {
         projectToken.approve(address(positionManager), 10 ether);
         positionManager.openPosition{ value: 0 }(
             address(projectToken),
+            address(projectToken),
             10 ether,
             5,
             1, // LONG
@@ -186,6 +194,7 @@ contract IntegrationTestModular is BaseTestModular {
         projectToken.approve(address(positionManager), 10 ether);
         positionManager.openPosition{ value: 0 }(
             address(projectToken),
+            address(projectToken),
             10 ether,
             5,
             2, // SHORT
@@ -208,7 +217,14 @@ contract IntegrationTestModular is BaseTestModular {
         vm.startPrank(trader1);
         projectToken.approve(address(positionManager), 10 ether);
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), 10 ether, 5, 1, type(uint256).max, block.timestamp + 1 hours, ""
+            address(projectToken),
+            address(projectToken),
+            10 ether,
+            5,
+            1,
+            type(uint256).max,
+            block.timestamp + 1 hours,
+            ""
         );
 
         vm.warp(block.timestamp + 61 seconds);
@@ -231,7 +247,14 @@ contract IntegrationTestModular is BaseTestModular {
         vm.startPrank(trader1);
         projectToken.approve(address(positionManager), 20 ether);
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), 10 ether, 10, 1, type(uint256).max, block.timestamp + 1 hours, ""
+            address(projectToken),
+            address(projectToken),
+            10 ether,
+            10,
+            1,
+            type(uint256).max,
+            block.timestamp + 1 hours,
+            ""
         );
 
         // Add margin
@@ -252,13 +275,34 @@ contract IntegrationTestModular is BaseTestModular {
 
         // Open multiple positions
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), 10 ether, 5, 1, type(uint256).max, block.timestamp + 1 hours, ""
+            address(projectToken),
+            address(projectToken),
+            10 ether,
+            5,
+            1,
+            type(uint256).max,
+            block.timestamp + 1 hours,
+            ""
         );
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), 10 ether, 5, 2, 0, block.timestamp + 1 hours, ""
+            address(projectToken),
+            address(projectToken),
+            10 ether,
+            5,
+            2,
+            0,
+            block.timestamp + 1 hours,
+            ""
         );
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), 10 ether, 5, 1, type(uint256).max, block.timestamp + 1 hours, ""
+            address(projectToken),
+            address(projectToken),
+            10 ether,
+            5,
+            1,
+            type(uint256).max,
+            block.timestamp + 1 hours,
+            ""
         );
         vm.stopPrank();
     }
@@ -272,6 +316,7 @@ contract IntegrationTestModular is BaseTestModular {
 
         // Set unrealistic max price - should work (price is 100e18)
         positionManager.openPosition{ value: 0 }(
+            address(projectToken),
             address(projectToken),
             10 ether,
             5,
@@ -307,13 +352,18 @@ contract IntegrationTestModular is BaseTestModular {
 
         vm.startPrank(owner);
         address newVault = vaultManager.createVault(
-            address(newToken), DEFAULT_MIN_BET, DEFAULT_MAX_BET, DEFAULT_GRADUATION_THRESHOLD
+            address(newToken),
+            address(newToken),
+            DEFAULT_MIN_BET,
+            DEFAULT_MAX_BET,
+            DEFAULT_GRADUATION_THRESHOLD
         );
         vm.stopPrank();
 
         assertTrue(newVault != address(0), "New vault should be created");
         assertTrue(
-            vaultManager.isVaultSupported(address(newToken)), "New token should be supported"
+            vaultManager.isVaultSupported(address(newToken), address(newToken)),
+            "New token should be supported"
         );
     }
 
@@ -323,7 +373,7 @@ contract IntegrationTestModular is BaseTestModular {
 
         // pauseVault requires onlyMultisig modifier
         vm.prank(mockEmergencyGuardian);
-        vaultManager.pauseVault(address(projectToken));
+        vaultManager.pauseVault(address(projectToken), address(projectToken));
 
         // Vault should be paused
     }
@@ -334,8 +384,8 @@ contract IntegrationTestModular is BaseTestModular {
 
         // pauseVault/unpauseVault requires onlyMultisig modifier
         vm.startPrank(mockEmergencyGuardian);
-        vaultManager.pauseVault(address(projectToken));
-        vaultManager.unpauseVault(address(projectToken));
+        vaultManager.pauseVault(address(projectToken), address(projectToken));
+        vaultManager.unpauseVault(address(projectToken), address(projectToken));
         vm.stopPrank();
     }
 
@@ -373,7 +423,14 @@ contract IntegrationTestModular is BaseTestModular {
         vm.startPrank(trader1);
         projectToken.approve(address(positionManager), 10 ether);
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), 10 ether, 5, 1, type(uint256).max, block.timestamp + 1 hours, ""
+            address(projectToken),
+            address(projectToken),
+            10 ether,
+            5,
+            1,
+            type(uint256).max,
+            block.timestamp + 1 hours,
+            ""
         );
 
         // 4. Wait for hold time
@@ -402,7 +459,14 @@ contract IntegrationTestModular is BaseTestModular {
         vm.startPrank(trader1);
         projectToken.approve(address(positionManager), 10 ether);
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), 10 ether, 5, 1, type(uint256).max, block.timestamp + 1 hours, ""
+            address(projectToken),
+            address(projectToken),
+            10 ether,
+            5,
+            1,
+            type(uint256).max,
+            block.timestamp + 1 hours,
+            ""
         );
         vm.stopPrank();
 
@@ -410,7 +474,14 @@ contract IntegrationTestModular is BaseTestModular {
         vm.startPrank(trader2);
         projectToken.approve(address(positionManager), 10 ether);
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), 10 ether, 5, 2, 0, block.timestamp + 1 hours, ""
+            address(projectToken),
+            address(projectToken),
+            10 ether,
+            5,
+            2,
+            0,
+            block.timestamp + 1 hours,
+            ""
         );
         vm.stopPrank();
 
@@ -445,7 +516,14 @@ contract IntegrationTestModular is BaseTestModular {
         vm.startPrank(trader1);
         projectToken.approve(address(positionManager), 50 ether);
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), 50 ether, 10, 1, type(uint256).max, block.timestamp + 1 hours, ""
+            address(projectToken),
+            address(projectToken),
+            50 ether,
+            10,
+            1,
+            type(uint256).max,
+            block.timestamp + 1 hours,
+            ""
         );
         vm.stopPrank();
 
@@ -477,6 +555,7 @@ contract IntegrationTestModular is BaseTestModular {
 
         for (uint256 i = 0; i < numPositions; i++) {
             positionManager.openPosition{ value: 0 }(
+                address(projectToken),
                 address(projectToken),
                 5 ether,
                 3,
@@ -536,7 +615,14 @@ contract IntegrationTestModular is BaseTestModular {
         vm.startPrank(trader1);
         projectToken.approve(address(positionManager), 10 ether);
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), 10 ether, 5, 1, type(uint256).max, block.timestamp + 1 hours, ""
+            address(projectToken),
+            address(projectToken),
+            10 ether,
+            5,
+            1,
+            type(uint256).max,
+            block.timestamp + 1 hours,
+            ""
         );
         vm.stopPrank();
     }
@@ -554,7 +640,14 @@ contract IntegrationTestModular is BaseTestModular {
         vm.startPrank(trader1);
         projectToken.approve(address(positionManager), 10 ether);
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), 10 ether, 5, 1, type(uint256).max, block.timestamp + 1 hours, ""
+            address(projectToken),
+            address(projectToken),
+            10 ether,
+            5,
+            1,
+            type(uint256).max,
+            block.timestamp + 1 hours,
+            ""
         );
         vm.stopPrank();
 

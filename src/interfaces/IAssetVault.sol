@@ -469,20 +469,10 @@ interface IAssetVault {
     // ========================================================================
 
     /**
-     * @notice Set leverage tier configuration
-     * @param tier1Threshold TVL threshold for tier 1 (Launch Phase)
-     * @param tier2Threshold TVL threshold for tier 2 (Growth Phase)
-     * @param tier1MaxLeverage Max leverage for TVL < tier1Threshold
-     * @param tier2MaxLeverage Max leverage for tier1Threshold <= TVL < tier2Threshold
-     * @param tier3MaxLeverage Max leverage for TVL >= tier2Threshold (Mature Phase)
+     * @notice Set maximum leverage (admin-configurable, default 100x)
+     * @param newMaxLeverage New maximum leverage (1 to MAX_LEVERAGE_ALLOWED)
      */
-    function setLeverageTierConfig(
-        uint256 tier1Threshold,
-        uint256 tier2Threshold,
-        uint16 tier1MaxLeverage,
-        uint16 tier2MaxLeverage,
-        uint16 tier3MaxLeverage
-    ) external;
+    function setMaxLeverage(uint16 newMaxLeverage) external;
 
     /**
      * @notice Set total OI tier configuration
@@ -504,26 +494,6 @@ interface IAssetVault {
         uint16 tier2MultiplierBps,
         uint16 tier3MultiplierBps,
         uint16 tier4MultiplierBps
-    ) external;
-
-    /**
-     * @notice Set utilization-based leverage configuration
-     * @param tier1Bps Threshold for full leverage
-     * @param tier2Bps Threshold for reduced leverage
-     * @param tier3Bps Threshold for emergency mode
-     * @param factorTier1Bps Leverage factor below tier1
-     * @param factorTier2Bps Leverage factor tier1-tier2
-     * @param factorTier3Bps Leverage factor tier2-tier3
-     * @param factorEmergencyBps Leverage factor above tier3
-     */
-    function setUtilizationConfig(
-        uint16 tier1Bps,
-        uint16 tier2Bps,
-        uint16 tier3Bps,
-        uint16 factorTier1Bps,
-        uint16 factorTier2Bps,
-        uint16 factorTier3Bps,
-        uint16 factorEmergencyBps
     ) external;
 
     /**
@@ -666,35 +636,9 @@ interface IAssetVault {
         );
 
     /**
-     * @notice Get leverage tier configuration
+     * @notice Get maximum leverage (fixed, admin-configurable)
      */
-    function getLeverageTierConfig()
-        external
-        view
-        returns (
-            uint256 tier1Threshold,
-            uint256 tier2Threshold,
-            uint16 tier1MaxLeverage,
-            uint16 tier2MaxLeverage,
-            uint16 tier3MaxLeverage
-        );
-
-    /**
-     * @notice Get utilization-based leverage configuration
-     * @dev Controls how max leverage is reduced as vault utilization increases
-     */
-    function getUtilizationConfig()
-        external
-        view
-        returns (
-            uint16 tier1Bps,
-            uint16 tier2Bps,
-            uint16 tier3Bps,
-            uint16 factorTier1Bps,
-            uint16 factorTier2Bps,
-            uint16 factorTier3Bps,
-            uint16 factorEmergencyBps
-        );
+    function getMaxLeverage() external view returns (uint16 maxLeverage);
 
     // Note: getFeeConfig() is defined above in FEE-RELATED FUNCTIONS section
 

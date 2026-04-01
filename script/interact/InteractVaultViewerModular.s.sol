@@ -42,7 +42,7 @@ contract InteractVaultViewerModular is DeployHelper {
         console.log("===========================================");
 
         viewTotalOIBreakdown();
-        viewEffectiveMaxLeverage();
+        viewVaultMaxLeverage();
         viewDirectionalExposure();
         viewImpactStats();
         viewVaultUtilization();
@@ -57,7 +57,7 @@ contract InteractVaultViewerModular is DeployHelper {
         console.log("===========================================");
 
         viewTotalOICapStatus();
-        viewEffectiveMaxLeverage();
+        viewVaultMaxLeverage();
         viewDirectionalExposure();
 
         console.log("===========================================\n");
@@ -115,58 +115,26 @@ contract InteractVaultViewerModular is DeployHelper {
     // LEVERAGE FUNCTIONS
     // ========================================================================
 
-    function viewEffectiveMaxLeverage() public view {
-        console.log("\n--- Effective Max Leverage ---");
-
-        (
-            uint16 effectiveMaxLeverage,
-            uint16 baseMaxLeverage,
-            uint256 utilizationBps,
-            uint8 utilizationTier,
-            string memory tierDescription
-        ) = viewer.getEffectiveMaxLeverage(vaultAddress);
-
-        console.log("Effective Max Leverage:", effectiveMaxLeverage, "x");
-        console.log("Base Max Leverage:", baseMaxLeverage, "x");
-        console.log("Utilization:", utilizationBps, "bps");
-        console.log("Utilization Tier:", utilizationTier);
-        console.log("Tier Description:", tierDescription);
-    }
-
     function viewVaultMaxLeverage() public view {
         console.log("\n--- Vault Max Leverage ---");
 
-        (uint16 maxLeverage, uint256 currentTVL, string memory currentPhase) =
-            viewer.getVaultMaxLeverage(vaultAddress);
+        uint16 maxLeverage = viewer.getVaultMaxLeverage(vaultAddress);
 
         console.log("Max Leverage:", maxLeverage, "x");
-        console.log("Current TVL:", currentTVL / 1e18, "tokens");
-        console.log("Current Phase:", currentPhase);
     }
 
     function checkLeverageAllowed(uint16 requestedLeverage) public view {
         console.log("\n--- Check Leverage Allowed ---");
         console.log("Requested Leverage:", requestedLeverage, "x");
 
-        (bool isAllowed, uint16 effectiveMaxLeverage, string memory reason) =
+        (bool isAllowed, uint16 maxLeverage, string memory reason) =
             viewer.checkLeverageAllowed(vaultAddress, requestedLeverage);
 
         console.log("Is Allowed:", isAllowed);
-        console.log("Effective Max Leverage:", effectiveMaxLeverage, "x");
+        console.log("Max Leverage:", maxLeverage, "x");
         if (!isAllowed) {
             console.log("Rejection Reason:", reason);
         }
-    }
-
-    function simulateLeverageAtTVL(uint256 targetTVL) public view {
-        console.log("\n--- Simulate Leverage at TVL ---");
-        console.log("Target TVL:", targetTVL / 1e18, "tokens");
-
-        (uint16 maxLeverageAtTarget, string memory phase) =
-            viewer.simulateLeverageAtTVL(vaultAddress, targetTVL);
-
-        console.log("Max Leverage at Target:", maxLeverageAtTarget, "x");
-        console.log("Phase:", phase);
     }
 
     // ========================================================================

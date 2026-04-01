@@ -26,9 +26,10 @@ contract InteractVaultRouter is DeployHelper {
         address vaultAddr = vm.envOr("VAULT_ADDRESS", address(0));
 
         if (vaultAddr == address(0)) {
-            address projectToken = vm.envOr("PROJECT_TOKEN_ADDRESS", address(0));
-            if (projectToken != address(0)) {
-                vaultAddr = vmgr.getVault(projectToken);
+            address collateralToken = vm.envOr("COLLATERAL_TOKEN_ADDRESS", address(0));
+            address priceToken = vm.envOr("PRICE_TOKEN_ADDRESS", address(0));
+            if (collateralToken != address(0) && priceToken != address(0)) {
+                vaultAddr = vmgr.getVault(collateralToken, priceToken);
             }
         }
 
@@ -47,7 +48,8 @@ contract InteractVaultRouter is DeployHelper {
     function viewInfo() public view {
         console.log("\n=== VaultRouter Info ===");
         console.log("Address:", address(vault));
-        console.log("Project Token:", vault.projectToken());
+        console.log("Price Token:", vault.priceToken());
+        console.log("Collateral Token:", vault.collateralToken());
         console.log("Version:", vault.version());
         console.log("VaultManager:", vault.vaultManager());
         console.log("PositionManager:", vault.positionManager());

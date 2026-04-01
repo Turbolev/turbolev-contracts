@@ -272,7 +272,7 @@ contract VaultRewards is VaultModuleBase {
         rewards.rewardsPool -= actualRewards;
 
         // Transfer
-        IERC20(core.projectToken).safeTransfer(msg.sender, actualRewards);
+        IERC20(core.collateralToken).safeTransfer(msg.sender, actualRewards);
 
         emit RewardsClaimed(address(this), msg.sender, actualRewards, block.timestamp);
     }

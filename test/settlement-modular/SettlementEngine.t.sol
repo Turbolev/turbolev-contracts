@@ -176,7 +176,14 @@ contract SettlementEngineTest is BaseTestModular {
         vm.startPrank(user1);
         projectToken.approve(address(positionManager), 10 ether);
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), 10 ether, 5, 1, type(uint256).max, block.timestamp + 1 hours, ""
+            address(projectToken),
+            address(projectToken),
+            10 ether,
+            5,
+            1,
+            type(uint256).max,
+            block.timestamp + 1 hours,
+            ""
         );
 
         vm.warp(block.timestamp + 61 seconds);
@@ -204,7 +211,14 @@ contract SettlementEngineTest is BaseTestModular {
         vm.startPrank(user1);
         projectToken.approve(address(positionManager), 10 ether);
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), 10 ether, 5, 1, type(uint256).max, block.timestamp + 1 hours, ""
+            address(projectToken),
+            address(projectToken),
+            10 ether,
+            5,
+            1,
+            type(uint256).max,
+            block.timestamp + 1 hours,
+            ""
         );
 
         vm.warp(block.timestamp + 61 seconds);
@@ -232,7 +246,14 @@ contract SettlementEngineTest is BaseTestModular {
         vm.startPrank(user1);
         projectToken.approve(address(positionManager), 10 ether);
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), 10 ether, 5, 1, type(uint256).max, block.timestamp + 1 hours, ""
+            address(projectToken),
+            address(projectToken),
+            10 ether,
+            5,
+            1,
+            type(uint256).max,
+            block.timestamp + 1 hours,
+            ""
         );
 
         vm.warp(block.timestamp + 61 seconds);
@@ -259,6 +280,7 @@ contract SettlementEngineTest is BaseTestModular {
 
         for (uint256 i = 0; i < 3; i++) {
             positionManager.openPosition{ value: 0 }(
+                address(projectToken),
                 address(projectToken),
                 10 ether,
                 5,
@@ -288,7 +310,14 @@ contract SettlementEngineTest is BaseTestModular {
         vm.startPrank(user1);
         projectToken.approve(address(positionManager), 10 ether);
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), 10 ether, 5, 1, type(uint256).max, block.timestamp + 1 hours, ""
+            address(projectToken),
+            address(projectToken),
+            10 ether,
+            5,
+            1,
+            type(uint256).max,
+            block.timestamp + 1 hours,
+            ""
         );
         vm.stopPrank();
 
@@ -296,7 +325,14 @@ contract SettlementEngineTest is BaseTestModular {
         vm.startPrank(user2);
         projectToken.approve(address(positionManager), 10 ether);
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), 10 ether, 5, 2, 0, block.timestamp + 1 hours, ""
+            address(projectToken),
+            address(projectToken),
+            10 ether,
+            5,
+            2,
+            0,
+            block.timestamp + 1 hours,
+            ""
         );
         vm.stopPrank();
 
@@ -322,6 +358,7 @@ contract SettlementEngineTest is BaseTestModular {
         projectToken.approve(address(positionManager), 10 ether);
         positionManager.openPosition{ value: 0 }(
             address(projectToken),
+            address(projectToken),
             10 ether,
             5,
             1, // LONG
@@ -340,6 +377,7 @@ contract SettlementEngineTest is BaseTestModular {
         vm.startPrank(user1);
         projectToken.approve(address(positionManager), 10 ether);
         positionManager.openPosition{ value: 0 }(
+            address(projectToken),
             address(projectToken),
             10 ether,
             5,
@@ -364,6 +402,7 @@ contract SettlementEngineTest is BaseTestModular {
         projectToken.approve(address(positionManager), DEFAULT_MIN_BET);
         positionManager.openPosition{ value: 0 }(
             address(projectToken),
+            address(projectToken),
             DEFAULT_MIN_BET,
             2,
             1,
@@ -382,6 +421,7 @@ contract SettlementEngineTest is BaseTestModular {
         vm.startPrank(user1);
         projectToken.approve(address(positionManager), 10 ether);
         positionManager.openPosition{ value: 0 }(
+            address(projectToken),
             address(projectToken),
             10 ether,
             20,
@@ -408,6 +448,7 @@ contract SettlementEngineTest is BaseTestModular {
         vm.startPrank(user1);
         projectToken.approve(address(positionManager), collateral);
         positionManager.openPosition{ value: 0 }(
+            address(projectToken),
             address(projectToken),
             collateral,
             leverage,

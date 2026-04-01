@@ -157,8 +157,11 @@ library VaultStorageLib {
         address vaultManager;
         address positionManager;
         address treasury;
-        address projectToken;
+        address projectToken; // kept for storage layout compatibility (= priceToken)
         address accessController;
+        // Token pair: collateralToken is the ERC20 used for LP liquidity and user collateral
+        // (e.g. USDC/USDT). projectToken / priceToken is the asset whose price is tracked.
+        address collateralToken;
         // Vault state
         VaultInfo vaultInfo;
         VaultParams vaultParams;
@@ -228,12 +231,8 @@ library VaultStorageLib {
         uint16 tier2MultiplierBps;
         uint16 tier3MultiplierBps;
         uint16 tier4MultiplierBps;
-        // Leverage tiers
-        uint256 leverageTier1Threshold;
-        uint256 leverageTier2Threshold;
-        uint16 tier1MaxLeverage;
-        uint16 tier2MaxLeverage;
-        uint16 tier3MaxLeverage;
+        // Fixed max leverage (admin-configurable, default 100x)
+        uint16 maxLeverage;
         // Utilization config
         VaultConfigLib.UtilizationConfig utilizationConfig;
         // Max profit cap multiplier (per-vault, default 3x)

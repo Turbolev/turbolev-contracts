@@ -36,6 +36,7 @@ contract PositionFeeIntegrationTest is BaseTestModular {
         projectToken.approve(address(positionManager), collateral);
         positionManager.openPosition{ value: 0 }(
             address(projectToken),
+            address(projectToken),
             collateral,
             5,
             1,
@@ -57,6 +58,7 @@ contract PositionFeeIntegrationTest is BaseTestModular {
         vm.startPrank(user1);
         projectToken.approve(address(positionManager), collateral);
         positionManager.openPosition{ value: 0 }(
+            address(projectToken),
             address(projectToken),
             collateral,
             5,
@@ -84,7 +86,14 @@ contract PositionFeeIntegrationTest is BaseTestModular {
         vm.startPrank(user1);
         projectToken.approve(address(positionManager), 10 ether);
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), 10 ether, 5, 1, type(uint256).max, block.timestamp + 1 hours, ""
+            address(projectToken),
+            address(projectToken),
+            10 ether,
+            5,
+            1,
+            type(uint256).max,
+            block.timestamp + 1 hours,
+            ""
         );
 
         vm.warp(block.timestamp + 61 seconds);
@@ -113,6 +122,7 @@ contract PositionFeeIntegrationTest is BaseTestModular {
         projectToken.approve(address(positionManager), smallCollateral);
         positionManager.openPosition{ value: 0 }(
             address(projectToken),
+            address(projectToken),
             smallCollateral,
             5,
             1,
@@ -132,6 +142,7 @@ contract PositionFeeIntegrationTest is BaseTestModular {
         vm.startPrank(user1);
         projectToken.approve(address(positionManager), largeCollateral);
         positionManager.openPosition{ value: 0 }(
+            address(projectToken),
             address(projectToken),
             largeCollateral,
             10,
@@ -159,6 +170,7 @@ contract PositionFeeIntegrationTest is BaseTestModular {
             projectToken.approve(address(positionManager), 5 ether);
             positionManager.openPosition{ value: 0 }(
                 address(projectToken),
+                address(projectToken),
                 5 ether,
                 5,
                 1,
@@ -184,7 +196,14 @@ contract PositionFeeIntegrationTest is BaseTestModular {
         vm.startPrank(user1);
         projectToken.approve(address(positionManager), 10 ether);
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), 10 ether, 5, 1, type(uint256).max, block.timestamp + 1 hours, ""
+            address(projectToken),
+            address(projectToken),
+            10 ether,
+            5,
+            1,
+            type(uint256).max,
+            block.timestamp + 1 hours,
+            ""
         );
         vm.stopPrank();
 
@@ -192,7 +211,14 @@ contract PositionFeeIntegrationTest is BaseTestModular {
         vm.startPrank(user2);
         projectToken.approve(address(positionManager), 10 ether);
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), 10 ether, 5, 2, 0, block.timestamp + 1 hours, ""
+            address(projectToken),
+            address(projectToken),
+            10 ether,
+            5,
+            2,
+            0,
+            block.timestamp + 1 hours,
+            ""
         );
         vm.stopPrank();
 
@@ -218,6 +244,7 @@ contract PositionFeeIntegrationTest is BaseTestModular {
         vm.startPrank(user1);
         projectToken.approve(address(positionManager), collateral);
         positionManager.openPosition{ value: 0 }(
+            address(projectToken),
             address(projectToken),
             collateral,
             highLeverage,
@@ -247,6 +274,7 @@ contract PositionFeeIntegrationTest is BaseTestModular {
         vm.startPrank(user1);
         projectToken.approve(address(positionManager), collateral);
         positionManager.openPosition{ value: 0 }(
+            address(projectToken),
             address(projectToken),
             collateral,
             lowLeverage,
@@ -279,6 +307,7 @@ contract PositionFeeIntegrationTest is BaseTestModular {
         vm.startPrank(user1);
         projectToken.approve(address(positionManager), collateral);
         positionManager.openPosition{ value: 0 }(
+            address(projectToken),
             address(projectToken),
             collateral,
             leverage,

@@ -43,14 +43,18 @@ contract VaultManagerModularTest is BaseTestModular {
     function test_CreateVault() public {
         vm.prank(owner);
         address newVault = vaultManager.createVault(
-            address(projectToken2), DEFAULT_MIN_BET, DEFAULT_MAX_BET, DEFAULT_GRADUATION_THRESHOLD
+            address(projectToken2),
+            address(projectToken2),
+            DEFAULT_MIN_BET,
+            DEFAULT_MAX_BET,
+            DEFAULT_GRADUATION_THRESHOLD
         );
 
         assertTrue(newVault != address(0));
 
         // Check vault is registered
-        assertEq(vaultManager.getVault(address(projectToken2)), newVault);
-        assertTrue(vaultManager.isVaultSupported(address(projectToken2)));
+        assertEq(vaultManager.getVault(address(projectToken2), address(projectToken2)), newVault);
+        assertTrue(vaultManager.isVaultSupported(address(projectToken2), address(projectToken2)));
     }
 
     function test_CreateVault_RevertDuplicate() public {
@@ -58,13 +62,21 @@ contract VaultManagerModularTest is BaseTestModular {
 
         // First vault creation succeeds
         vaultManager.createVault(
-            address(projectToken2), DEFAULT_MIN_BET, DEFAULT_MAX_BET, DEFAULT_GRADUATION_THRESHOLD
+            address(projectToken2),
+            address(projectToken2),
+            DEFAULT_MIN_BET,
+            DEFAULT_MAX_BET,
+            DEFAULT_GRADUATION_THRESHOLD
         );
 
         // Second vault creation for same token should fail
         vm.expectRevert();
         vaultManager.createVault(
-            address(projectToken2), DEFAULT_MIN_BET, DEFAULT_MAX_BET, DEFAULT_GRADUATION_THRESHOLD
+            address(projectToken2),
+            address(projectToken2),
+            DEFAULT_MIN_BET,
+            DEFAULT_MAX_BET,
+            DEFAULT_GRADUATION_THRESHOLD
         );
 
         vm.stopPrank();
@@ -74,18 +86,26 @@ contract VaultManagerModularTest is BaseTestModular {
         vm.prank(user1);
         vm.expectRevert();
         vaultManager.createVault(
-            address(projectToken2), DEFAULT_MIN_BET, DEFAULT_MAX_BET, DEFAULT_GRADUATION_THRESHOLD
+            address(projectToken2),
+            address(projectToken2),
+            DEFAULT_MIN_BET,
+            DEFAULT_MAX_BET,
+            DEFAULT_GRADUATION_THRESHOLD
         );
     }
 
     function test_CreateVaultWithBeacon_Alias() public {
         vm.prank(owner);
-        address newVault = vaultManager.createVaultWithBeacon(
-            address(projectToken2), DEFAULT_MIN_BET, DEFAULT_MAX_BET, DEFAULT_GRADUATION_THRESHOLD
+        address newVault = vaultManager.createVault(
+            address(projectToken2),
+            address(projectToken2),
+            DEFAULT_MIN_BET,
+            DEFAULT_MAX_BET,
+            DEFAULT_GRADUATION_THRESHOLD
         );
 
         assertTrue(newVault != address(0));
-        assertEq(vaultManager.getVault(address(projectToken2)), newVault);
+        assertEq(vaultManager.getVault(address(projectToken2), address(projectToken2)), newVault);
     }
 
     // ========================================================================
@@ -93,9 +113,13 @@ contract VaultManagerModularTest is BaseTestModular {
     // ========================================================================
 
     function test_BatchCreateVaults() public {
-        address[] memory tokens = new address[](2);
-        tokens[0] = address(projectToken2);
-        tokens[1] = address(projectToken3);
+        address[] memory priceTokens = new address[](2);
+        priceTokens[0] = address(projectToken2);
+        priceTokens[1] = address(projectToken3);
+
+        address[] memory collateralTokens = new address[](2);
+        collateralTokens[0] = address(projectToken2);
+        collateralTokens[1] = address(projectToken3);
 
         uint256[] memory minBets = new uint256[](2);
         minBets[0] = DEFAULT_MIN_BET;
@@ -110,8 +134,9 @@ contract VaultManagerModularTest is BaseTestModular {
         thresholds[1] = DEFAULT_GRADUATION_THRESHOLD;
 
         vm.prank(owner);
-        address[] memory vaults =
-            vaultManager.batchCreateVaults(tokens, minBets, maxBets, thresholds);
+        address[] memory vaults = vaultManager.batchCreateVaults(
+            priceTokens, collateralTokens, minBets, maxBets, thresholds
+        );
 
         assertEq(vaults.length, 2);
         assertTrue(vaults[0] != address(0));
@@ -119,14 +144,15 @@ contract VaultManagerModularTest is BaseTestModular {
     }
 
     function test_BatchCreateVaults_RevertLengthMismatch() public {
-        address[] memory tokens = new address[](2);
+        address[] memory priceTokens = new address[](2);
+        address[] memory collateralTokens = new address[](2);
         uint256[] memory minBets = new uint256[](1); // Mismatched length
         uint256[] memory maxBets = new uint256[](2);
         uint256[] memory thresholds = new uint256[](2);
 
         vm.prank(owner);
         vm.expectRevert();
-        vaultManager.batchCreateVaults(tokens, minBets, maxBets, thresholds);
+        vaultManager.batchCreateVaults(priceTokens, collateralTokens, minBets, maxBets, thresholds);
     }
 
     // ========================================================================
@@ -134,13 +160,13 @@ contract VaultManagerModularTest is BaseTestModular {
     // ========================================================================
 
     function test_GetVault() public view {
-        address vaultAddr = vaultManager.getVault(address(projectToken));
+        address vaultAddr = vaultManager.getVault(address(projectToken), address(projectToken));
         assertEq(vaultAddr, address(vault));
     }
 
     function test_IsVaultSupported() public view {
-        assertTrue(vaultManager.isVaultSupported(address(projectToken)));
-        assertFalse(vaultManager.isVaultSupported(address(projectToken2)));
+        assertTrue(vaultManager.isVaultSupported(address(projectToken), address(projectToken)));
+        assertFalse(vaultManager.isVaultSupported(address(projectToken2), address(projectToken2)));
     }
 
     function test_GetAllVaults() public view {
@@ -157,14 +183,14 @@ contract VaultManagerModularTest is BaseTestModular {
 
     function test_GetVaultInfo() public view {
         IVaultManager.VaultInfo memory info = vaultManager.getVaultInfo(address(vault));
-        assertEq(info.projectToken, address(projectToken));
+        assertEq(info.priceToken, address(projectToken));
         assertEq(info.vaultAddress, address(vault));
         assertTrue(info.isActive);
         assertFalse(info.isBeaconProxy); // Modular vault uses ERC1967
     }
 
-    function test_VaultProjectToken() public view {
-        address token = vaultManager.vaultProjectToken(address(vault));
+    function test_VaultPriceToken() public view {
+        address token = vaultManager.vaultPriceToken(address(vault));
         assertEq(token, address(projectToken));
     }
 
@@ -197,17 +223,17 @@ contract VaultManagerModularTest is BaseTestModular {
 
     function test_PauseVault() public {
         vm.prank(mockEmergencyGuardian);
-        vaultManager.pauseVault(address(projectToken));
+        vaultManager.pauseVault(address(projectToken), address(projectToken));
 
         assertTrue(vault.paused());
     }
 
     function test_UnpauseVault() public {
         vm.prank(mockEmergencyGuardian);
-        vaultManager.pauseVault(address(projectToken));
+        vaultManager.pauseVault(address(projectToken), address(projectToken));
 
         vm.prank(mockEmergencyGuardian);
-        vaultManager.unpauseVault(address(projectToken));
+        vaultManager.unpauseVault(address(projectToken), address(projectToken));
 
         assertFalse(vault.paused());
     }
@@ -223,7 +249,11 @@ contract VaultManagerModularTest is BaseTestModular {
         // Create another vault
         vm.prank(owner);
         address vault2 = vaultManager.createVault(
-            address(projectToken2), DEFAULT_MIN_BET, DEFAULT_MAX_BET, DEFAULT_GRADUATION_THRESHOLD
+            address(projectToken2),
+            address(projectToken2),
+            DEFAULT_MIN_BET,
+            DEFAULT_MAX_BET,
+            DEFAULT_GRADUATION_THRESHOLD
         );
 
         address[] memory vaults = new address[](2);
@@ -310,7 +340,11 @@ contract VaultManagerModularTest is BaseTestModular {
         vm.prank(owner);
         vm.expectRevert();
         vaultManager.createVault(
-            address(projectToken2), DEFAULT_MIN_BET, DEFAULT_MAX_BET, DEFAULT_GRADUATION_THRESHOLD
+            address(projectToken2),
+            address(projectToken2),
+            DEFAULT_MIN_BET,
+            DEFAULT_MAX_BET,
+            DEFAULT_GRADUATION_THRESHOLD
         );
     }
 
@@ -324,7 +358,11 @@ contract VaultManagerModularTest is BaseTestModular {
         // Creating vault should work after unpause
         vm.prank(owner);
         address newVault = vaultManager.createVault(
-            address(projectToken2), DEFAULT_MIN_BET, DEFAULT_MAX_BET, DEFAULT_GRADUATION_THRESHOLD
+            address(projectToken2),
+            address(projectToken2),
+            DEFAULT_MIN_BET,
+            DEFAULT_MAX_BET,
+            DEFAULT_GRADUATION_THRESHOLD
         );
 
         assertTrue(newVault != address(0));

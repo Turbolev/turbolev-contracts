@@ -65,17 +65,17 @@ contract InteractVaultManagerModular is DeployHelper {
         console.log("  - Is Graduated:", info.isGraduated);
     }
 
-    function getVaultByToken(address projectToken) public view {
+    function getVaultByToken(address collateralToken, address priceToken) public view {
         console.log("\n=== Vault by Token ===");
-        address vault = vmgr.getVault(projectToken);
-        console.log("Project Token:", projectToken);
+        address vault = vmgr.getVault(collateralToken, priceToken);
+        console.log("Price Token:", priceToken);
         console.log("Vault:", vault);
     }
 
-    function isVaultSupported(address projectToken) public view {
+    function isVaultSupported(address collateralToken, address priceToken) public view {
         console.log("\n=== Vault Support Check ===");
-        bool supported = vmgr.isVaultSupported(projectToken);
-        console.log("Project Token:", projectToken);
+        bool supported = vmgr.isVaultSupported(collateralToken, priceToken);
+        console.log("Price Token:", priceToken);
         console.log("Is Supported:", supported);
     }
 
@@ -83,17 +83,17 @@ contract InteractVaultManagerModular is DeployHelper {
     // PAUSE FUNCTIONS
     // ========================================================================
 
-    function pauseVault(address projectToken) public {
+    function pauseVault(address collateralToken, address priceToken) public {
         vm.startBroadcast(deployer);
-        vmgr.pauseVault(projectToken);
-        console.log("Vault paused for token:", projectToken);
+        vmgr.pauseVault(collateralToken, priceToken);
+        console.log("Vault paused for price token:", priceToken);
         vm.stopBroadcast();
     }
 
-    function unpauseVault(address projectToken) public {
+    function unpauseVault(address collateralToken, address priceToken) public {
         vm.startBroadcast(deployer);
-        vmgr.unpauseVault(projectToken);
-        console.log("Vault unpaused for token:", projectToken);
+        vmgr.unpauseVault(collateralToken, priceToken);
+        console.log("Vault unpaused for price token:", priceToken);
         vm.stopBroadcast();
     }
 
@@ -115,10 +115,10 @@ contract InteractVaultManagerModular is DeployHelper {
     // EMERGENCY FUNCTIONS
     // ========================================================================
 
-    function emergencyPauseVault(address projectToken) public {
+    function emergencyPauseVault(address collateralToken, address priceToken) public {
         vm.startBroadcast(deployer);
-        vmgr.emergencyPauseVault(projectToken);
-        console.log("Emergency pause executed for token:", projectToken);
+        vmgr.emergencyPauseVault(collateralToken, priceToken);
+        console.log("Emergency pause executed for price token:", priceToken);
         vm.stopBroadcast();
     }
 
@@ -129,10 +129,10 @@ contract InteractVaultManagerModular is DeployHelper {
         vm.stopBroadcast();
     }
 
-    function emergencyUnpauseVault(address projectToken) public {
+    function emergencyUnpauseVault(address collateralToken, address priceToken) public {
         vm.startBroadcast(deployer);
-        vmgr.emergencyUnpauseVault(projectToken);
-        console.log("Emergency unpause executed for token:", projectToken);
+        vmgr.emergencyUnpauseVault(collateralToken, priceToken);
+        console.log("Emergency unpause executed for price token:", priceToken);
         vm.stopBroadcast();
     }
 

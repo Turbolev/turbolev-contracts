@@ -55,14 +55,10 @@ library VaultConfigLib {
     uint16 constant DEFAULT_CLOSE_POSITION_FEE_BPS = 5; // 0.05%
 
     // ========================================================================
-    // DEFAULT VALUES - LEVERAGE TIER CONFIG
+    // DEFAULT VALUES - MAX LEVERAGE CONFIG
     // ========================================================================
 
-    uint256 constant DEFAULT_LEVERAGE_TIER1_THRESHOLD = 100_000 * 1e18;
-    uint256 constant DEFAULT_LEVERAGE_TIER2_THRESHOLD = 500_000 * 1e18;
-    uint16 constant DEFAULT_TIER1_MAX_LEVERAGE = 10;
-    uint16 constant DEFAULT_TIER2_MAX_LEVERAGE = 10;
-    uint16 constant DEFAULT_TIER3_MAX_LEVERAGE = 10;
+    uint16 constant DEFAULT_MAX_LEVERAGE = 100; // 100x fixed default
 
     // ========================================================================
     // DEFAULT VALUES - OI TIER CONFIG
@@ -127,23 +123,6 @@ library VaultConfigLib {
         uint16 earlyWithdrawalFeeBps;
         uint16 openPositionFeeBps;
         uint16 closePositionFeeBps;
-    }
-
-    /**
-     * @notice Leverage tier configuration based on vault TVL
-     * @dev Max leverage increases as vault grows (more mature = higher leverage allowed)
-     * @param tier1Threshold TVL threshold for tier 1 (Launch Phase)
-     * @param tier2Threshold TVL threshold for tier 2 (Growth Phase)
-     * @param tier1MaxLeverage Max leverage for TVL < tier1Threshold
-     * @param tier2MaxLeverage Max leverage for tier1Threshold <= TVL < tier2Threshold
-     * @param tier3MaxLeverage Max leverage for TVL >= tier2Threshold (Mature Phase)
-     */
-    struct LeverageTierConfig {
-        uint256 tier1Threshold;
-        uint256 tier2Threshold;
-        uint16 tier1MaxLeverage;
-        uint16 tier2MaxLeverage;
-        uint16 tier3MaxLeverage;
     }
 
     /**
@@ -223,24 +202,6 @@ library VaultConfigLib {
     }
 
     /**
-     * @notice Returns default leverage tier configuration
-     * @return config Default LeverageTierConfig struct
-     */
-    function getDefaultLeverageTierConfig()
-        internal
-        pure
-        returns (LeverageTierConfig memory config)
-    {
-        return LeverageTierConfig({
-            tier1Threshold: DEFAULT_LEVERAGE_TIER1_THRESHOLD,
-            tier2Threshold: DEFAULT_LEVERAGE_TIER2_THRESHOLD,
-            tier1MaxLeverage: DEFAULT_TIER1_MAX_LEVERAGE,
-            tier2MaxLeverage: DEFAULT_TIER2_MAX_LEVERAGE,
-            tier3MaxLeverage: DEFAULT_TIER3_MAX_LEVERAGE
-        });
-    }
-
-    /**
      * @notice Returns default OI tier configuration
      * @return config Default OITierConfig struct
      */
@@ -297,29 +258,6 @@ library VaultConfigLib {
         if (config.openPositionFeeBps > MAX_POSITION_FEE_BPS) return false;
         if (config.closePositionFeeBps < MIN_POSITION_FEE_BPS) return false;
         if (config.closePositionFeeBps > MAX_POSITION_FEE_BPS) return false;
-        return true;
-    }
-
-    /**
-     * @notice Validate leverage tier configuration
-     * @param config LeverageTierConfig to validate
-     * @return valid True if configuration is valid
-     */
-    function validateLeverageTierConfig(LeverageTierConfig memory config)
-        internal
-        pure
-        returns (bool valid)
-    {
-        // tier2 must be >= tier1
-        if (config.tier2Threshold < config.tier1Threshold) return false;
-        // Leverage must be positive
-        if (config.tier1MaxLeverage == 0) return false;
-        if (config.tier2MaxLeverage == 0) return false;
-        if (config.tier3MaxLeverage == 0) return false;
-        // Leverage must not exceed safety cap
-        if (config.tier1MaxLeverage > MAX_LEVERAGE_ALLOWED) return false;
-        if (config.tier2MaxLeverage > MAX_LEVERAGE_ALLOWED) return false;
-        if (config.tier3MaxLeverage > MAX_LEVERAGE_ALLOWED) return false;
         return true;
     }
 

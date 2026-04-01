@@ -130,6 +130,7 @@ contract FeePoolAndRewardsTest is BaseTestModular {
         projectToken.approve(address(positionManager), TRADE_AMOUNT);
         positionManager.openPosition(
             address(projectToken),
+            address(projectToken),
             TRADE_AMOUNT,
             5, // 5x leverage
             1, // long
@@ -172,7 +173,14 @@ contract FeePoolAndRewardsTest is BaseTestModular {
         vm.startPrank(trader1);
         projectToken.approve(address(positionManager), TRADE_AMOUNT);
         uint64 positionId = positionManager.openPosition(
-            address(projectToken), TRADE_AMOUNT, 5, 1, type(uint256).max, 3600, bytes("")
+            address(projectToken),
+            address(projectToken),
+            TRADE_AMOUNT,
+            5,
+            1,
+            type(uint256).max,
+            3600,
+            bytes("")
         );
         vm.stopPrank();
 
@@ -383,7 +391,7 @@ contract FeePoolAndRewardsTest is BaseTestModular {
         vm.startPrank(trader1);
         projectToken.approve(address(positionManager), 100 ether);
         uint64 pos1 = positionManager.openPosition(
-            address(projectToken), 50 ether, 2, 1, 0, 3600, bytes("")
+            address(projectToken), address(projectToken), 50 ether, 2, 1, 0, 3600, bytes("")
         );
         vm.stopPrank();
 
@@ -391,7 +399,7 @@ contract FeePoolAndRewardsTest is BaseTestModular {
         vm.startPrank(trader2);
         projectToken.approve(address(positionManager), 100 ether);
         uint64 pos2 = positionManager.openPosition(
-            address(projectToken), 30 ether, 2, 2, 0, 3600, bytes("")
+            address(projectToken), address(projectToken), 30 ether, 2, 2, 0, 3600, bytes("")
         );
         vm.stopPrank();
 
@@ -399,7 +407,7 @@ contract FeePoolAndRewardsTest is BaseTestModular {
         vm.startPrank(trader3);
         projectToken.approve(address(positionManager), 100 ether);
         uint64 pos3 = positionManager.openPosition(
-            address(projectToken), 20 ether, 2, 1, 0, 3600, bytes("")
+            address(projectToken), address(projectToken), 20 ether, 2, 1, 0, 3600, bytes("")
         );
         vm.stopPrank();
 
@@ -473,7 +481,7 @@ contract FeePoolAndRewardsTest is BaseTestModular {
         vm.startPrank(trader1);
         projectToken.approve(address(positionManager), 100 ether);
         uint64 positionId = positionManager.openPosition(
-            address(projectToken), 50 ether, 2, 1, 0, 3600, bytes("")
+            address(projectToken), address(projectToken), 50 ether, 2, 1, 0, 3600, bytes("")
         );
         vm.stopPrank();
 
@@ -522,7 +530,7 @@ contract FeePoolAndRewardsTest is BaseTestModular {
         vm.startPrank(trader1);
         projectToken.approve(address(positionManager), 100 ether);
         uint64 pos1 = positionManager.openPosition(
-            address(projectToken), 50 ether, 2, 1, 0, 3600, bytes("")
+            address(projectToken), address(projectToken), 50 ether, 2, 1, 0, 3600, bytes("")
         );
         vm.stopPrank();
 
@@ -577,7 +585,7 @@ contract FeePoolAndRewardsTest is BaseTestModular {
         vm.startPrank(trader1);
         projectToken.approve(address(positionManager), 100 ether);
         uint64 pos1 = positionManager.openPosition(
-            address(projectToken), 50 ether, 2, 1, 0, 3600, bytes("")
+            address(projectToken), address(projectToken), 50 ether, 2, 1, 0, 3600, bytes("")
         );
         vm.stopPrank();
 
@@ -649,7 +657,7 @@ contract FeePoolAndRewardsTest is BaseTestModular {
         vm.startPrank(trader1);
         projectToken.approve(address(positionManager), 100 ether);
         uint64 pos1 = positionManager.openPosition(
-            address(projectToken), 50 ether, 2, 1, 0, 3600, bytes("")
+            address(projectToken), address(projectToken), 50 ether, 2, 1, 0, 3600, bytes("")
         );
         vm.stopPrank();
 
@@ -772,21 +780,21 @@ contract FeePoolAndRewardsTest is BaseTestModular {
         vm.startPrank(trader1);
         projectToken.approve(address(positionManager), 100 ether);
         positions[0] = positionManager.openPosition(
-            address(projectToken), 50 ether, 2, 1, 0, 3600, bytes("")
+            address(projectToken), address(projectToken), 50 ether, 2, 1, 0, 3600, bytes("")
         );
         vm.stopPrank();
 
         vm.startPrank(trader2);
         projectToken.approve(address(positionManager), 100 ether);
         positions[1] = positionManager.openPosition(
-            address(projectToken), 30 ether, 2, 2, 0, 3600, bytes("")
+            address(projectToken), address(projectToken), 30 ether, 2, 2, 0, 3600, bytes("")
         );
         vm.stopPrank();
 
         vm.startPrank(trader3);
         projectToken.approve(address(positionManager), 100 ether);
         positions[2] = positionManager.openPosition(
-            address(projectToken), 20 ether, 2, 1, 0, 3600, bytes("")
+            address(projectToken), address(projectToken), 20 ether, 2, 1, 0, 3600, bytes("")
         );
         vm.stopPrank();
 

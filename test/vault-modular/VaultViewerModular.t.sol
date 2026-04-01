@@ -73,70 +73,28 @@ contract VaultViewerModularTest is BaseTestModular {
     // LEVERAGE TESTS
     // ========================================================================
 
-    function test_getEffectiveMaxLeverage() public view {
-        (
-            uint16 effectiveMaxLeverage,
-            uint16 baseMaxLeverage,
-            uint256 utilizationBps,
-            uint8 utilizationTier,
-            string memory tierDescription
-        ) = vaultViewer.getEffectiveMaxLeverage(address(vault));
-
-        assertTrue(effectiveMaxLeverage > 0, "Effective leverage should be > 0");
-        assertTrue(baseMaxLeverage > 0, "Base leverage should be > 0");
-        assertEq(utilizationBps, 0, "Utilization should be 0");
-        assertEq(utilizationTier, 1, "Should be in tier 1");
-        assertTrue(bytes(tierDescription).length > 0, "Should have tier description");
-    }
-
     function test_getVaultMaxLeverage() public view {
-        (uint16 maxLeverage, uint256 currentTVL, string memory currentPhase) =
-            vaultViewer.getVaultMaxLeverage(address(vault));
+        uint16 maxLeverage = vaultViewer.getVaultMaxLeverage(address(vault));
 
         assertTrue(maxLeverage > 0, "Max leverage should be > 0");
-        assertEq(currentTVL, 1000 ether, "TVL should match");
-        assertTrue(bytes(currentPhase).length > 0, "Should have phase description");
-    }
-
-    function test_getLeverageTierConfig() public view {
-        (
-            uint256 tier1Threshold,
-            uint256 tier2Threshold,
-            uint16 tier1Max,
-            uint16 tier2Max,
-            uint16 tier3Max
-        ) = vaultViewer.getLeverageTierConfig(address(vault));
-
-        // Just check values are returned (may be 0 if not configured)
-        assertTrue(
-            tier1Max > 0 || tier2Max > 0 || tier3Max > 0, "At least one leverage tier should be set"
-        );
     }
 
     function test_checkLeverageAllowed() public view {
-        (bool isAllowed, uint16 effectiveMaxLeverage, string memory reason) =
+        (bool isAllowed, uint16 maxLeverage, string memory reason) =
             vaultViewer.checkLeverageAllowed(address(vault), 10);
 
         assertTrue(isAllowed, "10x leverage should be allowed");
-        assertTrue(effectiveMaxLeverage >= 10, "Effective max should be >= 10");
+        assertTrue(maxLeverage >= 10, "Max leverage should be >= 10");
         assertEq(bytes(reason).length, 0, "Should have no rejection reason");
     }
 
     function test_checkLeverageAllowed_Rejected() public view {
-        (bool isAllowed, uint16 effectiveMaxLeverage, string memory reason) =
-            vaultViewer.checkLeverageAllowed(address(vault), 1000);
+        (bool isAllowed, uint16 maxLeverage, string memory reason) =
+            vaultViewer.checkLeverageAllowed(address(vault), 1001);
 
-        assertFalse(isAllowed, "1000x leverage should not be allowed");
-        assertTrue(effectiveMaxLeverage < 1000, "Effective max should be < 1000");
+        assertFalse(isAllowed, "1001x leverage should not be allowed (default max is 100x)");
+        assertTrue(maxLeverage < 1001, "Max leverage should be < 1001");
         assertTrue(bytes(reason).length > 0, "Should have rejection reason");
-    }
-
-    function test_simulateLeverageAtTVL() public view {
-        (uint16 maxLeverageAtTarget, string memory phase) =
-            vaultViewer.simulateLeverageAtTVL(address(vault), 1_000_000 ether);
-
-        assertTrue(maxLeverageAtTarget > 0, "Max leverage should be > 0");
-        assertTrue(bytes(phase).length > 0, "Should have phase description");
     }
 
     // ========================================================================

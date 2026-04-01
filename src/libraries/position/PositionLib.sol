@@ -81,14 +81,14 @@ library PositionLib {
         uint8 closeRequestCount; // 1 byte
         uint8 maxCloseRequests; // 1 byte
         address user;
-        address projectToken; // Project token address (the asset being bet on)
-        address tokenAddress; // Collateral token: address(0) for native, or ERC20
+        address projectToken; // Price token: the asset whose price is tracked (e.g. SEI, ETH)
+        address tokenAddress; // Collateral token: ERC20 used for margin and payouts (e.g. USDC)
         uint256 amount; // Collateral amount (includes added margin)
-        uint256 openPrice; // Open price (from backend)
-        uint256 closePrice; // Close price (from backend)
+        uint256 openPrice; // Open price (from oracle)
+        uint256 closePrice; // Close price (from oracle)
         uint256 liquidationPrice; // Liquidation price (calculated based on leverage)
         uint256 positionSize; // Position size = amount × leverage (for display)
-        uint256 maxProfitCap; // Max profit allowed (Phase 3)
+        uint256 maxProfitCap; // Max profit allowed
         uint256 createdTimestamp;
         uint256 lastModifiedTimestamp;
         uint256 minCloseTime; // Flash loan protection: earliest close time

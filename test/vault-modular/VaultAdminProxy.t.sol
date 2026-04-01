@@ -96,7 +96,7 @@ contract VaultAdminProxyTest is BaseTestModular {
         vm.stopPrank();
 
         vm.prank(admin);
-        vaultAdminProxy.pauseVault(address(projectToken));
+        vaultAdminProxy.pauseVault(address(projectToken), address(projectToken));
 
         assertTrue(IVaultRouter(testVault).paused());
     }
@@ -109,11 +109,11 @@ contract VaultAdminProxyTest is BaseTestModular {
 
         // First pause
         vm.prank(admin);
-        vaultAdminProxy.pauseVault(address(projectToken));
+        vaultAdminProxy.pauseVault(address(projectToken), address(projectToken));
 
         // Then unpause
         vm.prank(admin);
-        vaultAdminProxy.unpauseVault(address(projectToken));
+        vaultAdminProxy.unpauseVault(address(projectToken), address(projectToken));
 
         assertFalse(IVaultRouter(testVault).paused());
     }
@@ -121,7 +121,7 @@ contract VaultAdminProxyTest is BaseTestModular {
     function test_PauseVault_RevertIfNotVaultAdmin() public {
         vm.prank(user1);
         vm.expectRevert(IVaultAdminProxy.NotAuthorized.selector);
-        vaultAdminProxy.pauseVault(address(projectToken));
+        vaultAdminProxy.pauseVault(address(projectToken), address(projectToken));
     }
 
     function test_UpdateVaultParams() public {
@@ -133,7 +133,9 @@ contract VaultAdminProxyTest is BaseTestModular {
         uint256 newMaxBet = 100 ether;
 
         vm.prank(admin);
-        vaultAdminProxy.updateVaultParams(address(projectToken), newMinBet, newMaxBet);
+        vaultAdminProxy.updateVaultParams(
+            address(projectToken), address(projectToken), newMinBet, newMaxBet
+        );
 
         IVaultRouter.VaultParams memory params = IVaultRouter(testVault).getVaultParams();
         assertEq(params.minBetAmount, newMinBet);
@@ -148,7 +150,9 @@ contract VaultAdminProxyTest is BaseTestModular {
         uint16 newFeeBps = 50; // 0.5%
 
         vm.prank(admin);
-        vaultAdminProxy.setVaultStakingFeeBps(address(projectToken), newFeeBps);
+        vaultAdminProxy.setVaultStakingFeeBps(
+            address(projectToken), address(projectToken), newFeeBps
+        );
 
         (uint16 stakingFeeBps,,) = IVaultRouter(testVault).getFeeConfig();
         assertEq(stakingFeeBps, newFeeBps);
@@ -162,7 +166,9 @@ contract VaultAdminProxyTest is BaseTestModular {
         uint16 newFeeBps = 200; // 2%
 
         vm.prank(admin);
-        vaultAdminProxy.setVaultEarlyWithdrawalFeeBps(address(projectToken), newFeeBps);
+        vaultAdminProxy.setVaultEarlyWithdrawalFeeBps(
+            address(projectToken), address(projectToken), newFeeBps
+        );
 
         (, uint16 earlyWithdrawalFeeBps,) = IVaultRouter(testVault).getFeeConfig();
         assertEq(earlyWithdrawalFeeBps, newFeeBps);
@@ -176,7 +182,9 @@ contract VaultAdminProxyTest is BaseTestModular {
         uint256 newThreshold = 200 ether;
 
         vm.prank(admin);
-        vaultAdminProxy.setVaultGraduationThreshold(address(projectToken), newThreshold);
+        vaultAdminProxy.setVaultGraduationThreshold(
+            address(projectToken), address(projectToken), newThreshold
+        );
 
         IVaultRouter.VaultInfo memory info = IVaultRouter(testVault).getVaultInfo();
         assertEq(info.graduationThreshold, newThreshold);
@@ -188,7 +196,7 @@ contract VaultAdminProxyTest is BaseTestModular {
         vm.stopPrank();
 
         vm.prank(admin);
-        vaultAdminProxy.setVaultTradingEnabled(address(projectToken), true);
+        vaultAdminProxy.setVaultTradingEnabled(address(projectToken), address(projectToken), true);
 
         assertTrue(IVaultRouter(testVault).tradingEnabled());
     }
@@ -201,7 +209,7 @@ contract VaultAdminProxyTest is BaseTestModular {
         address newTreasury = makeAddr("newTreasury");
 
         vm.prank(admin);
-        vaultAdminProxy.setVaultTreasury(address(projectToken), newTreasury);
+        vaultAdminProxy.setVaultTreasury(address(projectToken), address(projectToken), newTreasury);
 
         // Treasury should be updated (no getter in interface, so we just verify no revert)
     }
@@ -212,12 +220,12 @@ contract VaultAdminProxyTest is BaseTestModular {
         vm.stopPrank();
 
         vm.prank(admin);
-        vaultAdminProxy.setVaultImpactEnabled(address(projectToken), false);
+        vaultAdminProxy.setVaultImpactEnabled(address(projectToken), address(projectToken), false);
 
         assertFalse(IVaultRouter(testVault).isImpactEnabled());
 
         vm.prank(admin);
-        vaultAdminProxy.setVaultImpactEnabled(address(projectToken), true);
+        vaultAdminProxy.setVaultImpactEnabled(address(projectToken), address(projectToken), true);
 
         assertTrue(IVaultRouter(testVault).isImpactEnabled());
     }
@@ -230,6 +238,7 @@ contract VaultAdminProxyTest is BaseTestModular {
         // Values must be <= MAX_IMPACT_BPS (200) and in ascending order.
         vm.prank(admin);
         vaultAdminProxy.setVaultImpactConfig(
+            address(projectToken),
             address(projectToken),
             5, // tier1: 0.05%
             15, // tier2: 0.15%
@@ -245,7 +254,7 @@ contract VaultAdminProxyTest is BaseTestModular {
     // ========================================================================
 
     function test_GetVault() public view {
-        address vault = vaultAdminProxy.getVault(address(projectToken));
+        address vault = vaultAdminProxy.getVault(address(projectToken), address(projectToken));
         assertEq(vault, testVault);
     }
 
@@ -256,8 +265,8 @@ contract VaultAdminProxyTest is BaseTestModular {
     }
 
     function test_IsVaultSupported() public view {
-        assertTrue(vaultAdminProxy.isVaultSupported(address(projectToken)));
-        assertFalse(vaultAdminProxy.isVaultSupported(address(0x123)));
+        assertTrue(vaultAdminProxy.isVaultSupported(address(projectToken), address(projectToken)));
+        assertFalse(vaultAdminProxy.isVaultSupported(address(0x123), address(0x123)));
     }
 
     // ========================================================================
@@ -310,7 +319,7 @@ contract VaultAdminProxyTest is BaseTestModular {
 
         vm.prank(admin);
         vm.expectRevert(IVaultAdminProxy.VaultNotFound.selector);
-        vaultAdminProxy.pauseVault(fakeToken);
+        vaultAdminProxy.pauseVault(fakeToken, fakeToken);
     }
 
     function test_VaultNotActive() public {
@@ -324,7 +333,7 @@ contract VaultAdminProxyTest is BaseTestModular {
 
         vm.prank(admin);
         vm.expectRevert(IVaultAdminProxy.VaultNotActive.selector);
-        vaultAdminProxy.pauseVault(address(projectToken));
+        vaultAdminProxy.pauseVault(address(projectToken), address(projectToken));
 
         // Reactivate for other tests
         vm.prank(owner);
@@ -373,7 +382,7 @@ contract VaultAdminProxyTest is BaseTestModular {
 
         vm.prank(admin);
         // This should not revert even if there are no fees to withdraw (0 = withdraw all)
-        vaultAdminProxy.withdrawFees(address(projectToken), 0);
+        vaultAdminProxy.withdrawFees(address(projectToken), address(projectToken), 0);
     }
 
     function test_SetVaultOpenPositionFeeBps() public {
@@ -384,7 +393,9 @@ contract VaultAdminProxyTest is BaseTestModular {
         uint16 newFeeBps = 30; // 0.3%
 
         vm.prank(admin);
-        vaultAdminProxy.setVaultOpenPositionFeeBps(address(projectToken), newFeeBps);
+        vaultAdminProxy.setVaultOpenPositionFeeBps(
+            address(projectToken), address(projectToken), newFeeBps
+        );
 
         // Just verify no revert since getFeeConfig doesn't return openPositionFeeBps
     }
@@ -397,7 +408,9 @@ contract VaultAdminProxyTest is BaseTestModular {
         uint16 newFeeBps = 25; // 0.25%
 
         vm.prank(admin);
-        vaultAdminProxy.setVaultClosePositionFeeBps(address(projectToken), newFeeBps);
+        vaultAdminProxy.setVaultClosePositionFeeBps(
+            address(projectToken), address(projectToken), newFeeBps
+        );
 
         // Just verify no revert since getFeeConfig doesn't return closePositionFeeBps
     }
@@ -420,43 +433,21 @@ contract VaultAdminProxyTest is BaseTestModular {
     // RISK CONFIG SETTERS TESTS
     // ========================================================================
 
-    function test_SetVaultLeverageTierConfig() public {
+    function test_SetVaultMaxLeverage() public {
         vm.startPrank(mockTimelockController);
         vaultAccessController.grantRole(VAULT_ADMIN_ROLE, admin);
         vm.stopPrank();
 
         vm.prank(admin);
-        vaultAdminProxy.setVaultLeverageTierConfig(
-            address(projectToken),
-            50_000 * 1e18, // tier1Threshold
-            200_000 * 1e18, // tier2Threshold
-            50, // tier1MaxLeverage
-            150, // tier2MaxLeverage
-            400 // tier3MaxLeverage
-        );
+        vaultAdminProxy.setVaultMaxLeverage(address(projectToken), address(projectToken), 200);
 
-        // Verify new values
-        (
-            uint256 tier1Threshold,
-            uint256 tier2Threshold,
-            uint16 tier1MaxLeverage,
-            uint16 tier2MaxLeverage,
-            uint16 tier3MaxLeverage
-        ) = IVaultRouter(testVault).getLeverageTierConfig();
-
-        assertEq(tier1Threshold, 50_000 * 1e18);
-        assertEq(tier2Threshold, 200_000 * 1e18);
-        assertEq(tier1MaxLeverage, 50);
-        assertEq(tier2MaxLeverage, 150);
-        assertEq(tier3MaxLeverage, 400);
+        assertEq(IVaultRouter(testVault).getMaxLeverage(), 200);
     }
 
-    function test_SetVaultLeverageTierConfig_RevertNotAuthorized() public {
+    function test_SetVaultMaxLeverage_RevertNotAuthorized() public {
         vm.prank(user1);
         vm.expectRevert(IVaultAdminProxy.NotAuthorized.selector);
-        vaultAdminProxy.setVaultLeverageTierConfig(
-            address(projectToken), 50_000 * 1e18, 200_000 * 1e18, 50, 150, 400
-        );
+        vaultAdminProxy.setVaultMaxLeverage(address(projectToken), address(projectToken), 200);
     }
 
     function test_SetVaultTotalOITierConfig() public {
@@ -466,6 +457,7 @@ contract VaultAdminProxyTest is BaseTestModular {
 
         vm.prank(admin);
         vaultAdminProxy.setVaultTotalOITierConfig(
+            address(projectToken),
             address(projectToken),
             25_000, // totalOIRiskMultiplierBps (2.5x)
             100_000 * 1e18, // tier1Threshold
@@ -504,6 +496,7 @@ contract VaultAdminProxyTest is BaseTestModular {
         vm.expectRevert(IVaultAdminProxy.NotAuthorized.selector);
         vaultAdminProxy.setVaultTotalOITierConfig(
             address(projectToken),
+            address(projectToken),
             25_000,
             100_000 * 1e18,
             500_000 * 1e18,
@@ -523,6 +516,7 @@ contract VaultAdminProxyTest is BaseTestModular {
         vm.prank(admin);
         vaultAdminProxy.setVaultMaxDirectionalExposure(
             address(projectToken),
+            address(projectToken),
             7500 // 75%
         );
 
@@ -533,51 +527,8 @@ contract VaultAdminProxyTest is BaseTestModular {
     function test_SetVaultMaxDirectionalExposure_RevertNotAuthorized() public {
         vm.prank(user1);
         vm.expectRevert(IVaultAdminProxy.NotAuthorized.selector);
-        vaultAdminProxy.setVaultMaxDirectionalExposure(address(projectToken), 7500);
-    }
-
-    function test_SetVaultUtilizationConfig() public {
-        vm.startPrank(mockTimelockController);
-        vaultAccessController.grantRole(VAULT_ADMIN_ROLE, admin);
-        vm.stopPrank();
-
-        vm.prank(admin);
-        vaultAdminProxy.setVaultUtilizationConfig(
-            address(projectToken),
-            2500, // tier1Bps (25%)
-            5000, // tier2Bps (50%)
-            7500, // tier3Bps (75%)
-            10_000, // factorTier1Bps (100%)
-            6000, // factorTier2Bps (60%)
-            3000, // factorTier3Bps (30%)
-            500 // factorEmergencyBps (5%)
-        );
-
-        // Verify new values
-        (
-            uint16 tier1Bps,
-            uint16 tier2Bps,
-            uint16 tier3Bps,
-            uint16 factorTier1Bps,
-            uint16 factorTier2Bps,
-            uint16 factorTier3Bps,
-            uint16 factorEmergencyBps
-        ) = IVaultRouter(testVault).getUtilizationConfig();
-
-        assertEq(tier1Bps, 2500);
-        assertEq(tier2Bps, 5000);
-        assertEq(tier3Bps, 7500);
-        assertEq(factorTier1Bps, 10_000);
-        assertEq(factorTier2Bps, 6000);
-        assertEq(factorTier3Bps, 3000);
-        assertEq(factorEmergencyBps, 500);
-    }
-
-    function test_SetVaultUtilizationConfig_RevertNotAuthorized() public {
-        vm.prank(user1);
-        vm.expectRevert(IVaultAdminProxy.NotAuthorized.selector);
-        vaultAdminProxy.setVaultUtilizationConfig(
-            address(projectToken), 2500, 5000, 7500, 10_000, 6000, 3000, 500
+        vaultAdminProxy.setVaultMaxDirectionalExposure(
+            address(projectToken), address(projectToken), 7500
         );
     }
 
@@ -589,6 +540,7 @@ contract VaultAdminProxyTest is BaseTestModular {
         vm.prank(admin);
         vaultAdminProxy.setVaultMaxProfitCapMultiplier(
             address(projectToken),
+            address(projectToken),
             5 // 5x collateral
         );
 
@@ -599,6 +551,8 @@ contract VaultAdminProxyTest is BaseTestModular {
     function test_SetVaultMaxProfitCapMultiplier_RevertNotAuthorized() public {
         vm.prank(user1);
         vm.expectRevert(IVaultAdminProxy.NotAuthorized.selector);
-        vaultAdminProxy.setVaultMaxProfitCapMultiplier(address(projectToken), 5);
+        vaultAdminProxy.setVaultMaxProfitCapMultiplier(
+            address(projectToken), address(projectToken), 5
+        );
     }
 }

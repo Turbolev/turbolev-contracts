@@ -141,9 +141,13 @@ contract PositionCore is PositionModuleBase {
 
     /**
      * @notice Open position (LONG/SHORT) with leverage
+     * @param priceToken Token whose price is tracked by the oracle (e.g. SEI, ETH)
+     * @param collateralToken ERC20 token used as collateral (e.g. USDC, USDT)
+     * @param collateralAmount Amount of collateralToken to deposit
      */
     function openPosition(
-        address projectToken,
+        address priceToken,
+        address collateralToken,
         uint256 collateralAmount,
         uint8 leverage,
         uint8 direction,
@@ -167,20 +171,21 @@ contract PositionCore is PositionModuleBase {
             revert InvalidDirection();
         }
         if (
-            projectToken == address(0) || core.settlementEngine == address(0)
-                || core.vaultManager == address(0) || core.priceFeedManager == address(0)
+            priceToken == address(0) || collateralToken == address(0)
+                || core.settlementEngine == address(0) || core.vaultManager == address(0)
+                || core.priceFeedManager == address(0)
         ) revert InvalidAddress();
 
-        // Validate token decimals
-        _validateAndCacheTokenDecimals(projectToken);
+        // Validate price token decimals (used for oracle price scaling)
+        _validateAndCacheTokenDecimals(priceToken);
 
         uint256 amount = collateralAmount;
         if (amount == 0) revert InvalidAmount();
 
-        // Transfer project token from user
-        IERC20(projectToken).safeTransferFrom(msg.sender, address(this), amount);
+        // Transfer collateral token from user
+        IERC20(collateralToken).safeTransferFrom(msg.sender, address(this), amount);
 
-        // Get price from PriceFeedManager
+        // Get price from PriceFeedManager — price is always for priceToken
         uint256 maxAge = _calculateMaxAge(deadline);
         uint256 openPrice;
         uint256 pricePublishTime;
@@ -188,11 +193,11 @@ contract PositionCore is PositionModuleBase {
         if (priceUpdateData.length > 0) {
             (openPrice, pricePublishTime) = IPriceFeedManager(core.priceFeedManager)
             .getPriceWithUpdate{ value: msg.value }(
-                projectToken, maxAge, priceUpdateData
+                priceToken, maxAge, priceUpdateData
             );
         } else {
             (openPrice, pricePublishTime) =
-                IPriceFeedManager(core.priceFeedManager).getPriceChecked(projectToken, maxAge);
+                IPriceFeedManager(core.priceFeedManager).getPriceChecked(priceToken, maxAge);
         }
 
         if (openPrice == 0) revert InvalidPrice();
@@ -210,9 +215,10 @@ contract PositionCore is PositionModuleBase {
             }
         }
 
-        address vaultAddress = IVaultManager(core.vaultManager).getVault(projectToken);
+        address vaultAddress =
+            IVaultManager(core.vaultManager).getVault(collateralToken, priceToken);
         if (vaultAddress == address(0)) revert InvalidAddress();
-        if (!IVaultManager(core.vaultManager).isVaultSupported(projectToken)) {
+        if (!IVaultManager(core.vaultManager).isVaultSupported(collateralToken, priceToken)) {
             revert InvalidAddress();
         }
 
@@ -226,16 +232,18 @@ contract PositionCore is PositionModuleBase {
         positionId = core.nextPositionId++;
 
         // Transfer collateral to VaultManager
-        IERC20(projectToken).forceApprove(core.vaultManager, amount);
+        IERC20(collateralToken).forceApprove(core.vaultManager, amount);
         IVaultManager(core.vaultManager)
-            .depositFromBet(projectToken, positionId, amount, positionSize, false, direction);
+            .depositFromBet(
+                priceToken, collateralToken, positionId, amount, positionSize, false, direction
+            );
 
         PositionLib.Position storage pos = core.positions[positionId];
 
         pos.positionId = positionId;
         pos.user = msg.sender;
-        pos.projectToken = projectToken;
-        pos.tokenAddress = projectToken;
+        pos.projectToken = priceToken;
+        pos.tokenAddress = collateralToken;
         pos.amount = amount;
         pos.leverage = leverage;
         pos.direction = direction;
@@ -300,7 +308,7 @@ contract PositionCore is PositionModuleBase {
         emit PositionOpened(
             positionId,
             msg.sender,
-            projectToken,
+            collateralToken,
             amount,
             leverage,
             direction,
@@ -451,9 +459,12 @@ contract PositionCore is PositionModuleBase {
         );
 
         // Forward margin to VaultManager (guaranteed non-zero by check above)
+        // pos.tokenAddress = collateralToken, pos.projectToken = priceToken
         IERC20(pos.tokenAddress).forceApprove(core.vaultManager, marginAmount);
         IVaultManager(core.vaultManager)
-            .depositFromBet(pos.projectToken, positionId, marginAmount, 0, true, pos.direction);
+            .depositFromBet(
+                pos.projectToken, pos.tokenAddress, positionId, marginAmount, 0, true, pos.direction
+            );
 
         emit MarginAdded(
             positionId,
@@ -526,7 +537,9 @@ contract PositionCore is PositionModuleBase {
         if (core.settlementEngine == address(0) || core.vaultManager == address(0)) {
             revert InvalidAddress();
         }
-        address vaultAddress = IVaultManager(core.vaultManager).getVault(pos.projectToken);
+        // pos.projectToken = priceToken, pos.tokenAddress = collateralToken
+        address vaultAddress =
+            IVaultManager(core.vaultManager).getVault(pos.tokenAddress, pos.projectToken);
         if (vaultAddress == address(0)) revert InvalidAddress();
 
         // Process settlement — SettlementEngine reads position data directly from this router
@@ -545,6 +558,7 @@ contract PositionCore is PositionModuleBase {
         uint256 closeFee = IVaultManager(core.vaultManager)
             .updateVaultPnLWithLeverage(
                 pos.projectToken,
+                pos.tokenAddress,
                 positionId,
                 pos.amount,
                 vaultPnL,
@@ -560,7 +574,9 @@ contract PositionCore is PositionModuleBase {
         // Execute payout
         if (adjustedPayout > 0) {
             IVaultManager(core.vaultManager)
-                .executePayout(pos.projectToken, pos.user, adjustedPayout, positionId);
+                .executePayout(
+                    pos.projectToken, pos.tokenAddress, pos.user, adjustedPayout, positionId
+                );
         }
 
         // Update position state

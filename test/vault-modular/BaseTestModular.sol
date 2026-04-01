@@ -397,7 +397,11 @@ contract BaseTestModular is Test {
     function _createVault() internal {
         vm.startPrank(owner);
         address vaultAddress = vaultManager.createVault(
-            address(projectToken), DEFAULT_MIN_BET, DEFAULT_MAX_BET, DEFAULT_GRADUATION_THRESHOLD
+            address(projectToken),
+            address(projectToken),
+            DEFAULT_MIN_BET,
+            DEFAULT_MAX_BET,
+            DEFAULT_GRADUATION_THRESHOLD
         );
         vault = VaultRouter(payable(vaultAddress));
         testVault = vaultAddress;
@@ -427,12 +431,6 @@ contract BaseTestModular is Test {
 
     function _setHighLeverageConfig() internal {
         vm.prank(address(vaultManager));
-        vault.setLeverageTierConfig(
-            100_000 * 1e18, // tier1Threshold
-            500_000 * 1e18, // tier2Threshold
-            50, // tier1MaxLeverage
-            50, // tier2MaxLeverage
-            50 // tier3MaxLeverage
-        );
+        vault.setMaxLeverage(50);
     }
 }

@@ -131,9 +131,12 @@ contract PositionRouter is Initializable, UUPSUpgradeable {
 
     /**
      * @notice Open position (LONG/SHORT) with leverage
+     * @param priceToken Token whose price is tracked by the oracle (e.g. SEI, ETH)
+     * @param collateralToken ERC20 token used as collateral (e.g. USDC, USDT)
      */
     function openPosition(
-        address projectToken,
+        address priceToken,
+        address collateralToken,
         uint256 collateralAmount,
         uint8 leverage,
         uint8 direction,
@@ -143,8 +146,9 @@ contract PositionRouter is Initializable, UUPSUpgradeable {
     ) external payable returns (uint64 positionId) {
         bytes memory result = _delegateToCore(
             abi.encodeWithSignature(
-                "openPosition(address,uint256,uint8,uint8,uint256,uint256,bytes)",
-                projectToken,
+                "openPosition(address,address,uint256,uint8,uint8,uint256,uint256,bytes)",
+                priceToken,
+                collateralToken,
                 collateralAmount,
                 leverage,
                 direction,
@@ -410,7 +414,9 @@ contract PositionRouter is Initializable, UUPSUpgradeable {
             return (impactFeePaid, executionPrice, 0, false);
         }
 
-        address vaultAddress = IVaultManager(core.vaultManager).getVault(pos.projectToken);
+        // pos.projectToken = priceToken, pos.tokenAddress = collateralToken
+        address vaultAddress =
+            IVaultManager(core.vaultManager).getVault(pos.tokenAddress, pos.projectToken);
         if (vaultAddress == address(0)) {
             return (impactFeePaid, executionPrice, 0, false);
         }
