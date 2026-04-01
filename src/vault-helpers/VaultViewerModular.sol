@@ -841,6 +841,7 @@ contract VaultViewerModular {
             metrics.totalLiquidity = info.totalLiquidity;
             metrics.totalShares = info.totalShares;
             metrics.pendingPayoutsCount = info.pendingPositions;
+            metrics.pendingPayoutsValue = info.totalPendingPayoutAmount;
         } catch {
             // Default values
         }

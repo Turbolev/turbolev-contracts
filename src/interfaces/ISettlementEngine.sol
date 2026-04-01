@@ -13,6 +13,7 @@ interface ISettlementEngine {
         int256 pnl;
         int256 vaultPnL;
         uint8 finalState;
+        // excessProfit removed (A-07): profit cap excess is tracked via ProfitCapped event only
     }
 
     /**
@@ -26,7 +27,6 @@ interface ISettlementEngine {
      * @return pnl User P&L
      * @return vaultPnL Vault P&L (opposite of user)
      * @return finalState Final position state
-     * @return excessProfit Excess profit from capped trades
      */
     function processSettlement(uint64 positionId, uint256 closePrice, bool isLiquidation)
         external
@@ -36,8 +36,7 @@ interface ISettlementEngine {
             uint256 fee,
             int256 pnl,
             int256 vaultPnL,
-            uint8 finalState,
-            uint256 excessProfit
+            uint8 finalState
         );
 
     /**

@@ -130,41 +130,6 @@ contract VaultRiskLibTest is Test {
     }
 
     // ========================================================================
-    // CALCULATE UTILIZATION TESTS
-    // ========================================================================
-
-    function test_CalculateUtilization_Normal() public pure {
-        uint256 utilizationBps = VaultRiskLib.calculateUtilization(
-            1_000_000 ether, // TVL
-            100_000 ether, // Long
-            100_000 ether // Short
-        );
-
-        assertEq(utilizationBps, 2000); // (200K / 1M) * 10000 = 2000 bps = 20%
-    }
-
-    function test_CalculateUtilization_ZeroLiquidity() public pure {
-        uint256 utilizationBps = VaultRiskLib.calculateUtilization(0, 100_000 ether, 100_000 ether);
-        assertEq(utilizationBps, 0);
-    }
-
-    function test_CalculateUtilization_ZeroOI() public pure {
-        uint256 utilizationBps = VaultRiskLib.calculateUtilization(1_000_000 ether, 0, 0);
-        assertEq(utilizationBps, 0);
-    }
-
-    function test_CalculateUtilization_HighUtilization() public pure {
-        // Utilization can exceed 100%
-        uint256 utilizationBps = VaultRiskLib.calculateUtilization(
-            1_000_000 ether, // TVL
-            800_000 ether, // Long
-            500_000 ether // Short
-        );
-
-        assertEq(utilizationBps, 13_000); // 130%
-    }
-
-    // ========================================================================
     // CALCULATE NET EXPOSURE TESTS
     // ========================================================================
 
@@ -286,21 +251,6 @@ contract VaultRiskLibTest is Test {
     // ========================================================================
     // FUZZ TESTS
     // ========================================================================
-
-    function testFuzz_CalculateUtilization_NeverOverflows(
-        uint128 tvl,
-        uint128 longOI,
-        uint128 shortOI
-    ) public pure {
-        vm.assume(tvl > 0);
-
-        uint256 utilization = VaultRiskLib.calculateUtilization(tvl, longOI, shortOI);
-
-        // Utilization calculation should never overflow
-        // Result should be proportional to OI / TVL
-        uint256 expectedUtil = (uint256(longOI) + uint256(shortOI)) * 10_000 / tvl;
-        assertEq(utilization, expectedUtil);
-    }
 
     function testFuzz_CalculateNetExposure_Symmetric(uint128 longOI, uint128 shortOI) public pure {
         uint256 net1 = VaultRiskLib.calculateNetExposure(longOI, shortOI);

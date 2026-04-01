@@ -556,7 +556,7 @@ contract PositionCore is PositionModuleBase {
             uint256 settlementFee,
             int256 pnl,
             int256 vaultPnL,
-            uint8 finalState,
+            uint8 finalState
         ) = ISettlementEngine(core.settlementEngine)
             .processSettlement(positionId, closePrice, isLiquidation);
 

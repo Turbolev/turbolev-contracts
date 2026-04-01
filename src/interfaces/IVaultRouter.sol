@@ -28,6 +28,7 @@ interface IVaultRouter {
         uint256 graduatedAt;
         bool tradingEnabled;
         uint256 pendingPositions;
+        uint256 totalPendingPayoutAmount;
     }
 
     struct VaultParams {

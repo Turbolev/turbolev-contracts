@@ -300,7 +300,7 @@ contract VaultFunding is VaultModuleBase {
         uint16 tier3ImpactBps,
         uint16 tier4ImpactBps,
         uint16 tier5ImpactBps
-    ) external nonReentrant onlyVaultManagerOrHelper {
+    ) external onlyVaultManagerOrHelper {
         VaultStorageLib.FundingStorage storage funding = _funding();
 
         PriceImpactLib.ImpactConfig memory newConfig = PriceImpactLib.ImpactConfig({
@@ -327,7 +327,7 @@ contract VaultFunding is VaultModuleBase {
      * @notice Enable or disable price impact
      * @param enabled True to enable price impact
      */
-    function setImpactEnabled(bool enabled) external nonReentrant onlyVaultManagerOrHelper {
+    function setImpactEnabled(bool enabled) external onlyVaultManagerOrHelper {
         VaultStorageLib.FundingStorage storage funding = _funding();
         funding.impactEnabled = enabled;
         funding.impactConfig.isEnabled = enabled;

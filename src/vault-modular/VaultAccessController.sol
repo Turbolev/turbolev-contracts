@@ -216,14 +216,26 @@ contract VaultAccessController is
      * @param vault Vault address
      * @param role Role to grant
      * @param account Account to grant role to
-     * @dev Only callable by DEFAULT_ADMIN_ROLE or VAULT_ADMIN_ROLE
+     * @dev DEFAULT_ADMIN_ROLE can grant any vault role.
+     *      VAULT_ADMIN_ROLE can grant vault roles EXCEPT keeper roles
+     *      (VAULT_KEEPER_ROLE, POSITION_KEEPER_ROLE) — prevents privilege escalation
+     *      where a compromised vault admin could promote arbitrary addresses to keeper bots.
+     *      Keeper roles must be granted exclusively by DEFAULT_ADMIN_ROLE (Timelock).
      */
     function grantVaultRole(address vault, bytes32 role, address account) external {
-        if (!hasRole(DEFAULT_ADMIN_ROLE, msg.sender) && !hasRole(VAULT_ADMIN_ROLE, msg.sender)) {
-            revert NotAuthorized();
-        }
         if (vault == address(0) || account == address(0)) revert InvalidAddress();
         if (!registeredVaults[vault]) revert VaultNotRegistered();
+
+        if (hasRole(DEFAULT_ADMIN_ROLE, msg.sender)) {
+            // DEFAULT_ADMIN_ROLE: unrestricted
+        } else if (hasRole(VAULT_ADMIN_ROLE, msg.sender)) {
+            // VAULT_ADMIN_ROLE: cannot grant keeper roles
+            if (role == VAULT_KEEPER_ROLE || role == POSITION_KEEPER_ROLE) {
+                revert NotAuthorized();
+            }
+        } else {
+            revert NotAuthorized();
+        }
 
         vaultRoles[vault][role][account] = true;
         emit VaultRoleGranted(vault, role, account);

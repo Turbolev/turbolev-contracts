@@ -91,7 +91,7 @@ contract SettlementEngine is
         int256 pnl;
         int256 vaultPnL;
         uint8 finalState;
-        uint256 excessProfit;
+        // excessProfit removed (A-07): profit cap excess is tracked via ProfitCapped event only
     }
 
     // ========================================================================
@@ -229,7 +229,6 @@ contract SettlementEngine is
      * @return pnl User P&L
      * @return vaultPnL Vault P&L (opposite of user)
      * @return finalState Final position state
-     * @return excessProfit Excess profit from capped trades
      */
     function processSettlement(uint64 positionId, uint256 closePrice, bool isLiquidation)
         external
@@ -241,8 +240,7 @@ contract SettlementEngine is
             uint256 fee,
             int256 pnl,
             int256 vaultPnL,
-            uint8 finalState,
-            uint256 excessProfit
+            uint8 finalState
         )
     {
         // Read position directly from PositionRouter to prevent caller from passing forged data
@@ -284,14 +282,12 @@ contract SettlementEngine is
             }
 
             uint256 cappedProfit = profit;
-            excessProfit = 0;
 
             if (profit > maxProfit) {
                 cappedProfit = maxProfit;
-                excessProfit = profit - maxProfit;
 
                 emit ProfitCapped(
-                    position.positionId, profit, cappedProfit, excessProfit, block.timestamp
+                    position.positionId, profit, cappedProfit, profit - maxProfit, block.timestamp
                 );
             }
 
@@ -332,7 +328,7 @@ contract SettlementEngine is
         );
 
         // Return values directly (no struct)
-        return (won, payout, fee, pnl, vaultPnL, finalState, excessProfit);
+        return (won, payout, fee, pnl, vaultPnL, finalState);
     }
 
     /**

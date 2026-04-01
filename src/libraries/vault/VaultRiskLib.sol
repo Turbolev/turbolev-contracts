@@ -267,24 +267,4 @@ library VaultRiskLib {
             ? longExposure - shortExposure
             : shortExposure - longExposure;
     }
-
-    /**
-     * @notice Calculate vault utilization in basis points
-     * @dev Utilization = (Total OI / TVL) * 10000
-     * @param totalLiquidity Total vault liquidity
-     * @param totalLongExposure Total long open interest
-     * @param totalShortExposure Total short open interest
-     * @return utilizationBps Utilization in basis points (0-10000+)
-     */
-    function calculateUtilization(
-        uint256 totalLiquidity,
-        uint256 totalLongExposure,
-        uint256 totalShortExposure
-    ) external pure returns (uint256 utilizationBps) {
-        if (totalLiquidity == 0) {
-            return 0;
-        }
-        uint256 totalOI = totalLongExposure + totalShortExposure;
-        return (totalOI * MathLib.BASIS_POINTS) / totalLiquidity;
-    }
 }

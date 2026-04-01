@@ -122,7 +122,7 @@ contract PositionRouter is Initializable, UUPSUpgradeable {
         revert DirectTransferNotAllowed();
     }
 
-    fallback() external payable {
+    fallback() external {
         revert DirectTransferNotAllowed();
     }
 
