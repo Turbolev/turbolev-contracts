@@ -36,6 +36,9 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
     event Initialized(
         address indexed projectToken, address indexed accessController, uint256 timestamp
     );
+    event EmergencyUpgrade(
+        address indexed newImplementation, address indexed caller, uint256 timestamp
+    );
 
     // ========================================================================
     // ERRORS
@@ -44,11 +47,13 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
     error NotAuthorized();
     error InvalidAddress();
     error InvalidModule();
+    error InvalidContractAddress(address addr);
     error DelegateCallFailed();
     error AlreadyInitialized();
     error NotInitialized();
     error DirectTransferNotAllowed();
     error PendingOperationsExist(uint256 pendingPositions, uint256 pendingPayouts);
+    error MustPauseBeforeEmergencyUpgrade();
 
     // ========================================================================
     // MODULE IDs
@@ -221,7 +226,7 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
      * @notice Check position risk
      * @dev Reads storage directly to avoid staticcall storage context issues
      */
-    function checkPositionRisk(uint256 positionSize, uint8 leverage, uint8 direction)
+    function checkPositionRisk(uint256 positionSize, uint16 leverage, uint8 direction)
         external
         view
     {
@@ -1092,6 +1097,7 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
         }
 
         if (newModule == address(0)) revert InvalidModule();
+        if (newModule.code.length == 0) revert InvalidContractAddress(newModule);
 
         // Check no pending operations before allowing module swap
         uint256 pendingPositions = core.vaultInfo.pendingPositions;
@@ -1160,21 +1166,26 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
     // UUPS UPGRADE
     // ========================================================================
 
-    function _authorizeUpgrade(
-        address /* newImplementation */
-    )
-        internal
-        override
-    {
+    function _authorizeUpgrade(address newImplementation) internal override {
         VaultStorageLib.CoreStorage storage core = VaultStorageLib.getCoreStorage();
+        VaultAccessController ac = VaultAccessController(core.accessController);
 
-        // Only VaultManager or admin can upgrade
-        if (msg.sender != core.vaultManager) {
-            VaultAccessController ac = VaultAccessController(core.accessController);
-            if (!ac.hasRole(ac.UPGRADER_ROLE(), msg.sender)) {
-                revert NotAuthorized();
-            }
+        // Path 1: Normal upgrade via Timelock (UPGRADER_ROLE)
+        if (ac.hasRole(ac.UPGRADER_ROLE(), msg.sender)) {
+            return;
         }
+
+        // Path 2: Emergency upgrade via Emergency/Guardian role — only if vault is paused
+        if (
+            ac.hasRole(ac.EMERGENCY_ROLE(), msg.sender)
+                || ac.hasRole(ac.GUARDIAN_ROLE(), msg.sender)
+        ) {
+            if (!core.paused) revert MustPauseBeforeEmergencyUpgrade();
+            emit EmergencyUpgrade(newImplementation, msg.sender, block.timestamp);
+            return;
+        }
+
+        revert NotAuthorized();
     }
 }
 

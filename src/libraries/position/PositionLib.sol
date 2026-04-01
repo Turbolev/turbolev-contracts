@@ -47,10 +47,6 @@ library PositionLib {
     uint8 public constant BET_DIRECTION_LONG = 1; // Long (predict price increase)
     uint8 public constant BET_DIRECTION_SHORT = 2; // Short (predict price decrease)
 
-    // Legacy aliases for backward compatibility
-    uint8 public constant BET_DIRECTION_UP = 1; // Alias for LONG
-    uint8 public constant BET_DIRECTION_DOWN = 2; // Alias for SHORT
-
     // ========================================================================
     // LEVERAGE & LIQUIDATION CONSTANTS
     // ========================================================================
@@ -80,7 +76,7 @@ library PositionLib {
     struct Position {
         uint64 positionId; // 8 bytes
         uint8 leverage; // 1 byte - Leverage multiplier (1-100)
-        uint8 direction; // 1 byte - BET_DIRECTION_UP or BET_DIRECTION_DOWN
+        uint8 direction; // 1 byte - BET_DIRECTION_LONG or BET_DIRECTION_SHORT
         uint8 state; // 1 byte - POSITION_STATE_*
         uint8 closeRequestCount; // 1 byte
         uint8 maxCloseRequests; // 1 byte

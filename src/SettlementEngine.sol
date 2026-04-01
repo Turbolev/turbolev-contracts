@@ -14,6 +14,10 @@ import "./interfaces/IAssetVault.sol";
 import "./interfaces/IPriceFeedManager.sol";
 import "./interfaces/IVaultAccessController.sol";
 
+interface IPositionRouter {
+    function getPosition(uint64 positionId) external view returns (PositionLib.Position memory);
+}
+
 /**
  * @title SettlementEngine
  * @notice Contract for handling settlement and payout calculation - Upgradeable
@@ -216,7 +220,7 @@ contract SettlementEngine is
     /**
      * @notice Process settlement logic with synthetic leverage
      * @dev Main settlement function - calculates payout, fees, and P&L
-     * @param position Position data
+     * @param positionId Position ID — position data is read directly from PositionRouter
      * @param closePrice Close price
      * @param isLiquidation True if this is a liquidation
      * @return won Whether user won
@@ -227,11 +231,7 @@ contract SettlementEngine is
      * @return finalState Final position state
      * @return excessProfit Excess profit from capped trades
      */
-    function processSettlement(
-        PositionLib.Position calldata position,
-        uint256 closePrice,
-        bool isLiquidation
-    )
+    function processSettlement(uint64 positionId, uint256 closePrice, bool isLiquidation)
         external
         onlyPositionManager
         whenNotPaused
@@ -245,6 +245,10 @@ contract SettlementEngine is
             uint256 excessProfit
         )
     {
+        // Read position directly from PositionRouter to prevent caller from passing forged data
+        PositionLib.Position memory position =
+            IPositionRouter(positionManager).getPosition(positionId);
+
         // Calculate P&L with leverage
         (pnl,) = PositionLib.calculateUnrealizedPnL(position, closePrice);
 

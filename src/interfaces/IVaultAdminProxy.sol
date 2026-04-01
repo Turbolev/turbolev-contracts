@@ -52,25 +52,6 @@ interface IVaultAdminProxy {
     function priceFeedManager() external view returns (address);
 
     // ========================================================================
-    // BATCH OPERATIONS (VAULT_KEEPER_ROLE)
-    // ========================================================================
-
-    /**
-     * @notice Batch update hourly funding rates for all vaults
-     * @return updatedCount Number of vaults successfully updated
-     */
-    function batchUpdateHourlyFunding() external returns (uint256 updatedCount);
-
-    /**
-     * @notice Update hourly funding for specific vaults
-     * @param vaults Array of vault addresses to update
-     * @return updatedCount Number of vaults successfully updated
-     */
-    function batchUpdateHourlyFundingForVaults(address[] calldata vaults)
-        external
-        returns (uint256 updatedCount);
-
-    // ========================================================================
     // VAULT ADMIN FUNCTIONS (VAULT_ADMIN_ROLE)
     // ========================================================================
 

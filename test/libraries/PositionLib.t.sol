@@ -73,8 +73,6 @@ contract PositionLibTest is Test {
     function test_Constants_BetDirections() public {
         assertEq(PositionLib.BET_DIRECTION_LONG, 1, "LONG should be 1");
         assertEq(PositionLib.BET_DIRECTION_SHORT, 2, "SHORT should be 2");
-        assertEq(PositionLib.BET_DIRECTION_UP, 1, "UP (alias) should be 1");
-        assertEq(PositionLib.BET_DIRECTION_DOWN, 2, "DOWN (alias) should be 2");
     }
 
     function test_Constants_LeverageAndLiquidation() public {
@@ -90,7 +88,7 @@ contract PositionLibTest is Test {
         assertEq(
             PositionLib.MIN_POSITION_HOLD_TIME, 30, "MIN_POSITION_HOLD_TIME should be 30 (H-05 fix)"
         );
-        assertEq(PositionLib.MAX_PROFIT_CAP_MULTIPLIER, 3, "MAX_PROFIT_CAP_MULTIPLIER should be 3");
+        assertEq(PositionLib.MAX_PROFIT_CAP_MULTIPLIER, 2, "MAX_PROFIT_CAP_MULTIPLIER should be 2");
         assertEq(PositionLib.MAX_CLOSE_REQUESTS, 3, "MAX_CLOSE_REQUESTS should be 3");
     }
 

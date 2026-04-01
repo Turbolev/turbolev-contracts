@@ -91,6 +91,40 @@ contract VaultStorageLibTest is Test {
     }
 
     // ========================================================================
+    // HARDCODED SLOT CONSTANT VERIFICATION TESTS
+    // Ensures pre-calculated constants match the dynamic EIP-7201 formula.
+    // If any of these fail after an upgrade, the storage layout has changed.
+    // ========================================================================
+
+    function test_SlotConstants_MatchDynamicFormula() public pure {
+        assertEq(
+            VaultStorageLib.SLOT_CORE,
+            VaultStorageLib.calculateEIP7201Slot("boolean.vault.core"),
+            "SLOT_CORE mismatch"
+        );
+        assertEq(
+            VaultStorageLib.SLOT_FUNDING,
+            VaultStorageLib.calculateEIP7201Slot("boolean.vault.funding"),
+            "SLOT_FUNDING mismatch"
+        );
+        assertEq(
+            VaultStorageLib.SLOT_REWARDS,
+            VaultStorageLib.calculateEIP7201Slot("boolean.vault.rewards"),
+            "SLOT_REWARDS mismatch"
+        );
+        assertEq(
+            VaultStorageLib.SLOT_RISK,
+            VaultStorageLib.calculateEIP7201Slot("boolean.vault.risk"),
+            "SLOT_RISK mismatch"
+        );
+        assertEq(
+            VaultStorageLib.SLOT_ROUTER,
+            VaultStorageLib.calculateEIP7201Slot("boolean.vault.router"),
+            "SLOT_ROUTER mismatch"
+        );
+    }
+
+    // ========================================================================
     // NAMESPACE COLLISION TESTS
     // ========================================================================
 

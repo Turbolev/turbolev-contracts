@@ -55,6 +55,12 @@ contract PriceFeedManager is
     /// @notice Mapping to check if provider ID is registered
     mapping(bytes32 => bool) private providerRegistered;
 
+    /// @notice Index of each provider ID in providerIdsList (1-based; 0 = not in list)
+    mapping(bytes32 => uint256) private providerIdsListIndex;
+
+    /// @notice Number of tokens currently using each provider (primary or secondary)
+    mapping(bytes32 => uint256) private providerTokenCount;
+
     // ========================================================================
     // PREDEFINED PROVIDER IDs (for common use)
     // ========================================================================
@@ -95,13 +101,14 @@ contract PriceFeedManager is
     // ========================================================================
 
     /// @dev Storage gap to allow for new variables in future versions
-    /// @notice Reduced from 46 to 42 slots due to circuit breaker and accessController additions:
+    /// @notice Reduced from 46 to 41 slots due to additions:
     /// - circuitBreakerConfig: 1 slot (packed struct)
     /// - lastPriceRecords: 1 slot (mapping)
     /// - circuitBreakerBypassed: 1 slot (mapping)
     /// - accessController: 1 slot
-    /// Total new slots used: 4, remaining gap: 46 - 4 = 42
-    uint256[42] private __gap;
+    /// - providerTokenCount: 1 slot (mapping)
+    /// Total new slots used: 5, remaining gap: 46 - 5 = 41
+    uint256[41] private __gap;
 
     // ========================================================================
     // EVENTS
@@ -262,6 +269,7 @@ contract PriceFeedManager is
         oracleProviders[providerId] = provider;
         providerRegistered[providerId] = true;
         providerIdsList.push(providerId);
+        providerIdsListIndex[providerId] = providerIdsList.length; // 1-based index
 
         emit OracleProviderRegistered(providerId, provider.oracleContract, provider.oracleType);
     }
@@ -292,6 +300,7 @@ contract PriceFeedManager is
             oracleProviders[providerId] = provider;
             providerRegistered[providerId] = true;
             providerIdsList.push(providerId);
+            providerIdsListIndex[providerId] = providerIdsList.length; // 1-based index
 
             emit OracleProviderRegistered(providerId, provider.oracleContract, provider.oracleType);
         }
@@ -327,12 +336,25 @@ contract PriceFeedManager is
         if (!providerRegistered[providerId]) {
             revert ProviderNotFound(providerId);
         }
-
-        // Note: In production, you might want to check if any token is using this provider
-        // For simplicity, we allow removal here
+        if (providerTokenCount[providerId] > 0) {
+            revert ProviderInUse(providerId);
+        }
 
         delete oracleProviders[providerId];
         providerRegistered[providerId] = false;
+
+        // Swap-and-pop to remove from providerIdsList in O(1)
+        uint256 idx = providerIdsListIndex[providerId]; // 1-based
+        if (idx > 0) {
+            uint256 lastIdx = providerIdsList.length;
+            if (idx != lastIdx) {
+                bytes32 lastId = providerIdsList[lastIdx - 1];
+                providerIdsList[idx - 1] = lastId;
+                providerIdsListIndex[lastId] = idx;
+            }
+            providerIdsList.pop();
+            delete providerIdsListIndex[providerId];
+        }
 
         emit OracleProviderRemoved(providerId);
     }
@@ -412,7 +434,22 @@ contract PriceFeedManager is
             revert ProviderNotFound(config.secondaryProviderId);
         }
 
+        // Decrement counters for old providers before overwriting
+        PriceFeedConfig memory oldConfig = priceFeedConfigs[projectToken];
+        if (oldConfig.primaryProviderId != bytes32(0)) {
+            providerTokenCount[oldConfig.primaryProviderId]--;
+        }
+        if (oldConfig.secondaryProviderId != bytes32(0)) {
+            providerTokenCount[oldConfig.secondaryProviderId]--;
+        }
+
         priceFeedConfigs[projectToken] = config;
+
+        // Increment counters for new providers
+        providerTokenCount[config.primaryProviderId]++;
+        if (config.secondaryProviderId != bytes32(0)) {
+            providerTokenCount[config.secondaryProviderId]++;
+        }
 
         emit PriceFeedConfigUpdated(
             projectToken, config.primaryProviderId, config.secondaryProviderId
@@ -449,7 +486,22 @@ contract PriceFeedManager is
         }
 
         // ========== STEP 2: Save config ==========
+        // Decrement counters for old providers before overwriting
+        PriceFeedConfig memory oldConfig = priceFeedConfigs[projectToken];
+        if (oldConfig.primaryProviderId != bytes32(0)) {
+            providerTokenCount[oldConfig.primaryProviderId]--;
+        }
+        if (oldConfig.secondaryProviderId != bytes32(0)) {
+            providerTokenCount[oldConfig.secondaryProviderId]--;
+        }
+
         priceFeedConfigs[projectToken] = config;
+
+        // Increment counters for new providers
+        providerTokenCount[config.primaryProviderId]++;
+        if (config.secondaryProviderId != bytes32(0)) {
+            providerTokenCount[config.secondaryProviderId]++;
+        }
 
         // ========== STEP 3: Fetch initial price ==========
         OracleProvider memory primary = oracleProviders[config.primaryProviderId];
@@ -500,7 +552,12 @@ contract PriceFeedManager is
             revert ProviderNotFound(providerId);
         }
 
+        bytes32 oldProviderId = priceFeedConfigs[projectToken].primaryProviderId;
+        if (oldProviderId != bytes32(0)) {
+            providerTokenCount[oldProviderId]--;
+        }
         priceFeedConfigs[projectToken].primaryProviderId = providerId;
+        providerTokenCount[providerId]++;
 
         emit PrimaryProviderSet(projectToken, providerId);
         emit PriceFeedConfigUpdated(
@@ -524,7 +581,14 @@ contract PriceFeedManager is
             revert ProviderNotFound(providerId);
         }
 
+        bytes32 oldProviderId = priceFeedConfigs[projectToken].secondaryProviderId;
+        if (oldProviderId != bytes32(0)) {
+            providerTokenCount[oldProviderId]--;
+        }
         priceFeedConfigs[projectToken].secondaryProviderId = providerId;
+        if (providerId != bytes32(0)) {
+            providerTokenCount[providerId]++;
+        }
 
         emit SecondaryProviderSet(projectToken, providerId);
         emit PriceFeedConfigUpdated(
@@ -690,8 +754,9 @@ contract PriceFeedManager is
             revert InvalidOraclePrice();
         }
 
-        // Run circuit breaker — revert if price deviation is abnormal
-        if (!_checkCircuitBreaker(projectToken, fetchedPrice)) {
+        // Validate against circuit breaker — read-only path, baseline is NOT updated.
+        // Baseline updates only happen when oracle data is actually pushed (getPriceWithUpdate).
+        if (!_validateCircuitBreaker(projectToken, fetchedPrice)) {
             LastPriceRecord memory lastRecord = lastPriceRecords[projectToken];
             uint256 deviationBps = _calculateDeviationBps(lastRecord.price, fetchedPrice);
             revert CircuitBreakerTripped(deviationBps, circuitBreakerConfig.maxDeviationBps);
@@ -768,8 +833,8 @@ contract PriceFeedManager is
             revert InvalidOraclePrice();
         }
 
-        // Check circuit breaker before returning price
-        if (!_checkCircuitBreaker(projectToken, fetchedPrice)) {
+        // Validate against circuit breaker — read-only path, baseline is NOT updated.
+        if (!_validateCircuitBreaker(projectToken, fetchedPrice)) {
             LastPriceRecord memory lastRecord = lastPriceRecords[projectToken];
             uint256 deviationBps = _calculateDeviationBps(lastRecord.price, fetchedPrice);
             revert CircuitBreakerTripped(deviationBps, circuitBreakerConfig.maxDeviationBps);
@@ -1123,11 +1188,59 @@ contract PriceFeedManager is
     }
 
     /**
-     * @notice Check circuit breaker and update last price record
+     * @notice Validate price against circuit breaker WITHOUT updating the baseline.
      * @param projectToken Token address
      * @param newPrice New price to validate
      * @return valid True if price passes circuit breaker check
-     * @dev Returns true and updates record if check passes, returns false if triggered
+     * @dev Use for read-only price fetches (getPriceChecked, getPriceWithFallback).
+     *      Baseline must only be updated when an actual oracle update is pushed
+     *      (getPriceWithUpdate, setPriceFeedConfigWithInit), otherwise an attacker
+     *      can gradually shift the baseline by repeatedly calling read functions
+     *      with small price movements (M-10).
+     */
+    function _validateCircuitBreaker(address projectToken, uint256 newPrice)
+        internal
+        returns (bool valid)
+    {
+        // Skip if disabled globally or bypassed for this token
+        if (!circuitBreakerConfig.enabled || circuitBreakerBypassed[projectToken]) {
+            return true;
+        }
+
+        LastPriceRecord memory lastRecord = lastPriceRecords[projectToken];
+
+        // First price MUST be set via setPriceFeedConfigWithInit
+        if (lastRecord.price == 0 || lastRecord.timestamp == 0) {
+            revert InitialPriceNotSet(projectToken);
+        }
+
+        uint256 timeDelta = block.timestamp - lastRecord.timestamp;
+        if (timeDelta > circuitBreakerConfig.minDeviationWindow) {
+            // Outside time window — accept without deviation check.
+            // Baseline is NOT updated here; only oracle-push paths update it.
+            return true;
+        }
+
+        uint256 deviationBps = _calculateDeviationBps(lastRecord.price, newPrice);
+
+        if (deviationBps > circuitBreakerConfig.maxDeviationBps) {
+            emit CircuitBreakerTriggered(
+                projectToken, lastRecord.price, newPrice, deviationBps, timeDelta
+            );
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * @notice Validate price against circuit breaker AND update the baseline.
+     * @param projectToken Token address
+     * @param newPrice New price to validate
+     * @return valid True if price passes circuit breaker check
+     * @dev Use ONLY when an actual oracle update has been pushed (getPriceWithUpdate,
+     *      setPriceFeedConfigWithInit). Updating the baseline on every read would
+     *      allow gradual baseline manipulation (M-10).
      */
     function _checkCircuitBreaker(address projectToken, uint256 newPrice)
         internal
@@ -1142,24 +1255,19 @@ contract PriceFeedManager is
         LastPriceRecord memory lastRecord = lastPriceRecords[projectToken];
 
         // First price MUST be set via setPriceFeedConfigWithInit
-        // This prevents circuit breaker bypass by manipulating the first price
         if (lastRecord.price == 0 || lastRecord.timestamp == 0) {
             revert InitialPriceNotSet(projectToken);
         }
 
-        // Check time window - only validate deviation if within the deviation window
-        // This allows gradual price movements over longer periods
         uint256 timeDelta = block.timestamp - lastRecord.timestamp;
         if (timeDelta > circuitBreakerConfig.minDeviationWindow) {
-            // Price update is outside the time window - accept and update record
+            // Outside time window — accept and update baseline.
             _updateLastPriceRecord(projectToken, newPrice);
             return true;
         }
 
-        // Calculate deviation between last recorded price and new price
         uint256 deviationBps = _calculateDeviationBps(lastRecord.price, newPrice);
 
-        // Check if deviation exceeds maximum allowed threshold
         if (deviationBps > circuitBreakerConfig.maxDeviationBps) {
             emit CircuitBreakerTriggered(
                 projectToken, lastRecord.price, newPrice, deviationBps, timeDelta
@@ -1167,7 +1275,7 @@ contract PriceFeedManager is
             return false;
         }
 
-        // Price is valid - update last price record
+        // Price is valid — update baseline only on oracle-push paths
         _updateLastPriceRecord(projectToken, newPrice);
         return true;
     }

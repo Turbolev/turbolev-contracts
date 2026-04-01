@@ -126,6 +126,7 @@ contract VaultRewards is VaultModuleBase {
 
                 if (rewardResult.isEligible && rewardResult.reward > 0) {
                     rewards.claimableRewards[lp] += rewardResult.reward;
+                    rewards.rewardsPool += rewardResult.reward;
                 }
             }
             rewards.finalizeLPIndex = endIndex;
@@ -136,6 +137,9 @@ contract VaultRewards is VaultModuleBase {
         rewards.dailyNetPnL = 0;
         delete rewards.dailyPositionIds;
 
+        isComplete = core.vaultLPs.length <= MAX_LPS_PER_FINALIZE;
+        rewards.isFinalizing = !isComplete;
+
         emit DailyRewardFinalized(
             address(this),
             today,
@@ -144,8 +148,6 @@ contract VaultRewards is VaultModuleBase {
             finalizedPnL,
             block.timestamp
         );
-
-        return core.vaultLPs.length <= MAX_LPS_PER_FINALIZE;
     }
 
     /**
@@ -202,10 +204,14 @@ contract VaultRewards is VaultModuleBase {
 
             if (rewardResult.isEligible && rewardResult.reward > 0) {
                 rewards.claimableRewards[lp] += rewardResult.reward;
+                rewards.rewardsPool += rewardResult.reward;
             }
         }
 
         rewards.finalizeLPIndex = endIndex;
+        if (complete) {
+            rewards.isFinalizing = false;
+        }
         return complete;
     }
 
@@ -243,11 +249,10 @@ contract VaultRewards is VaultModuleBase {
 
         if (rewardAmount == 0) revert NoRewardsToClaim();
 
-        // Get vault balance and use library to cap rewards
-        uint256 vaultBalance = IERC20(core.projectToken).balanceOf(address(this));
-
+        // Cap against rewardsPool — the accounting variable tracking only tokens
+        // allocated for rewards, excluding LP liquidity, feePool, and betCollateral.
         (uint256 actualRewards, bool wasCapped) =
-            VaultRewardsLib.capRewardsAtBalance(rewardAmount, vaultBalance);
+            VaultRewardsLib.capRewardsAtBalance(rewardAmount, rewards.rewardsPool);
 
         if (wasCapped) {
             emit RewardsCapped(msg.sender, rewardAmount, actualRewards, block.timestamp);
@@ -264,6 +269,7 @@ contract VaultRewards is VaultModuleBase {
         lpPos.lastRewardClaim = block.timestamp;
         lpPos.totalRewardsClaimed += actualRewards;
         rewards.claimableRewards[msg.sender] -= actualRewards;
+        rewards.rewardsPool -= actualRewards;
 
         // Transfer
         IERC20(core.projectToken).safeTransfer(msg.sender, actualRewards);

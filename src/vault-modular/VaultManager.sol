@@ -104,10 +104,19 @@ contract VaultManager is
     event VaultDeactivated(address indexed vaultAddress, uint256 timestamp);
     event VaultReactivated(address indexed vaultAddress, uint256 timestamp);
     event EmergencyPauseAllTriggered(address indexed caller, uint256 timestamp);
+    event EmergencyPauseBatchTriggered(
+        address indexed caller, uint256 startIndex, uint256 count, uint256 timestamp
+    );
     event EmergencyUnpauseAllTriggered(address indexed caller, uint256 timestamp);
+    event EmergencyUnpauseBatchTriggered(
+        address indexed caller, uint256 startIndex, uint256 count, uint256 timestamp
+    );
     event AccessControllerUpdated(address indexed oldController, address indexed newController);
     event VaultRouterImplUpdated(address indexed oldImpl, address indexed newImpl);
     event ModulesUpdated(address coreModule, address fundingModule, address rewardsModule);
+    event PositionManagerUpdated(
+        address indexed oldPositionManager, address indexed newPositionManager
+    );
 
     // Emergency events
     event EmergencyPauseVault(address indexed vault, address indexed caller, uint256 timestamp);
@@ -132,6 +141,7 @@ contract VaultManager is
     error NotAuthorized();
     error LengthMismatch();
     error BatchTooLarge();
+    error InvalidBatchRange();
     error MustPauseBeforeEmergencyUpgrade();
     error NotAContract(address addr);
 
@@ -229,6 +239,7 @@ contract VaultManager is
         if (_projectToken == address(0)) {
             revert InvalidAddress();
         }
+        if (positionManager == address(0)) revert InvalidAddress();
         if (vaultsByProjectToken[_projectToken] != address(0)) {
             revert DuplicateProjectToken();
         }
@@ -415,12 +426,77 @@ contract VaultManager is
     }
 
     /**
-     * @notice Emergency pause all
+     * @notice Emergency pause all vaults in a single batch (safe only when vault count is small)
+     * @dev Reverts if allVaults.length > MAX_BATCH_SIZE to prevent OOG.
+     *      Use emergencyPauseBatch() for paginated execution when vault count is large.
      */
     function emergencyPauseAll() external onlyEmergencyRole {
+        if (allVaults.length > MAX_BATCH_SIZE) revert BatchTooLarge();
         _pause();
+        _pauseVaultRange(0, allVaults.length);
+        emit EmergencyPauseAllTriggered(msg.sender, block.timestamp);
+    }
 
-        for (uint256 i = 0; i < allVaults.length; i++) {
+    /**
+     * @notice Emergency pause vaults in a paginated range
+     * @param startIndex First index in allVaults to process (inclusive)
+     * @param count Number of vaults to process (capped at MAX_BATCH_SIZE)
+     * @dev Call repeatedly with increasing startIndex until all vaults are covered.
+     *      VaultManager itself is paused on the first call (startIndex == 0).
+     */
+    function emergencyPauseBatch(uint256 startIndex, uint256 count) external onlyEmergencyRole {
+        if (count == 0 || count > MAX_BATCH_SIZE) revert BatchTooLarge();
+        if (startIndex >= allVaults.length) revert InvalidBatchRange();
+
+        if (startIndex == 0) _pause();
+
+        uint256 end = startIndex + count;
+        if (end > allVaults.length) end = allVaults.length;
+
+        _pauseVaultRange(startIndex, end);
+        emit EmergencyPauseBatchTriggered(msg.sender, startIndex, end - startIndex, block.timestamp);
+    }
+
+    /**
+     * @notice Emergency unpause all vaults in a single batch (safe only when vault count is small)
+     * @dev Reverts if allVaults.length > MAX_BATCH_SIZE to prevent OOG.
+     *      Use emergencyUnpauseBatch() for paginated execution when vault count is large.
+     */
+    function emergencyUnpauseAll() external onlyEmergencyRole {
+        if (allVaults.length > MAX_BATCH_SIZE) revert BatchTooLarge();
+        _unpause();
+        _unpauseVaultRange(0, allVaults.length);
+        emit EmergencyUnpauseAllTriggered(msg.sender, block.timestamp);
+    }
+
+    /**
+     * @notice Emergency unpause vaults in a paginated range
+     * @param startIndex First index in allVaults to process (inclusive)
+     * @param count Number of vaults to process (capped at MAX_BATCH_SIZE)
+     * @dev Call repeatedly with increasing startIndex until all vaults are covered.
+     *      VaultManager itself is unpaused on the first call (startIndex == 0).
+     */
+    function emergencyUnpauseBatch(uint256 startIndex, uint256 count) external onlyEmergencyRole {
+        if (count == 0 || count > MAX_BATCH_SIZE) revert BatchTooLarge();
+        if (startIndex >= allVaults.length) revert InvalidBatchRange();
+
+        if (startIndex == 0) _unpause();
+
+        uint256 end = startIndex + count;
+        if (end > allVaults.length) end = allVaults.length;
+
+        _unpauseVaultRange(startIndex, end);
+        emit EmergencyUnpauseBatchTriggered(
+            msg.sender, startIndex, end - startIndex, block.timestamp
+        );
+    }
+
+    // ========================================================================
+    // INTERNAL HELPERS
+    // ========================================================================
+
+    function _pauseVaultRange(uint256 start, uint256 end) internal {
+        for (uint256 i = start; i < end; i++) {
             address vault = allVaults[i];
             if (vaultInfos[vault].isActive) {
                 try IVaultRouter(vault).paused() returns (bool isPaused) {
@@ -430,17 +506,10 @@ contract VaultManager is
                 } catch { }
             }
         }
-
-        emit EmergencyPauseAllTriggered(msg.sender, block.timestamp);
     }
 
-    /**
-     * @notice Emergency unpause all
-     */
-    function emergencyUnpauseAll() external onlyEmergencyRole {
-        _unpause();
-
-        for (uint256 i = 0; i < allVaults.length; i++) {
+    function _unpauseVaultRange(uint256 start, uint256 end) internal {
+        for (uint256 i = start; i < end; i++) {
             address vault = allVaults[i];
             if (vaultInfos[vault].isActive) {
                 try IVaultRouter(vault).paused() returns (bool isPaused) {
@@ -450,8 +519,6 @@ contract VaultManager is
                 } catch { }
             }
         }
-
-        emit EmergencyUnpauseAllTriggered(msg.sender, block.timestamp);
     }
 
     // ========================================================================
@@ -555,7 +622,11 @@ contract VaultManager is
 
     function setPositionManager(address _positionManager) external onlyOwner whenNotPaused {
         if (_positionManager == address(0)) revert InvalidAddress();
+        address oldPositionManager = positionManager;
+        VaultAccessController(accessController)
+            .updatePositionManagerRole(oldPositionManager, _positionManager);
         positionManager = _positionManager;
+        emit PositionManagerUpdated(oldPositionManager, _positionManager);
     }
 
     function setAccessController(address _accessController) external onlyOwner whenNotPaused {
@@ -610,6 +681,8 @@ contract VaultManager is
      *      This ensures users have opportunity to withdraw before emergency upgrades
      */
     function _authorizeUpgrade(address newImplementation) internal override {
+        if (newImplementation.code.length == 0) revert NotAContract(newImplementation);
+
         VaultAccessController ac = VaultAccessController(accessController);
 
         // Path 1: Normal upgrade via Timelock (UPGRADER_ROLE)
@@ -644,6 +717,11 @@ contract VaultManager is
 
     function getAllVaults() external view returns (address[] memory) {
         return allVaults;
+    }
+
+    /// @notice Total number of vaults (use with MAX_BATCH_SIZE to calculate batch count for emergencyPauseBatch)
+    function vaultCount() external view returns (uint256) {
+        return allVaults.length;
     }
 
     function vaultProjectToken(address vaultAddress) external view returns (address projectToken) {

@@ -51,7 +51,7 @@ library VaultRiskLib {
         uint256 totalLiquidity;
         // Position params
         uint256 positionSize;
-        uint8 leverage;
+        uint16 leverage;
         uint8 direction; // 1 = LONG, 2 = SHORT
         // Vault limits
         uint256 minBetAmount;
@@ -90,7 +90,7 @@ library VaultRiskLib {
      *      8. Total OI cap check → ExceedsTotalOICap()
      * @param params Struct containing all risk parameters
      */
-    function checkPositionRisk(RiskCheckParams memory params) external pure {
+    function checkPositionRisk(RiskCheckParams memory params) internal pure {
         // 1. Check if vault is paused
         if (params.isPaused) {
             revert VaultPaused();
@@ -327,7 +327,7 @@ library VaultRiskLib {
      * @notice Calculate collateral from position size and leverage
      * @dev collateral = positionSize / leverage
      */
-    function calculateCollateral(uint256 positionSize, uint8 leverage)
+    function calculateCollateral(uint256 positionSize, uint16 leverage)
         external
         pure
         returns (uint256)
@@ -339,7 +339,7 @@ library VaultRiskLib {
      * @notice Calculate position size from collateral and leverage
      * @dev positionSize = collateral * leverage
      */
-    function calculatePositionSize(uint256 collateral, uint8 leverage)
+    function calculatePositionSize(uint256 collateral, uint16 leverage)
         external
         pure
         returns (uint256)

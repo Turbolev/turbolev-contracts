@@ -46,6 +46,7 @@ contract PositionRouter is Initializable, UUPSUpgradeable {
     error NotAuthorized();
     error InvalidAddress();
     error InvalidModule();
+    error InvalidContractAddress(address addr);
     error DelegateCallFailed();
     error AlreadyInitialized();
     error NotInitialized();
@@ -87,6 +88,9 @@ contract PositionRouter is Initializable, UUPSUpgradeable {
 
         // Validate addresses
         if (_accessController == address(0)) revert InvalidAddress();
+        if (_settlementEngine == address(0)) revert InvalidAddress();
+        if (_vaultManager == address(0)) revert InvalidAddress();
+        if (_priceFeedManager == address(0)) revert InvalidAddress();
         if (_coreModule == address(0)) revert InvalidModule();
 
         // Set router storage
@@ -569,6 +573,7 @@ contract PositionRouter is Initializable, UUPSUpgradeable {
         }
 
         if (newModule == address(0)) revert InvalidModule();
+        if (newModule.code.length == 0) revert InvalidContractAddress(newModule);
 
         PositionStorageLib.RouterStorage storage router = PositionStorageLib.getRouterStorage();
         address oldModule;

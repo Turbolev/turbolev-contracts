@@ -24,6 +24,8 @@ library VaultLiquidityLib {
     error DepositTooSmall();
     error InsufficientLiquidity();
     error InsufficientShares();
+    error ZeroTotalLiquidity();
+    error ZeroTotalShares();
 
     // ========================================================================
     // STRUCTS
@@ -113,6 +115,7 @@ library VaultLiquidityLib {
     {
         if (params.shares == 0) revert InvalidAmount();
         if (params.shares > params.totalShares) revert InsufficientShares();
+        if (params.totalLiquidity == 0) revert ZeroTotalLiquidity();
 
         // Calculate gross amount based on total liquidity
         result.grossAmount = (params.shares * params.totalLiquidity) / params.totalShares;
@@ -156,6 +159,7 @@ library VaultLiquidityLib {
         if (totalShares == 0) {
             shares = amount * INITIAL_SHARE_MULTIPLIER;
         } else {
+            if (totalLiquidity == 0) revert ZeroTotalLiquidity();
             shares = (amount * totalShares) / totalLiquidity;
         }
 

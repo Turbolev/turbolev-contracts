@@ -85,35 +85,6 @@ contract VaultAdminProxyTest is BaseTestModular {
     // BATCH OPERATIONS TESTS
     // ========================================================================
 
-    function test_BatchUpdateHourlyFunding() public {
-        // Enable funding on vault
-        vm.prank(owner);
-        IVaultRouter(testVault).setTradingEnabled(true);
-
-        // Call batch update as keeper
-        vm.prank(keeper);
-        uint256 updatedCount = vaultAdminProxy.batchUpdateHourlyFunding();
-
-        // Should have updated at least the test vault
-        assertGe(updatedCount, 0);
-    }
-
-    function test_BatchUpdateHourlyFunding_RevertIfNotKeeper() public {
-        vm.prank(user1);
-        vm.expectRevert(IVaultAdminProxy.NotAuthorized.selector);
-        vaultAdminProxy.batchUpdateHourlyFunding();
-    }
-
-    function test_BatchUpdateHourlyFundingForVaults() public {
-        address[] memory vaults = new address[](1);
-        vaults[0] = testVault;
-
-        vm.prank(keeper);
-        uint256 updatedCount = vaultAdminProxy.batchUpdateHourlyFundingForVaults(vaults);
-
-        assertGe(updatedCount, 0);
-    }
-
     // ========================================================================
     // VAULT ADMIN FUNCTIONS TESTS
     // ========================================================================

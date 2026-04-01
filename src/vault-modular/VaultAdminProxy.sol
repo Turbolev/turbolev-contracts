@@ -65,7 +65,7 @@ contract VaultAdminProxy is Initializable, UUPSUpgradeable, ReentrancyGuardUpgra
         uint256 successCount, uint256 failCount, uint256 timestamp
     );
     event FeesWithdrawn(address indexed vault, uint256 amount, uint256 timestamp);
-    event BatchFundingUpdated(uint256 vaultsUpdated, uint256 timestamp);
+
     event PriceFeedManagerUpdated(address indexed oldManager, address indexed newManager);
     event VaultLeverageTierConfigUpdated(address indexed vault, uint256 timestamp);
     event VaultTotalOITierConfigUpdated(address indexed vault, uint256 timestamp);
@@ -107,6 +107,7 @@ contract VaultAdminProxy is Initializable, UUPSUpgradeable, ReentrancyGuardUpgra
     {
         if (_vaultManager == address(0)) revert InvalidAddress();
         if (_accessController == address(0)) revert InvalidAddress();
+        if (_priceFeedManager == address(0)) revert InvalidAddress();
 
         __UUPSUpgradeable_init();
         __ReentrancyGuard_init();
@@ -156,39 +157,6 @@ contract VaultAdminProxy is Initializable, UUPSUpgradeable, ReentrancyGuardUpgra
     // ========================================================================
     // BATCH OPERATIONS (VAULT_KEEPER_ROLE)
     // ========================================================================
-
-    /**
-     * @notice Batch update hourly funding rates for all vaults
-     * @dev Kept for interface compatibility; no-op since funding is now settled upfront.
-     * @return updatedCount Always returns 0 (no periodic update needed)
-     */
-    function batchUpdateHourlyFunding()
-        external
-        nonReentrant
-        onlyVaultKeeper
-        returns (uint256 updatedCount)
-    {
-        // Price impact is settled upfront at order creation; no periodic update needed.
-        emit BatchFundingUpdated(0, block.timestamp);
-        return 0;
-    }
-
-    /**
-     * @notice Update hourly funding for specific vaults
-     * @dev Kept for interface compatibility; no-op since funding is now settled upfront.
-     * @param vaults Array of vault addresses (unused)
-     * @return updatedCount Always returns 0
-     */
-    function batchUpdateHourlyFundingForVaults(address[] calldata vaults)
-        external
-        nonReentrant
-        onlyVaultKeeper
-        returns (uint256 updatedCount)
-    {
-        // Price impact is settled upfront at order creation; no periodic update needed.
-        emit BatchFundingUpdated(0, block.timestamp);
-        return 0;
-    }
 
     // ========================================================================
     // VAULT ADMIN FUNCTIONS (VAULT_ADMIN_ROLE)
@@ -568,6 +536,7 @@ contract VaultAdminProxy is Initializable, UUPSUpgradeable, ReentrancyGuardUpgra
      * @param _priceFeedManager PriceFeedManager contract address
      */
     function setPriceFeedManager(address _priceFeedManager) external onlyDefaultAdmin {
+        if (_priceFeedManager == address(0)) revert InvalidAddress();
         address oldManager = priceFeedManager;
         priceFeedManager = _priceFeedManager;
         emit PriceFeedManagerUpdated(oldManager, _priceFeedManager);

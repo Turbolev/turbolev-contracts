@@ -18,12 +18,12 @@ import "../interfaces/IVaultManager.sol";
  * - POSITION_MANAGER_ROLE: PositionManager contract - can interact with positions
  * - VAULT_KEEPER_ROLE: Vault keeper bots - can update funding, finalize rewards
  * - POSITION_KEEPER_ROLE: Position keeper bots - can process settlements, liquidations
- * - GUARDIAN_ROLE: Emergency guardian (single address, e.g. Gnosis Safe) - can pause vaults
- * - EMERGENCY_ROLE: Alias for GUARDIAN_ROLE, kept for backward compatibility
+ * - GUARDIAN_ROLE: Emergency guardian (e.g. Gnosis Safe) - can pause vaults immediately
+ * - EMERGENCY_ROLE: Emergency multisig - same pause capabilities as GUARDIAN_ROLE
  * - UPGRADER_ROLE: Can upgrade contracts
  *
- * Emergency Actions (Single Guardian):
- * - Any address with GUARDIAN_ROLE can pause vaults immediately (no confirmation needed)
+ * Emergency Actions:
+ * - Any address with GUARDIAN_ROLE or EMERGENCY_ROLE can pause vaults immediately (no confirmation needed)
  * - Unpause requires DEFAULT_ADMIN_ROLE (Timelock)
  */
 contract VaultAccessController is
@@ -54,7 +54,7 @@ contract VaultAccessController is
     /// @notice Role for emergency guardian - single address can pause vaults immediately
     bytes32 public constant GUARDIAN_ROLE = keccak256("GUARDIAN_ROLE");
 
-    /// @notice Alias for GUARDIAN_ROLE (backward compatibility)
+    /// @notice Emergency role - distinct from GUARDIAN_ROLE; both can perform emergency pause actions
     bytes32 public constant EMERGENCY_ROLE = keccak256("EMERGENCY_ROLE");
 
     // ========================================================================
@@ -151,6 +151,23 @@ contract VaultAccessController is
 
     // grantRole, revokeRole, renounceRole inherited from AccessControlUpgradeable
 
+    /**
+     * @notice Update POSITION_MANAGER_ROLE — revoke old, grant new
+     * @param oldPositionManager Previous position manager address (revoke role), or address(0) to skip revoke
+     * @param newPositionManager New position manager address (grant role)
+     * @dev Only callable by VAULT_ADMIN_ROLE (VaultManager)
+     */
+    function updatePositionManagerRole(address oldPositionManager, address newPositionManager)
+        external
+        onlyRole(VAULT_ADMIN_ROLE)
+    {
+        if (newPositionManager == address(0)) revert InvalidAddress();
+        if (oldPositionManager != address(0)) {
+            _revokeRole(POSITION_MANAGER_ROLE, oldPositionManager);
+        }
+        _grantRole(POSITION_MANAGER_ROLE, newPositionManager);
+    }
+
     // ========================================================================
     // PER-VAULT ROLE MANAGEMENT
     // ========================================================================
@@ -195,6 +212,7 @@ contract VaultAccessController is
             revert NotAuthorized();
         }
         if (vault == address(0) || account == address(0)) revert InvalidAddress();
+        if (!registeredVaults[vault]) revert VaultNotRegistered();
 
         vaultRoles[vault][role][account] = true;
         emit VaultRoleGranted(vault, role, account);
@@ -375,15 +393,18 @@ contract VaultAccessController is
     }
 
     // ========================================================================
-    // EMERGENCY PAUSE (Single GUARDIAN_ROLE)
+    // EMERGENCY PAUSE (GUARDIAN_ROLE or EMERGENCY_ROLE)
     // ========================================================================
 
     /**
      * @notice Emergency pause a single vault
      * @param vault Vault address to pause
-     * @dev Any address with GUARDIAN_ROLE can call this immediately
+     * @dev Any address with GUARDIAN_ROLE or EMERGENCY_ROLE can call this immediately
      */
-    function pauseVault(address vault) external nonReentrant onlyRole(GUARDIAN_ROLE) {
+    function pauseVault(address vault) external nonReentrant {
+        if (!hasRole(GUARDIAN_ROLE, msg.sender) && !hasRole(EMERGENCY_ROLE, msg.sender)) {
+            revert NotAuthorized();
+        }
         if (vaultManager == address(0)) revert VaultManagerNotSet();
         IVaultManager(vaultManager).emergencyPauseVaultByAddress(vault);
         emit EmergencyPause(vault, msg.sender);
@@ -392,13 +413,12 @@ contract VaultAccessController is
     /**
      * @notice Emergency batch pause vaults
      * @param vaults Array of vault addresses to pause
-     * @dev Any address with GUARDIAN_ROLE can call this immediately
+     * @dev Any address with GUARDIAN_ROLE or EMERGENCY_ROLE can call this immediately
      */
-    function batchPauseVaults(address[] calldata vaults)
-        external
-        nonReentrant
-        onlyRole(GUARDIAN_ROLE)
-    {
+    function batchPauseVaults(address[] calldata vaults) external nonReentrant {
+        if (!hasRole(GUARDIAN_ROLE, msg.sender) && !hasRole(EMERGENCY_ROLE, msg.sender)) {
+            revert NotAuthorized();
+        }
         if (vaultManager == address(0)) revert VaultManagerNotSet();
         IVaultManager(vaultManager).emergencyBatchPauseVaults(vaults);
         for (uint256 i = 0; i < vaults.length; i++) {

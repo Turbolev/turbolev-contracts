@@ -383,6 +383,7 @@ contract BaseTestModular is Test {
         priceFeedManager.registerOracleProvider(priceFeedManager.PYTH_PROVIDER(), pythProvider);
 
         // Configure token with Pyth as primary provider
+        // Use setPriceFeedConfigWithInit to initialize circuit breaker baseline price
         IPriceFeedManager.PriceFeedConfig memory config = IPriceFeedManager.PriceFeedConfig({
             primaryProviderId: priceFeedManager.PYTH_PROVIDER(),
             secondaryProviderId: bytes32(0),
@@ -390,7 +391,7 @@ contract BaseTestModular is Test {
             secondaryFeed: address(0),
             usePullMode: false
         });
-        priceFeedManager.setPriceFeedConfig(address(projectToken), config);
+        priceFeedManager.setPriceFeedConfigWithInit(address(projectToken), config, "", 3600);
     }
 
     function _createVault() internal {

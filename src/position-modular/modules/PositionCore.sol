@@ -96,6 +96,9 @@ contract PositionCore is PositionModuleBase {
 
     event Paused(address account);
     event Unpaused(address account);
+    event OraclePriceFetchFailed(
+        uint64 indexed positionId, address indexed projectToken, bytes reason
+    );
 
     // ========================================================================
     // INITIALIZER
@@ -158,7 +161,8 @@ contract PositionCore is PositionModuleBase {
             revert InvalidLeverage();
         }
         if (
-            direction != PositionLib.BET_DIRECTION_UP && direction != PositionLib.BET_DIRECTION_DOWN
+            direction != PositionLib.BET_DIRECTION_LONG
+                && direction != PositionLib.BET_DIRECTION_SHORT
         ) {
             revert InvalidDirection();
         }
@@ -333,7 +337,6 @@ contract PositionCore is PositionModuleBase {
         if (core.priceFeedManager == address(0)) revert InvalidAddress();
 
         // Get current mark price
-        bool priceSuccess = false;
         uint256 closePrice;
         uint256 pricePublishTime;
 
@@ -345,8 +348,10 @@ contract PositionCore is PositionModuleBase {
             ) {
                 closePrice = _price;
                 pricePublishTime = _publishTime;
-                priceSuccess = true;
-            } catch { }
+            } catch (bytes memory reason) {
+                emit OraclePriceFetchFailed(positionId, pos.projectToken, reason);
+                revert OracleFetchFailed(reason);
+            }
         } else {
             try IPriceFeedManager(core.priceFeedManager)
                 .getPrice(pos.projectToken, maxAge) returns (
@@ -354,11 +359,13 @@ contract PositionCore is PositionModuleBase {
             ) {
                 closePrice = _price;
                 pricePublishTime = _publishTime;
-                priceSuccess = true;
-            } catch { }
+            } catch (bytes memory reason) {
+                emit OraclePriceFetchFailed(positionId, pos.projectToken, reason);
+                revert OracleFetchFailed(reason);
+            }
         }
 
-        if (!priceSuccess || closePrice == 0) {
+        if (closePrice == 0) {
             revert PriceStale();
         }
 
@@ -522,7 +529,7 @@ contract PositionCore is PositionModuleBase {
         address vaultAddress = IVaultManager(core.vaultManager).getVault(pos.projectToken);
         if (vaultAddress == address(0)) revert InvalidAddress();
 
-        // Process settlement
+        // Process settlement — SettlementEngine reads position data directly from this router
         (
             bool won,
             uint256 payout,
@@ -531,7 +538,7 @@ contract PositionCore is PositionModuleBase {
             int256 vaultPnL,
             uint8 finalState,
         ) = ISettlementEngine(core.settlementEngine)
-            .processSettlement(pos, closePrice, isLiquidation);
+            .processSettlement(positionId, closePrice, isLiquidation);
 
         // No ongoing funding — impact fee was settled upfront at open.
         uint256 adjustedPayout = payout;

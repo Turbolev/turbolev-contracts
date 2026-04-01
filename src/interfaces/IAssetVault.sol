@@ -124,7 +124,7 @@ interface IAssetVault {
      * @param leverage Leverage multiplier
      * @param direction Position direction (1 = LONG, 2 = SHORT)
      */
-    function checkPositionRisk(uint256 positionSize, uint8 leverage, uint8 direction) external view;
+    function checkPositionRisk(uint256 positionSize, uint16 leverage, uint8 direction) external view;
 
     /**
      * @notice Get vault info

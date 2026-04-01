@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.22;
 
-import "../libraries/position/PositionLib.sol";
-
 /**
  * @title ISettlementEngine
  * @notice Interface for SettlementEngine contract
@@ -19,7 +17,7 @@ interface ISettlementEngine {
 
     /**
      * @notice Process settlement logic with synthetic leverage
-     * @param position Position data
+     * @param positionId Position ID — SettlementEngine reads position data directly from PositionRouter
      * @param closePrice Close price
      * @param isLiquidation True if this is a liquidation
      * @return won Whether user won
@@ -30,11 +28,7 @@ interface ISettlementEngine {
      * @return finalState Final position state
      * @return excessProfit Excess profit from capped trades
      */
-    function processSettlement(
-        PositionLib.Position memory position,
-        uint256 closePrice,
-        bool isLiquidation
-    )
+    function processSettlement(uint64 positionId, uint256 closePrice, bool isLiquidation)
         external
         returns (
             bool won,

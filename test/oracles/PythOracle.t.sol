@@ -216,13 +216,12 @@ contract PythOracleTest is Test {
     // ========================================================================
 
     function testPriceScalingPositiveExpo() public {
-        // Set price with positive expo: 20 with expo 2
-        // Real price = 20 * 10^2 = 2000
-        // Should scale to: 2000 * 10^18
+        // H-11 FIX: positive exponent is now rejected with InvalidExponent()
+        // PythOracle only accepts expo in [-18, 0] range
         mockPyth.setPrice(priceId, 20, 2);
 
-        (int256 price,) = pythOracle.getPrice(token);
-        assertEq(price, 2000e18);
+        vm.expectRevert(PythOracle.InvalidExponent.selector);
+        pythOracle.getPrice(token);
     }
 
     function testPriceScalingNegativeExpo() public {
@@ -248,8 +247,18 @@ contract PythOracleTest is Test {
     // ========================================================================
 
     function testSetMaxPriceAge() public {
+        // L-08 FIX: maxPriceAge is bounded to [MIN_PRICE_AGE=10, MAX_PRICE_AGE=3600]
+        // Valid value within bounds
+        pythOracle.setMaxPriceAge(1800);
+        assertEq(pythOracle.maxPriceAge(), 1800);
+
+        // Value exceeding MAX_PRICE_AGE (3600) should revert
+        vm.expectRevert(PythOracle.InvalidPriceAge.selector);
         pythOracle.setMaxPriceAge(7200);
-        assertEq(pythOracle.maxPriceAge(), 7200);
+
+        // Value below MIN_PRICE_AGE (10) should revert
+        vm.expectRevert(PythOracle.InvalidPriceAge.selector);
+        pythOracle.setMaxPriceAge(5);
     }
 
     function testSetDefaultMode() public {
