@@ -116,14 +116,7 @@ contract VaultCore is VaultModuleBase {
     event Paused(address account);
     event Unpaused(address account);
     event FeesWithdrawn(address indexed to, uint256 amount, uint256 timestamp);
-    event LeverageTierConfigUpdated(
-        uint256 tier1Threshold,
-        uint256 tier2Threshold,
-        uint16 tier1MaxLeverage,
-        uint16 tier2MaxLeverage,
-        uint16 tier3MaxLeverage,
-        uint256 timestamp
-    );
+    event MaxLeverageUpdated(uint16 oldMaxLeverage, uint16 newMaxLeverage, uint256 timestamp);
     event TotalOITierConfigUpdated(
         uint16 totalOIRiskMultiplierBps,
         uint256 tier1Threshold,
@@ -136,16 +129,6 @@ contract VaultCore is VaultModuleBase {
         uint256 timestamp
     );
     event MaxDirectionalExposureConfigUpdated(uint16 oldBps, uint16 newBps, uint256 timestamp);
-    event UtilizationConfigUpdated(
-        uint16 tier1Bps,
-        uint16 tier2Bps,
-        uint16 tier3Bps,
-        uint16 factorTier1Bps,
-        uint16 factorTier2Bps,
-        uint16 factorTier3Bps,
-        uint16 factorEmergencyBps,
-        uint256 timestamp
-    );
     event MaxProfitCapMultiplierUpdated(
         uint8 oldMultiplier, uint8 newMultiplier, uint256 timestamp
     );
@@ -184,7 +167,8 @@ contract VaultCore is VaultModuleBase {
 
     /**
      * @notice Initialize vault core storage
-     * @param _projectToken Project token address
+     * @param _priceToken Token whose price is tracked by the oracle (e.g. SEI, ETH)
+     * @param _collateralToken Token used for LP liquidity and user collateral (e.g. USDC, USDT)
      * @param _vaultManager VaultManager address
      * @param _positionManager PositionManager address
      * @param _accessController VaultAccessController address
@@ -193,7 +177,8 @@ contract VaultCore is VaultModuleBase {
      * @param _graduationThreshold Graduation threshold
      */
     function initialize(
-        address _projectToken,
+        address _priceToken,
+        address _collateralToken,
         address _vaultManager,
         address _positionManager,
         address _accessController,
@@ -209,13 +194,15 @@ contract VaultCore is VaultModuleBase {
         if (core.projectToken != address(0)) revert AlreadyInitialized();
 
         // Validate addresses
-        if (_projectToken == address(0)) revert InvalidAddress();
+        if (_priceToken == address(0)) revert InvalidAddress();
+        if (_collateralToken == address(0)) revert InvalidAddress();
         if (_vaultManager == address(0)) revert InvalidAddress();
         if (_positionManager == address(0)) revert InvalidAddress();
         if (_accessController == address(0)) revert InvalidAddress();
 
-        // Set addresses
-        core.projectToken = _projectToken;
+        // Set addresses — projectToken stores priceToken for storage layout compatibility
+        core.projectToken = _priceToken;
+        core.collateralToken = _collateralToken;
         core.vaultManager = _vaultManager;
         core.positionManager = _positionManager;
         core.accessController = _accessController;
@@ -249,15 +236,8 @@ contract VaultCore is VaultModuleBase {
         risk.tier3MultiplierBps = uint16(VaultConfigLib.DEFAULT_OI_TIER3_MULTIPLIER_BPS);
         risk.tier4MultiplierBps = uint16(VaultConfigLib.DEFAULT_OI_TIER4_MULTIPLIER_BPS);
 
-        // Initialize leverage tiers
-        risk.leverageTier1Threshold = VaultConfigLib.DEFAULT_LEVERAGE_TIER1_THRESHOLD;
-        risk.leverageTier2Threshold = VaultConfigLib.DEFAULT_LEVERAGE_TIER2_THRESHOLD;
-        risk.tier1MaxLeverage = VaultConfigLib.DEFAULT_TIER1_MAX_LEVERAGE;
-        risk.tier2MaxLeverage = VaultConfigLib.DEFAULT_TIER2_MAX_LEVERAGE;
-        risk.tier3MaxLeverage = VaultConfigLib.DEFAULT_TIER3_MAX_LEVERAGE;
-
-        // Initialize utilization config
-        risk.utilizationConfig = VaultConfigLib.getDefaultUtilizationConfig();
+        // Initialize fixed max leverage (default 100x)
+        risk.maxLeverage = VaultConfigLib.DEFAULT_MAX_LEVERAGE;
 
         // Initialize max profit cap multiplier
         risk.maxProfitCapMultiplier = VaultConfigLib.DEFAULT_MAX_PROFIT_CAP_MULTIPLIER;
@@ -269,7 +249,7 @@ contract VaultCore is VaultModuleBase {
         // Initialize reentrancy guard
         core.reentrancyStatus = VaultStorageLib.NOT_ENTERED;
 
-        emit VaultInitialized(_projectToken, _vaultManager, _positionManager, block.timestamp);
+        emit VaultInitialized(_priceToken, _vaultManager, _positionManager, block.timestamp);
     }
 
     // ========================================================================
@@ -293,12 +273,12 @@ contract VaultCore is VaultModuleBase {
             revert DepositTooSmall();
         }
 
-        // Handle token transfer
-        if (core.projectToken == address(0)) {
+        // Handle token transfer — always use collateralToken (ERC20 only)
+        if (core.collateralToken == address(0)) {
             revert NativeTokenNotAllowed();
         }
         if (msg.value != 0) revert InvalidAmount();
-        IERC20(core.projectToken).safeTransferFrom(msg.sender, address(this), amount);
+        IERC20(core.collateralToken).safeTransferFrom(msg.sender, address(this), amount);
 
         // Calculate shares
         uint256 shares;
@@ -429,8 +409,8 @@ contract VaultCore is VaultModuleBase {
             block.timestamp
         );
 
-        // Transfer tokens
-        IERC20(core.projectToken).safeTransfer(msg.sender, netPayout);
+        // Transfer collateral tokens back to LP
+        IERC20(core.collateralToken).safeTransfer(msg.sender, netPayout);
     }
 
     // ========================================================================
@@ -578,8 +558,8 @@ contract VaultCore is VaultModuleBase {
 
         emit PayoutExecuted(user, amount, block.timestamp);
 
-        // Transfer
-        IERC20(core.projectToken).safeTransfer(user, amount);
+        // Transfer collateral tokens to user
+        IERC20(core.collateralToken).safeTransfer(user, amount);
 
         // Process pending payouts
         _processPendingPayouts();
@@ -704,7 +684,6 @@ contract VaultCore is VaultModuleBase {
         VaultStorageLib.FundingStorage storage funding = _funding();
         VaultStorageLib.RiskStorage storage risk = _risk();
 
-        uint16 vaultMaxLeverage = _calculateMaxLeverage(core.vaultInfo.totalLiquidity);
         uint16 currentMultiplier = _calculateRiskMultiplier(core.vaultInfo.totalLiquidity);
 
         VaultRiskLib.RiskCheckParams memory params = VaultRiskLib.RiskCheckParams({
@@ -719,15 +698,8 @@ contract VaultCore is VaultModuleBase {
             totalLongExposure: funding.totalLongExposure,
             totalShortExposure: funding.totalShortExposure,
             maxDirectionalExposureBps: risk.maxDirectionalExposureBps,
-            vaultMaxLeverage: vaultMaxLeverage,
-            totalOIRiskMultiplierBps: currentMultiplier,
-            utilizationTier1Bps: risk.utilizationConfig.tier1Bps,
-            utilizationTier2Bps: risk.utilizationConfig.tier2Bps,
-            utilizationTier3Bps: risk.utilizationConfig.tier3Bps,
-            leverageFactorTier1Bps: risk.utilizationConfig.factorTier1Bps,
-            leverageFactorTier2Bps: risk.utilizationConfig.factorTier2Bps,
-            leverageFactorTier3Bps: risk.utilizationConfig.factorTier3Bps,
-            leverageFactorEmergencyBps: risk.utilizationConfig.factorEmergencyBps
+            vaultMaxLeverage: risk.maxLeverage,
+            totalOIRiskMultiplierBps: currentMultiplier
         });
 
         VaultRiskLib.checkPositionRisk(params);
@@ -852,7 +824,7 @@ contract VaultCore is VaultModuleBase {
         core.feePool -= toWithdraw;
         // NOTE: Do NOT deduct from totalLiquidity - fees are in separate pool
 
-        IERC20(core.projectToken).safeTransfer(recipient, toWithdraw);
+        IERC20(core.collateralToken).safeTransfer(recipient, toWithdraw);
 
         emit FeesWithdrawn(recipient, toWithdraw, block.timestamp);
     }
@@ -887,47 +859,19 @@ contract VaultCore is VaultModuleBase {
     // ========================================================================
 
     /**
-     * @notice Set leverage tier configuration
-     * @param tier1Threshold TVL threshold for tier 1 (Launch Phase)
-     * @param tier2Threshold TVL threshold for tier 2 (Growth Phase)
-     * @param tier1MaxLeverage Max leverage for TVL < tier1Threshold
-     * @param tier2MaxLeverage Max leverage for tier1Threshold <= TVL < tier2Threshold
-     * @param tier3MaxLeverage Max leverage for TVL >= tier2Threshold (Mature Phase)
+     * @notice Set maximum leverage (admin-configurable, default 100x)
+     * @param newMaxLeverage New maximum leverage value (1 to MAX_LEVERAGE_ALLOWED)
      */
-    function setLeverageTierConfig(
-        uint256 tier1Threshold,
-        uint256 tier2Threshold,
-        uint16 tier1MaxLeverage,
-        uint16 tier2MaxLeverage,
-        uint16 tier3MaxLeverage
-    ) external onlyVaultManagerOrHelper {
-        // Validate using VaultConfigLib
-        VaultConfigLib.LeverageTierConfig memory config = VaultConfigLib.LeverageTierConfig({
-            tier1Threshold: tier1Threshold,
-            tier2Threshold: tier2Threshold,
-            tier1MaxLeverage: tier1MaxLeverage,
-            tier2MaxLeverage: tier2MaxLeverage,
-            tier3MaxLeverage: tier3MaxLeverage
-        });
-        if (!VaultConfigLib.validateLeverageTierConfig(config)) {
+    function setMaxLeverage(uint16 newMaxLeverage) external onlyVaultManagerOrHelper {
+        if (newMaxLeverage == 0 || newMaxLeverage > VaultConfigLib.MAX_LEVERAGE_ALLOWED) {
             revert InvalidParameters();
         }
 
         VaultStorageLib.RiskStorage storage risk = _risk();
-        risk.leverageTier1Threshold = tier1Threshold;
-        risk.leverageTier2Threshold = tier2Threshold;
-        risk.tier1MaxLeverage = tier1MaxLeverage;
-        risk.tier2MaxLeverage = tier2MaxLeverage;
-        risk.tier3MaxLeverage = tier3MaxLeverage;
+        uint16 oldMaxLeverage = risk.maxLeverage;
+        risk.maxLeverage = newMaxLeverage;
 
-        emit LeverageTierConfigUpdated(
-            tier1Threshold,
-            tier2Threshold,
-            tier1MaxLeverage,
-            tier2MaxLeverage,
-            tier3MaxLeverage,
-            block.timestamp
-        );
+        emit MaxLeverageUpdated(oldMaxLeverage, newMaxLeverage, block.timestamp);
     }
 
     /**
@@ -1006,54 +950,6 @@ contract VaultCore is VaultModuleBase {
         risk.maxDirectionalExposureBps = maxDirectionalExposureBps;
 
         emit MaxDirectionalExposureConfigUpdated(oldBps, maxDirectionalExposureBps, block.timestamp);
-    }
-
-    /**
-     * @notice Set utilization-based leverage configuration
-     * @param tier1Bps Threshold for full leverage (default 30%)
-     * @param tier2Bps Threshold for reduced leverage (default 60%)
-     * @param tier3Bps Threshold for emergency mode (default 80%)
-     * @param factorTier1Bps Leverage factor below tier1 (default 100%)
-     * @param factorTier2Bps Leverage factor tier1-tier2 (default 50%)
-     * @param factorTier3Bps Leverage factor tier2-tier3 (default 20%)
-     * @param factorEmergencyBps Leverage factor above tier3 (default 4%)
-     */
-    function setUtilizationConfig(
-        uint16 tier1Bps,
-        uint16 tier2Bps,
-        uint16 tier3Bps,
-        uint16 factorTier1Bps,
-        uint16 factorTier2Bps,
-        uint16 factorTier3Bps,
-        uint16 factorEmergencyBps
-    ) external onlyVaultManagerOrHelper {
-        // Validate using VaultConfigLib
-        VaultConfigLib.UtilizationConfig memory config = VaultConfigLib.UtilizationConfig({
-            tier1Bps: tier1Bps,
-            tier2Bps: tier2Bps,
-            tier3Bps: tier3Bps,
-            factorTier1Bps: factorTier1Bps,
-            factorTier2Bps: factorTier2Bps,
-            factorTier3Bps: factorTier3Bps,
-            factorEmergencyBps: factorEmergencyBps
-        });
-        if (!VaultConfigLib.validateUtilizationConfig(config)) {
-            revert InvalidParameters();
-        }
-
-        VaultStorageLib.RiskStorage storage risk = _risk();
-        risk.utilizationConfig = config;
-
-        emit UtilizationConfigUpdated(
-            tier1Bps,
-            tier2Bps,
-            tier3Bps,
-            factorTier1Bps,
-            factorTier2Bps,
-            factorTier3Bps,
-            factorEmergencyBps,
-            block.timestamp
-        );
     }
 
     /**
@@ -1190,7 +1086,7 @@ contract VaultCore is VaultModuleBase {
             core.vaultInfo.pendingPositions--;
             core.vaultInfo.totalPendingPayoutAmount -= amount;
 
-            IERC20(core.projectToken).safeTransfer(user, amount);
+            IERC20(core.collateralToken).safeTransfer(user, amount);
 
             emit PayoutExecuted(user, amount, block.timestamp);
 
@@ -1220,18 +1116,6 @@ contract VaultCore is VaultModuleBase {
             return risk.tier3MultiplierBps;
         } else {
             return risk.tier4MultiplierBps;
-        }
-    }
-
-    function _calculateMaxLeverage(uint256 tvl) internal view returns (uint16) {
-        VaultStorageLib.RiskStorage storage risk = _risk();
-
-        if (tvl < risk.leverageTier1Threshold) {
-            return risk.tier1MaxLeverage;
-        } else if (tvl < risk.leverageTier2Threshold) {
-            return risk.tier2MaxLeverage;
-        } else {
-            return risk.tier3MaxLeverage;
         }
     }
 }

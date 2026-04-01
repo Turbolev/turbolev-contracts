@@ -67,12 +67,11 @@ contract VaultAdminProxy is Initializable, UUPSUpgradeable, ReentrancyGuardUpgra
     event FeesWithdrawn(address indexed vault, uint256 amount, uint256 timestamp);
 
     event PriceFeedManagerUpdated(address indexed oldManager, address indexed newManager);
-    event VaultLeverageTierConfigUpdated(address indexed vault, uint256 timestamp);
+    event VaultMaxLeverageUpdated(address indexed vault, uint16 maxLeverage, uint256 timestamp);
     event VaultTotalOITierConfigUpdated(address indexed vault, uint256 timestamp);
     event VaultMaxDirectionalExposureUpdated(
         address indexed vault, uint16 maxDirectionalExposureBps, uint256 timestamp
     );
-    event VaultUtilizationConfigUpdated(address indexed vault, uint256 timestamp);
     event VaultMaxProfitCapMultiplierUpdated(
         address indexed vault, uint8 multiplier, uint256 timestamp
     );
@@ -164,138 +163,165 @@ contract VaultAdminProxy is Initializable, UUPSUpgradeable, ReentrancyGuardUpgra
 
     /**
      * @notice Pause a specific vault
-     * @param projectToken Project token address
+     *  collateralToken Collateral token address
+     *  priceToken Price token address
      */
-    function pauseVault(address projectToken) external onlyVaultAdmin {
-        address vault = _getVault(projectToken);
+    function pauseVault(address collateralToken, address priceToken) external onlyVaultAdmin {
+        address vault = _getVault(collateralToken, priceToken);
         IVaultRouter(vault).pause();
         emit VaultPaused(vault, msg.sender, block.timestamp);
     }
 
     /**
      * @notice Unpause a specific vault
-     * @param projectToken Project token address
+     *  collateralToken Collateral token address
+     *  priceToken Price token address
      */
-    function unpauseVault(address projectToken) external onlyVaultAdmin {
-        address vault = _getVault(projectToken);
+    function unpauseVault(address collateralToken, address priceToken) external onlyVaultAdmin {
+        address vault = _getVault(collateralToken, priceToken);
         IVaultRouter(vault).unpause();
         emit VaultUnpaused(vault, msg.sender, block.timestamp);
     }
 
     /**
      * @notice Update vault parameters
-     * @param projectToken Project token address
+     *  collateralToken Collateral token address
+     *  priceToken Price token address
      * @param minBetAmount Minimum bet amount
      * @param maxBetAmount Maximum bet amount
      */
-    function updateVaultParams(address projectToken, uint256 minBetAmount, uint256 maxBetAmount)
-        external
-        onlyVaultAdmin
-    {
-        address vault = _getVault(projectToken);
+    function updateVaultParams(
+        address collateralToken,
+        address priceToken,
+        uint256 minBetAmount,
+        uint256 maxBetAmount
+    ) external onlyVaultAdmin {
+        address vault = _getVault(collateralToken, priceToken);
         IVaultRouter(vault).updateVaultParams(minBetAmount, maxBetAmount);
         emit VaultParamsUpdated(vault, minBetAmount, maxBetAmount, block.timestamp);
     }
 
     /**
      * @notice Withdraw collected fees from a vault
-     * @param projectToken Project token address
+     *  collateralToken Collateral token address
+     *  priceToken Price token address
      * @param amount Amount to withdraw (0 = withdraw all)
      */
-    function withdrawFees(address projectToken, uint256 amount) external onlyVaultAdmin {
-        address vault = _getVault(projectToken);
+    function withdrawFees(address collateralToken, address priceToken, uint256 amount)
+        external
+        onlyVaultAdmin
+    {
+        address vault = _getVault(collateralToken, priceToken);
         IVaultRouter(vault).withdrawFees(amount);
         emit FeesWithdrawn(vault, amount, block.timestamp);
     }
 
     /**
      * @notice Set staking fee BPS for a vault
-     * @param projectToken Project token address
+     *  collateralToken Collateral token address
+     *  priceToken Price token address
      * @param stakingFeeBps Staking fee in basis points
      */
-    function setVaultStakingFeeBps(address projectToken, uint16 stakingFeeBps)
-        external
-        onlyVaultAdmin
-    {
-        address vault = _getVault(projectToken);
+    function setVaultStakingFeeBps(
+        address collateralToken,
+        address priceToken,
+        uint16 stakingFeeBps
+    ) external onlyVaultAdmin {
+        address vault = _getVault(collateralToken, priceToken);
         IVaultRouter(vault).setFee(0, stakingFeeBps); // feeType 0 = staking
         emit VaultFeeUpdated(vault, 0, stakingFeeBps, block.timestamp);
     }
 
     /**
      * @notice Set early withdrawal fee BPS for a vault
-     * @param projectToken Project token address
+     *  collateralToken Collateral token address
+     *  priceToken Price token address
      * @param earlyWithdrawalFeeBps Early withdrawal fee in basis points
      */
-    function setVaultEarlyWithdrawalFeeBps(address projectToken, uint16 earlyWithdrawalFeeBps)
-        external
-        onlyVaultAdmin
-    {
-        address vault = _getVault(projectToken);
+    function setVaultEarlyWithdrawalFeeBps(
+        address collateralToken,
+        address priceToken,
+        uint16 earlyWithdrawalFeeBps
+    ) external onlyVaultAdmin {
+        address vault = _getVault(collateralToken, priceToken);
         IVaultRouter(vault).setFee(1, earlyWithdrawalFeeBps); // feeType 1 = earlyWithdrawal
         emit VaultFeeUpdated(vault, 1, earlyWithdrawalFeeBps, block.timestamp);
     }
 
     /**
      * @notice Set open position fee BPS for a vault
-     * @param projectToken Project token address
+     *  collateralToken Collateral token address
+     *  priceToken Price token address
      * @param openPositionFeeBps Open position fee in basis points
      */
-    function setVaultOpenPositionFeeBps(address projectToken, uint16 openPositionFeeBps)
-        external
-        onlyVaultAdmin
-    {
-        address vault = _getVault(projectToken);
+    function setVaultOpenPositionFeeBps(
+        address collateralToken,
+        address priceToken,
+        uint16 openPositionFeeBps
+    ) external onlyVaultAdmin {
+        address vault = _getVault(collateralToken, priceToken);
         IVaultRouter(vault).setFee(2, openPositionFeeBps); // feeType 2 = openPosition
         emit VaultFeeUpdated(vault, 2, openPositionFeeBps, block.timestamp);
     }
 
     /**
      * @notice Set close position fee BPS for a vault
-     * @param projectToken Project token address
+     *  collateralToken Collateral token address
+     *  priceToken Price token address
      * @param closePositionFeeBps Close position fee in basis points
      */
-    function setVaultClosePositionFeeBps(address projectToken, uint16 closePositionFeeBps)
-        external
-        onlyVaultAdmin
-    {
-        address vault = _getVault(projectToken);
+    function setVaultClosePositionFeeBps(
+        address collateralToken,
+        address priceToken,
+        uint16 closePositionFeeBps
+    ) external onlyVaultAdmin {
+        address vault = _getVault(collateralToken, priceToken);
         IVaultRouter(vault).setFee(3, closePositionFeeBps); // feeType 3 = closePosition
         emit VaultFeeUpdated(vault, 3, closePositionFeeBps, block.timestamp);
     }
 
     /**
      * @notice Set graduation threshold for a vault
-     * @param projectToken Project token address
+     *  collateralToken Collateral token address
+     *  priceToken Price token address
      * @param graduationThreshold Graduation threshold
      */
-    function setVaultGraduationThreshold(address projectToken, uint256 graduationThreshold)
-        external
-        onlyVaultAdmin
-    {
-        address vault = _getVault(projectToken);
+    function setVaultGraduationThreshold(
+        address collateralToken,
+        address priceToken,
+        uint256 graduationThreshold
+    ) external onlyVaultAdmin {
+        address vault = _getVault(collateralToken, priceToken);
         IVaultRouter(vault).setGraduationThreshold(graduationThreshold);
         emit VaultGraduationThresholdUpdated(vault, graduationThreshold, block.timestamp);
     }
 
     /**
      * @notice Set trading enabled for a vault
-     * @param projectToken Project token address
+     *  collateralToken Collateral token address
+     *  priceToken Price token address
      * @param enabled Trading enabled
      */
-    function setVaultTradingEnabled(address projectToken, bool enabled) external onlyVaultAdmin {
-        address vault = _getVault(projectToken);
+    function setVaultTradingEnabled(address collateralToken, address priceToken, bool enabled)
+        external
+        onlyVaultAdmin
+    {
+        address vault = _getVault(collateralToken, priceToken);
         IVaultRouter(vault).setTradingEnabled(enabled);
         emit VaultTradingEnabledUpdated(vault, enabled, block.timestamp);
     }
 
     /**
      * @notice Set treasury address for a specific vault
-     * @param projectToken Project token address
+     *  collateralToken Collateral token address
+     *  priceToken Price token address
      * @param treasury Treasury address
      */
-    function setVaultTreasury(address projectToken, address treasury) external onlyVaultAdmin {
-        address vault = _getVault(projectToken);
+    function setVaultTreasury(address collateralToken, address priceToken, address treasury)
+        external
+        onlyVaultAdmin
+    {
+        address vault = _getVault(collateralToken, priceToken);
         IVaultRouter(vault).setTreasury(treasury);
         emit VaultTreasuryUpdated(vault, treasury, block.timestamp);
     }
@@ -335,7 +361,8 @@ contract VaultAdminProxy is Initializable, UUPSUpgradeable, ReentrancyGuardUpgra
 
     /**
      * @notice Set price impact tier configuration for a vault
-     * @param projectToken Project token address
+     *  collateralToken Collateral token address
+     *  priceToken Price token address
      * @param tier1ImpactBps Impact for < 20% imbalance
      * @param tier2ImpactBps Impact for 20-40% imbalance
      * @param tier3ImpactBps Impact for 40-60% imbalance
@@ -343,14 +370,15 @@ contract VaultAdminProxy is Initializable, UUPSUpgradeable, ReentrancyGuardUpgra
      * @param tier5ImpactBps Impact for > 80% imbalance
      */
     function setVaultImpactConfig(
-        address projectToken,
+        address collateralToken,
+        address priceToken,
         uint16 tier1ImpactBps,
         uint16 tier2ImpactBps,
         uint16 tier3ImpactBps,
         uint16 tier4ImpactBps,
         uint16 tier5ImpactBps
     ) external onlyVaultAdmin {
-        address vault = _getVault(projectToken);
+        address vault = _getVault(collateralToken, priceToken);
         IVaultRouter(vault)
             .setImpactConfig(
                 tier1ImpactBps, tier2ImpactBps, tier3ImpactBps, tier4ImpactBps, tier5ImpactBps
@@ -360,11 +388,15 @@ contract VaultAdminProxy is Initializable, UUPSUpgradeable, ReentrancyGuardUpgra
 
     /**
      * @notice Enable or disable price impact for a vault
-     * @param projectToken Project token address
+     *  collateralToken Collateral token address
+     *  priceToken Price token address
      * @param enabled True to enable price impact
      */
-    function setVaultImpactEnabled(address projectToken, bool enabled) external onlyVaultAdmin {
-        address vault = _getVault(projectToken);
+    function setVaultImpactEnabled(address collateralToken, address priceToken, bool enabled)
+        external
+        onlyVaultAdmin
+    {
+        address vault = _getVault(collateralToken, priceToken);
         IVaultRouter(vault).setImpactEnabled(enabled);
         emit VaultFundingEnabledUpdated(vault, enabled, block.timestamp);
     }
@@ -402,33 +434,24 @@ contract VaultAdminProxy is Initializable, UUPSUpgradeable, ReentrancyGuardUpgra
     // ========================================================================
 
     /**
-     * @notice Set leverage tier configuration for a vault
-     * @param projectToken Project token address
-     * @param tier1Threshold TVL threshold for tier 1
-     * @param tier2Threshold TVL threshold for tier 2
-     * @param tier1MaxLeverage Max leverage for tier 1
-     * @param tier2MaxLeverage Max leverage for tier 2
-     * @param tier3MaxLeverage Max leverage for tier 3
+     * @notice Set maximum leverage for a vault
+     *  collateralToken Collateral token address
+     *  priceToken Price token address
+     * @param maxLeverage New maximum leverage (1 to 1000)
      */
-    function setVaultLeverageTierConfig(
-        address projectToken,
-        uint256 tier1Threshold,
-        uint256 tier2Threshold,
-        uint16 tier1MaxLeverage,
-        uint16 tier2MaxLeverage,
-        uint16 tier3MaxLeverage
-    ) external onlyVaultAdmin {
-        address vault = _getVault(projectToken);
-        IVaultRouter(vault)
-            .setLeverageTierConfig(
-                tier1Threshold, tier2Threshold, tier1MaxLeverage, tier2MaxLeverage, tier3MaxLeverage
-            );
-        emit VaultLeverageTierConfigUpdated(vault, block.timestamp);
+    function setVaultMaxLeverage(address collateralToken, address priceToken, uint16 maxLeverage)
+        external
+        onlyVaultAdmin
+    {
+        address vault = _getVault(collateralToken, priceToken);
+        IVaultRouter(vault).setMaxLeverage(maxLeverage);
+        emit VaultMaxLeverageUpdated(vault, maxLeverage, block.timestamp);
     }
 
     /**
      * @notice Set total OI tier configuration for a vault
-     * @param projectToken Project token address
+     *  collateralToken Collateral token address
+     *  priceToken Price token address
      * @param totalOIRiskMultiplierBps Fixed multiplier when tiers disabled
      * @param tier1Threshold Small vault threshold
      * @param tier2Threshold Medium vault threshold
@@ -439,7 +462,8 @@ contract VaultAdminProxy is Initializable, UUPSUpgradeable, ReentrancyGuardUpgra
      * @param tier4MultiplierBps Multiplier for tier 4
      */
     function setVaultTotalOITierConfig(
-        address projectToken,
+        address collateralToken,
+        address priceToken,
         uint16 totalOIRiskMultiplierBps,
         uint256 tier1Threshold,
         uint256 tier2Threshold,
@@ -449,7 +473,7 @@ contract VaultAdminProxy is Initializable, UUPSUpgradeable, ReentrancyGuardUpgra
         uint16 tier3MultiplierBps,
         uint16 tier4MultiplierBps
     ) external onlyVaultAdmin {
-        address vault = _getVault(projectToken);
+        address vault = _getVault(collateralToken, priceToken);
         IVaultRouter(vault)
             .setTotalOITierConfig(
                 totalOIRiskMultiplierBps,
@@ -466,63 +490,32 @@ contract VaultAdminProxy is Initializable, UUPSUpgradeable, ReentrancyGuardUpgra
 
     /**
      * @notice Set max directional exposure for a vault
-     * @param projectToken Project token address
+     *  collateralToken Collateral token address
+     *  priceToken Price token address
      * @param maxDirectionalExposureBps Max directional exposure in basis points
      */
-    function setVaultMaxDirectionalExposure(address projectToken, uint16 maxDirectionalExposureBps)
-        external
-        onlyVaultAdmin
-    {
-        address vault = _getVault(projectToken);
+    function setVaultMaxDirectionalExposure(
+        address collateralToken,
+        address priceToken,
+        uint16 maxDirectionalExposureBps
+    ) external onlyVaultAdmin {
+        address vault = _getVault(collateralToken, priceToken);
         IVaultRouter(vault).setMaxDirectionalExposure(maxDirectionalExposureBps);
         emit VaultMaxDirectionalExposureUpdated(vault, maxDirectionalExposureBps, block.timestamp);
     }
 
     /**
-     * @notice Set utilization config for a vault
-     * @param projectToken Project token address
-     * @param tier1Bps Threshold for full leverage
-     * @param tier2Bps Threshold for reduced leverage
-     * @param tier3Bps Threshold for emergency mode
-     * @param factorTier1Bps Leverage factor for tier 1
-     * @param factorTier2Bps Leverage factor for tier 2
-     * @param factorTier3Bps Leverage factor for tier 3
-     * @param factorEmergencyBps Leverage factor for emergency
-     */
-    function setVaultUtilizationConfig(
-        address projectToken,
-        uint16 tier1Bps,
-        uint16 tier2Bps,
-        uint16 tier3Bps,
-        uint16 factorTier1Bps,
-        uint16 factorTier2Bps,
-        uint16 factorTier3Bps,
-        uint16 factorEmergencyBps
-    ) external onlyVaultAdmin {
-        address vault = _getVault(projectToken);
-        IVaultRouter(vault)
-            .setUtilizationConfig(
-                tier1Bps,
-                tier2Bps,
-                tier3Bps,
-                factorTier1Bps,
-                factorTier2Bps,
-                factorTier3Bps,
-                factorEmergencyBps
-            );
-        emit VaultUtilizationConfigUpdated(vault, block.timestamp);
-    }
-
-    /**
      * @notice Set max profit cap multiplier for a vault
-     * @param projectToken Project token address
+     *  collateralToken Collateral token address
+     *  priceToken Price token address
      * @param multiplier Max profit cap multiplier
      */
-    function setVaultMaxProfitCapMultiplier(address projectToken, uint8 multiplier)
-        external
-        onlyVaultAdmin
-    {
-        address vault = _getVault(projectToken);
+    function setVaultMaxProfitCapMultiplier(
+        address collateralToken,
+        address priceToken,
+        uint8 multiplier
+    ) external onlyVaultAdmin {
+        address vault = _getVault(collateralToken, priceToken);
         IVaultRouter(vault).setMaxProfitCapMultiplier(multiplier);
         emit VaultMaxProfitCapMultiplierUpdated(vault, multiplier, block.timestamp);
     }
@@ -565,12 +558,17 @@ contract VaultAdminProxy is Initializable, UUPSUpgradeable, ReentrancyGuardUpgra
     // ========================================================================
 
     /**
-     * @notice Get vault address for a project token
-     * @param projectToken Project token address
+     * @notice Get vault address for a (collateralToken, priceToken) pair
+     * @param collateralToken Collateral token address
+     * @param priceToken Price token address
      * @return vault Vault address
      */
-    function getVault(address projectToken) external view returns (address vault) {
-        return IVaultManager(vaultManager).getVault(projectToken);
+    function getVault(address collateralToken, address priceToken)
+        external
+        view
+        returns (address vault)
+    {
+        return IVaultManager(vaultManager).getVault(collateralToken, priceToken);
     }
 
     /**
@@ -582,12 +580,17 @@ contract VaultAdminProxy is Initializable, UUPSUpgradeable, ReentrancyGuardUpgra
     }
 
     /**
-     * @notice Check if vault is supported for a project token
-     * @param projectToken Project token address
+     * @notice Check if vault is supported for a (collateralToken, priceToken) pair
+     * @param collateralToken Collateral token address
+     * @param priceToken Price token address
      * @return supported Whether vault is supported
      */
-    function isVaultSupported(address projectToken) external view returns (bool supported) {
-        return IVaultManager(vaultManager).getVault(projectToken) != address(0);
+    function isVaultSupported(address collateralToken, address priceToken)
+        external
+        view
+        returns (bool supported)
+    {
+        return IVaultManager(vaultManager).getVault(collateralToken, priceToken) != address(0);
     }
 
     // ========================================================================
@@ -595,12 +598,17 @@ contract VaultAdminProxy is Initializable, UUPSUpgradeable, ReentrancyGuardUpgra
     // ========================================================================
 
     /**
-     * @notice Get vault address from project token
-     * @param projectToken Project token address
+     * @notice Get vault address from (collateralToken, priceToken) pair
+     * @param collateralToken Collateral token address
+     * @param priceToken Price token address
      * @return vault Vault address
      */
-    function _getVault(address projectToken) internal view returns (address vault) {
-        vault = IVaultManager(vaultManager).getVault(projectToken);
+    function _getVault(address collateralToken, address priceToken)
+        internal
+        view
+        returns (address vault)
+    {
+        vault = IVaultManager(vaultManager).getVault(collateralToken, priceToken);
         if (vault == address(0)) revert VaultNotFound();
 
         // Check if vault is active

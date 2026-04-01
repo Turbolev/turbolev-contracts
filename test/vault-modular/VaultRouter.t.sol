@@ -14,7 +14,7 @@ contract VaultRouterTest is BaseTestModular {
 
     function test_VaultInitialized() public view {
         // Check vault is properly initialized
-        assertEq(vault.projectToken(), address(projectToken));
+        assertEq(vault.priceToken(), address(projectToken));
         assertEq(vault.vaultManager(), address(vaultManager));
         assertEq(vault.positionManager(), address(positionManager));
         assertFalse(vault.paused());

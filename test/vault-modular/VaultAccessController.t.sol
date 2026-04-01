@@ -338,11 +338,9 @@ contract VaultAccessControllerTest is BaseTestModular {
     function test_Guardian_BatchPauseVaults() public {
         // Create a second vault
         vm.prank(owner);
+        MockERC20 t2 = new MockERC20("T2", "T2");
         address vault2 = vaultManager.createVault(
-            address(new MockERC20("T2", "T2")),
-            DEFAULT_MIN_BET,
-            DEFAULT_MAX_BET,
-            DEFAULT_GRADUATION_THRESHOLD
+            address(t2), address(t2), DEFAULT_MIN_BET, DEFAULT_MAX_BET, DEFAULT_GRADUATION_THRESHOLD
         );
 
         // Grant EMERGENCY_ROLE to VaultAccessController

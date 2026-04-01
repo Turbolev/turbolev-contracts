@@ -131,7 +131,14 @@ contract PositionAccessControlTest is BaseTestModular {
 
         vm.expectRevert();
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), 10 ether, 5, 1, type(uint256).max, block.timestamp + 1 hours, ""
+            address(projectToken),
+            address(projectToken),
+            10 ether,
+            5,
+            1,
+            type(uint256).max,
+            block.timestamp + 1 hours,
+            ""
         );
         vm.stopPrank();
     }
@@ -141,7 +148,14 @@ contract PositionAccessControlTest is BaseTestModular {
         vm.startPrank(user1);
         projectToken.approve(address(positionManager), 10 ether);
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), 10 ether, 5, 1, type(uint256).max, block.timestamp + 1 hours, ""
+            address(projectToken),
+            address(projectToken),
+            10 ether,
+            5,
+            1,
+            type(uint256).max,
+            block.timestamp + 1 hours,
+            ""
         );
         vm.stopPrank();
 
@@ -220,7 +234,14 @@ contract PositionAccessControlTest is BaseTestModular {
         vm.startPrank(user1);
         projectToken.approve(address(positionManager), 10 ether);
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), 10 ether, 5, 1, type(uint256).max, block.timestamp + 1 hours, ""
+            address(projectToken),
+            address(projectToken),
+            10 ether,
+            5,
+            1,
+            type(uint256).max,
+            block.timestamp + 1 hours,
+            ""
         );
         vm.stopPrank();
 
@@ -237,7 +258,14 @@ contract PositionAccessControlTest is BaseTestModular {
         vm.startPrank(user1);
         projectToken.approve(address(positionManager), 20 ether);
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), 10 ether, 5, 1, type(uint256).max, block.timestamp + 1 hours, ""
+            address(projectToken),
+            address(projectToken),
+            10 ether,
+            5,
+            1,
+            type(uint256).max,
+            block.timestamp + 1 hours,
+            ""
         );
 
         // User1 can add margin

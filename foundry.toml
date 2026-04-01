@@ -4,7 +4,7 @@ out = "out"
 libs = ["lib"]
 solc_version = "0.8.22"
 optimizer = true
-optimizer_runs = 100
+optimizer_runs = 400
 via_ir = true
 
 [profile.dev]

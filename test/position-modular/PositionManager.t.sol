@@ -39,6 +39,7 @@ contract PositionManagerTest is BaseTestModular {
 
         positionManager.openPosition{ value: 0 }(
             address(projectToken),
+            address(projectToken),
             collateral,
             leverage,
             direction,
@@ -66,6 +67,7 @@ contract PositionManagerTest is BaseTestModular {
 
         positionManager.openPosition{ value: 0 }(
             address(projectToken),
+            address(projectToken),
             collateral,
             leverage,
             direction,
@@ -85,6 +87,7 @@ contract PositionManagerTest is BaseTestModular {
         projectToken.approve(address(positionManager), collateral);
         positionManager.openPosition{ value: 0 }(
             address(projectToken),
+            address(projectToken),
             collateral,
             leverage,
             1,
@@ -98,7 +101,14 @@ contract PositionManagerTest is BaseTestModular {
         vm.startPrank(user2);
         projectToken.approve(address(positionManager), collateral);
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), collateral, leverage, 2, 0, block.timestamp + 1 hours, ""
+            address(projectToken),
+            address(projectToken),
+            collateral,
+            leverage,
+            2,
+            0,
+            block.timestamp + 1 hours,
+            ""
         );
         vm.stopPrank();
     }
@@ -114,7 +124,14 @@ contract PositionManagerTest is BaseTestModular {
         // Zero collateral should fail
         vm.expectRevert();
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), 0, 5, 1, type(uint256).max, block.timestamp + 1 hours, ""
+            address(projectToken),
+            address(projectToken),
+            0,
+            5,
+            1,
+            type(uint256).max,
+            block.timestamp + 1 hours,
+            ""
         );
         vm.stopPrank();
     }
@@ -126,7 +143,14 @@ contract PositionManagerTest is BaseTestModular {
         // Zero leverage should fail
         vm.expectRevert();
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), 10 ether, 0, 1, type(uint256).max, block.timestamp + 1 hours, ""
+            address(projectToken),
+            address(projectToken),
+            10 ether,
+            0,
+            1,
+            type(uint256).max,
+            block.timestamp + 1 hours,
+            ""
         );
         vm.stopPrank();
     }
@@ -138,7 +162,14 @@ contract PositionManagerTest is BaseTestModular {
         // Invalid direction (0) should fail
         vm.expectRevert();
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), 10 ether, 5, 0, type(uint256).max, block.timestamp + 1 hours, ""
+            address(projectToken),
+            address(projectToken),
+            10 ether,
+            5,
+            0,
+            type(uint256).max,
+            block.timestamp + 1 hours,
+            ""
         );
         vm.stopPrank();
     }
@@ -150,7 +181,14 @@ contract PositionManagerTest is BaseTestModular {
         // Past deadline should fail
         vm.expectRevert();
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), 10 ether, 5, 1, type(uint256).max, block.timestamp - 1, ""
+            address(projectToken),
+            address(projectToken),
+            10 ether,
+            5,
+            1,
+            type(uint256).max,
+            block.timestamp - 1,
+            ""
         );
         vm.stopPrank();
     }
@@ -166,6 +204,7 @@ contract PositionManagerTest is BaseTestModular {
         vm.startPrank(user1);
         projectToken.approve(address(positionManager), collateral);
         positionManager.openPosition{ value: 0 }(
+            address(projectToken),
             address(projectToken),
             collateral,
             5,
@@ -190,7 +229,14 @@ contract PositionManagerTest is BaseTestModular {
         vm.startPrank(user1);
         projectToken.approve(address(positionManager), 10 ether);
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), 10 ether, 5, 1, type(uint256).max, block.timestamp + 1 hours, ""
+            address(projectToken),
+            address(projectToken),
+            10 ether,
+            5,
+            1,
+            type(uint256).max,
+            block.timestamp + 1 hours,
+            ""
         );
         vm.stopPrank();
 
@@ -212,7 +258,14 @@ contract PositionManagerTest is BaseTestModular {
         vm.startPrank(user1);
         projectToken.approve(address(positionManager), 20 ether);
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), 10 ether, 5, 1, type(uint256).max, block.timestamp + 1 hours, ""
+            address(projectToken),
+            address(projectToken),
+            10 ether,
+            5,
+            1,
+            type(uint256).max,
+            block.timestamp + 1 hours,
+            ""
         );
 
         // Add margin
@@ -230,7 +283,14 @@ contract PositionManagerTest is BaseTestModular {
         vm.startPrank(user1);
         projectToken.approve(address(positionManager), 10 ether);
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), 10 ether, 5, 1, type(uint256).max, block.timestamp + 1 hours, ""
+            address(projectToken),
+            address(projectToken),
+            10 ether,
+            5,
+            1,
+            type(uint256).max,
+            block.timestamp + 1 hours,
+            ""
         );
         vm.stopPrank();
 
@@ -253,6 +313,7 @@ contract PositionManagerTest is BaseTestModular {
         vm.startPrank(user1);
         projectToken.approve(address(positionManager), collateral);
         positionManager.openPosition{ value: 0 }(
+            address(projectToken),
             address(projectToken),
             collateral,
             leverage,
@@ -284,6 +345,7 @@ contract PositionManagerTest is BaseTestModular {
 
         // Should not revert for valid inputs
         positionManager.openPosition{ value: 0 }(
+            address(projectToken),
             address(projectToken),
             collateral,
             leverage,

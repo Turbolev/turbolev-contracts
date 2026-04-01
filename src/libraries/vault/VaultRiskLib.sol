@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.22;
 
-import "./VaultConfigLib.sol";
 import "../math/MathLib.sol";
 
 /**
@@ -17,7 +16,7 @@ import "../math/MathLib.sol";
  * 3. Liquidity available check (prevents opening positions when totalLiquidity = 0)
  * 4. Minimum bet amount check
  * 5. Maximum bet amount check (fixed amount, no % of TVL)
- * 6. Maximum leverage check (includes utilization-based adjustment)
+ * 6. Maximum leverage check (fixed admin-configurable max, default 100x)
  * 7. Directional exposure check (50% of TVL default)
  * 8. Total OI cap check (TVL × risk multiplier)
  */
@@ -61,16 +60,8 @@ library VaultRiskLib {
         uint256 totalShortExposure;
         uint16 maxDirectionalExposureBps;
         // Leverage & OI cap
-        uint16 vaultMaxLeverage; // Base max leverage (before utilization adjustment)
+        uint16 vaultMaxLeverage; // Fixed max leverage (admin-configurable, default 100x)
         uint16 totalOIRiskMultiplierBps;
-        // Utilization-based leverage adjustment (7 fields)
-        uint16 utilizationTier1Bps; // Threshold for full leverage (default 30%)
-        uint16 utilizationTier2Bps; // Threshold for reduced leverage (default 60%)
-        uint16 utilizationTier3Bps; // Threshold for emergency mode (default 80%)
-        uint16 leverageFactorTier1Bps; // Factor for full leverage (default 100%)
-        uint16 leverageFactorTier2Bps; // Factor for reduced (default 50%)
-        uint16 leverageFactorTier3Bps; // Factor for further reduced (default 20%)
-        uint16 leverageFactorEmergencyBps; // Factor for emergency (default 4%)
     }
 
     // ========================================================================
@@ -85,7 +76,7 @@ library VaultRiskLib {
      *      3. Liquidity available check → NoLiquidityAvailable()
      *      4. Minimum bet amount check → BelowMinimumBet()
      *      5. Maximum bet amount check → ExceedsMaximumBet()
-     *      6. Maximum leverage check (with utilization adjustment) → ExceedsMaxLeverage()
+     *      6. Maximum leverage check (fixed admin-configurable) → ExceedsMaxLeverage()
      *      7. Directional exposure check → ExceedsDirectionalExposure()
      *      8. Total OI cap check → ExceedsTotalOICap()
      * @param params Struct containing all risk parameters
@@ -122,27 +113,8 @@ library VaultRiskLib {
             revert ExceedsMaximumBet();
         }
 
-        // 6. Check maximum leverage with utilization-based adjustment
-        // Build utilization config from params
-        VaultConfigLib.UtilizationConfig memory utilizationConfig = VaultConfigLib.UtilizationConfig({
-            tier1Bps: params.utilizationTier1Bps,
-            tier2Bps: params.utilizationTier2Bps,
-            tier3Bps: params.utilizationTier3Bps,
-            factorTier1Bps: params.leverageFactorTier1Bps,
-            factorTier2Bps: params.leverageFactorTier2Bps,
-            factorTier3Bps: params.leverageFactorTier3Bps,
-            factorEmergencyBps: params.leverageFactorEmergencyBps
-        });
-
-        uint16 effectiveMaxLeverage = _calculateEffectiveMaxLeverageWithConfig(
-            params.totalLiquidity,
-            params.totalLongExposure,
-            params.totalShortExposure,
-            params.vaultMaxLeverage,
-            utilizationConfig
-        );
-
-        if (params.leverage > effectiveMaxLeverage) {
+        // 6. Check maximum leverage (fixed, admin-configurable)
+        if (params.leverage > params.vaultMaxLeverage) {
             revert ExceedsMaxLeverage();
         }
 
@@ -171,71 +143,6 @@ library VaultRiskLib {
     // ========================================================================
     // INTERNAL HELPER FUNCTIONS
     // ========================================================================
-
-    /**
-     * @notice Calculate effective max leverage based on vault utilization (with custom config)
-     * @dev Utilization-Based Leverage Reduction with configurable tiers:
-     *      - Utilization < tier1: Full leverage (factorTier1)
-     *      - Utilization tier1-tier2: Reduced leverage (factorTier2)
-     *      - Utilization tier2-tier3: Further reduced (factorTier3)
-     *      - Utilization >= tier3: Emergency mode (factorEmergency)
-     *
-     * @param totalLiquidity Total vault liquidity (TVL)
-     * @param totalLongExposure Total long open interest
-     * @param totalShortExposure Total short open interest
-     * @param baseMaxLeverage Base maximum leverage (e.g., 100x, 200x, 500x based on maturity)
-     * @param config Configurable utilization tiers and leverage factors
-     * @return effectiveMaxLeverage Adjusted max leverage based on utilization
-     */
-    function _calculateEffectiveMaxLeverageWithConfig(
-        uint256 totalLiquidity,
-        uint256 totalLongExposure,
-        uint256 totalShortExposure,
-        uint16 baseMaxLeverage,
-        VaultConfigLib.UtilizationConfig memory config
-    ) internal pure returns (uint16 effectiveMaxLeverage) {
-        // If no liquidity, return minimum leverage
-        if (totalLiquidity == 0) {
-            return 1;
-        }
-
-        // Calculate current utilization
-        uint256 totalOI = totalLongExposure + totalShortExposure;
-        uint256 utilizationBps = (totalOI * MathLib.BASIS_POINTS) / totalLiquidity;
-
-        // Determine leverage factor based on utilization tier (using config)
-        uint256 leverageFactorBps;
-
-        if (utilizationBps < config.tier1Bps) {
-            // Below tier1: Full leverage
-            leverageFactorBps = config.factorTier1Bps;
-        } else if (utilizationBps < config.tier2Bps) {
-            // tier1 to tier2: Reduced leverage
-            leverageFactorBps = config.factorTier2Bps;
-        } else if (utilizationBps < config.tier3Bps) {
-            // tier2 to tier3: Further reduced
-            leverageFactorBps = config.factorTier3Bps;
-        } else {
-            // Above tier3: Emergency mode
-            leverageFactorBps = config.factorEmergencyBps;
-        }
-
-        // Calculate effective max leverage
-        uint256 calculatedLeverage =
-            (uint256(baseMaxLeverage) * leverageFactorBps) / MathLib.BASIS_POINTS;
-
-        // Ensure minimum leverage of 1
-        if (calculatedLeverage < 1) {
-            calculatedLeverage = 1;
-        }
-
-        // Ensure max leverage fits in uint16
-        if (calculatedLeverage > type(uint16).max) {
-            calculatedLeverage = type(uint16).max;
-        }
-
-        return uint16(calculatedLeverage);
-    }
 
     /**
      * @notice Check directional exposure cap (50% of TVL default)
@@ -379,81 +286,5 @@ library VaultRiskLib {
         }
         uint256 totalOI = totalLongExposure + totalShortExposure;
         return (totalOI * MathLib.BASIS_POINTS) / totalLiquidity;
-    }
-
-    /**
-     * @notice Get effective max leverage based on utilization (using default config)
-     * @param totalLiquidity Total vault liquidity
-     * @param totalLongExposure Total long open interest
-     * @param totalShortExposure Total short open interest
-     * @param baseMaxLeverage Base maximum leverage
-     * @return effectiveMaxLeverage Adjusted max leverage
-     * @return utilizationBps Current utilization in basis points
-     * @return leverageTier Current leverage tier (1-4)
-     */
-    function getEffectiveMaxLeverage(
-        uint256 totalLiquidity,
-        uint256 totalLongExposure,
-        uint256 totalShortExposure,
-        uint16 baseMaxLeverage
-    )
-        external
-        pure
-        returns (uint16 effectiveMaxLeverage, uint256 utilizationBps, uint8 leverageTier)
-    {
-        return getEffectiveMaxLeverageWithConfig(
-            totalLiquidity,
-            totalLongExposure,
-            totalShortExposure,
-            baseMaxLeverage,
-            VaultConfigLib.getDefaultUtilizationConfig()
-        );
-    }
-
-    /**
-     * @notice Get effective max leverage based on utilization with custom config
-     * @param totalLiquidity Total vault liquidity
-     * @param totalLongExposure Total long open interest
-     * @param totalShortExposure Total short open interest
-     * @param baseMaxLeverage Base maximum leverage
-     * @param config Custom utilization configuration from VaultConfigLib
-     * @return effectiveMaxLeverage Adjusted max leverage
-     * @return utilizationBps Current utilization in basis points
-     * @return leverageTier Current leverage tier (1-4)
-     */
-    function getEffectiveMaxLeverageWithConfig(
-        uint256 totalLiquidity,
-        uint256 totalLongExposure,
-        uint256 totalShortExposure,
-        uint16 baseMaxLeverage,
-        VaultConfigLib.UtilizationConfig memory config
-    )
-        public
-        pure
-        returns (uint16 effectiveMaxLeverage, uint256 utilizationBps, uint8 leverageTier)
-    {
-        if (totalLiquidity == 0) {
-            return (1, 0, 4); // Emergency tier if no liquidity
-        }
-
-        uint256 totalOI = totalLongExposure + totalShortExposure;
-        utilizationBps = (totalOI * MathLib.BASIS_POINTS) / totalLiquidity;
-
-        // Determine tier based on config
-        if (utilizationBps < config.tier1Bps) {
-            leverageTier = 1; // Full leverage
-        } else if (utilizationBps < config.tier2Bps) {
-            leverageTier = 2; // Reduced leverage
-        } else if (utilizationBps < config.tier3Bps) {
-            leverageTier = 3; // Further reduced
-        } else {
-            leverageTier = 4; // Emergency mode
-        }
-
-        effectiveMaxLeverage = _calculateEffectiveMaxLeverageWithConfig(
-            totalLiquidity, totalLongExposure, totalShortExposure, baseMaxLeverage, config
-        );
-
-        return (effectiveMaxLeverage, utilizationBps, leverageTier);
     }
 }

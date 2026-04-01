@@ -3,7 +3,6 @@ pragma solidity ^0.8.22;
 
 import "forge-std/Test.sol";
 import "../../src/libraries/vault/VaultRiskLib.sol";
-import "../../src/libraries/vault/VaultConfigLib.sol";
 
 // Wrapper contract to test library revert cases
 contract VaultRiskLibWrapper {
@@ -30,9 +29,6 @@ contract VaultRiskLibTest is Test {
     // ========================================================================
 
     function _defaultParams() internal pure returns (VaultRiskLib.RiskCheckParams memory) {
-        VaultConfigLib.UtilizationConfig memory config =
-            VaultConfigLib.getDefaultUtilizationConfig();
-
         return VaultRiskLib.RiskCheckParams({
             isPaused: false,
             tradingEnabled: true,
@@ -46,14 +42,7 @@ contract VaultRiskLibTest is Test {
             totalShortExposure: 100_000 ether,
             maxDirectionalExposureBps: 5000, // 50%
             vaultMaxLeverage: DEFAULT_MAX_LEVERAGE,
-            totalOIRiskMultiplierBps: 20_000, // 2x TVL
-            utilizationTier1Bps: config.tier1Bps,
-            utilizationTier2Bps: config.tier2Bps,
-            utilizationTier3Bps: config.tier3Bps,
-            leverageFactorTier1Bps: config.factorTier1Bps,
-            leverageFactorTier2Bps: config.factorTier2Bps,
-            leverageFactorTier3Bps: config.factorTier3Bps,
-            leverageFactorEmergencyBps: config.factorEmergencyBps
+            totalOIRiskMultiplierBps: 20_000 // 2x TVL
         });
     }
 
@@ -138,99 +127,6 @@ contract VaultRiskLibTest is Test {
 
         vm.expectRevert(VaultRiskLib.ExceedsTotalOICap.selector);
         wrapper.checkPositionRisk(params);
-    }
-
-    // ========================================================================
-    // EFFECTIVE MAX LEVERAGE TESTS
-    // ========================================================================
-
-    function test_GetEffectiveMaxLeverage_LowUtilization() public pure {
-        // Low utilization (< 30%) → Full leverage
-        (uint16 effectiveLeverage, uint256 utilizationBps, uint8 tier) = VaultRiskLib.getEffectiveMaxLeverage(
-            1_000_000 ether, // TVL
-            100_000 ether, // Long (10%)
-            100_000 ether, // Short (10%)
-            100 // Base leverage
-        );
-
-        assertEq(tier, 1); // Tier 1
-        assertEq(utilizationBps, 2000); // 20%
-        assertEq(effectiveLeverage, 100); // 100% of 100 = 100
-    }
-
-    function test_GetEffectiveMaxLeverage_MediumUtilization() public pure {
-        // Medium utilization (30-60%) → 50% leverage
-        (uint16 effectiveLeverage, uint256 utilizationBps, uint8 tier) = VaultRiskLib.getEffectiveMaxLeverage(
-            1_000_000 ether, // TVL
-            250_000 ether, // Long (25%)
-            250_000 ether, // Short (25%)
-            100 // Base leverage
-        );
-
-        assertEq(tier, 2); // Tier 2
-        assertEq(utilizationBps, 5000); // 50%
-        assertEq(effectiveLeverage, 50); // 50% of 100 = 50
-    }
-
-    function test_GetEffectiveMaxLeverage_HighUtilization() public pure {
-        // High utilization (60-80%) → 20% leverage
-        (uint16 effectiveLeverage, uint256 utilizationBps, uint8 tier) = VaultRiskLib.getEffectiveMaxLeverage(
-            1_000_000 ether, // TVL
-            350_000 ether, // Long (35%)
-            350_000 ether, // Short (35%)
-            100 // Base leverage
-        );
-
-        assertEq(tier, 3); // Tier 3
-        assertEq(utilizationBps, 7000); // 70%
-        assertEq(effectiveLeverage, 20); // 20% of 100 = 20
-    }
-
-    function test_GetEffectiveMaxLeverage_EmergencyUtilization() public pure {
-        // Emergency utilization (> 80%) → 4% leverage
-        (uint16 effectiveLeverage, uint256 utilizationBps, uint8 tier) = VaultRiskLib.getEffectiveMaxLeverage(
-            1_000_000 ether, // TVL
-            450_000 ether, // Long (45%)
-            450_000 ether, // Short (45%)
-            100 // Base leverage
-        );
-
-        assertEq(tier, 4); // Emergency tier
-        assertEq(utilizationBps, 9000); // 90%
-        assertEq(effectiveLeverage, 4); // 4% of 100 = 4
-    }
-
-    function test_GetEffectiveMaxLeverage_ZeroLiquidity() public pure {
-        (uint16 effectiveLeverage, uint256 utilizationBps, uint8 tier) =
-            VaultRiskLib.getEffectiveMaxLeverage(0, 100_000 ether, 100_000 ether, 100);
-
-        assertEq(tier, 4); // Emergency tier
-        assertEq(utilizationBps, 0);
-        assertEq(effectiveLeverage, 1); // Minimum 1x
-    }
-
-    function test_GetEffectiveMaxLeverage_CustomConfig() public pure {
-        VaultConfigLib.UtilizationConfig memory config = VaultConfigLib.UtilizationConfig({
-            tier1Bps: 2000, // 20%
-            tier2Bps: 5000, // 50%
-            tier3Bps: 7000, // 70%
-            factorTier1Bps: 10_000, // 100%
-            factorTier2Bps: 7500, // 75%
-            factorTier3Bps: 5000, // 50%
-            factorEmergencyBps: 1000 // 10%
-        });
-
-        // 40% utilization → tier2 with custom config
-        (uint16 effectiveLeverage,, uint8 tier) = VaultRiskLib.getEffectiveMaxLeverageWithConfig(
-            1_000_000 ether, // TVL
-            200_000 ether, // Long (20%)
-            200_000 ether, // Short (20%)
-            100, // Base leverage
-            config
-        );
-
-        assertEq(tier, 2); // In tier2 range (20-50%)
-        assertEq(effectiveLeverage, 75); // 75% of 100 = 75
     }
 
     // ========================================================================
@@ -412,21 +308,6 @@ contract VaultRiskLibTest is Test {
 
         // Net exposure should be the same regardless of which side is dominant
         assertEq(net1, net2);
-    }
-
-    function testFuzz_EffectiveMaxLeverage_AlwaysPositive(
-        uint128 tvl,
-        uint128 longOI,
-        uint128 shortOI,
-        uint16 baseLeverage
-    ) public pure {
-        vm.assume(baseLeverage > 0);
-
-        (uint16 effectiveLeverage,,) =
-            VaultRiskLib.getEffectiveMaxLeverage(tvl, longOI, shortOI, baseLeverage);
-
-        // Effective leverage should always be at least 1
-        assertGe(effectiveLeverage, 1);
     }
 
     function testFuzz_CollateralPositionRoundTrip(uint128 collateral, uint8 leverage) public pure {

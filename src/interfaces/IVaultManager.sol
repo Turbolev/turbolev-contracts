@@ -12,26 +12,34 @@ interface IVaultManager {
     // ========================================================================
 
     struct VaultInfo {
-        address projectToken;
+        address priceToken;
+        address collateralToken;
         address vaultAddress;
         uint256 deployedAt;
         bool isActive;
         bool isBeaconProxy;
     }
     /**
-     * @notice Get vault address for project token
-     * @param _projectToken Project token address
+     * @notice Get vault address for a (collateralToken, priceToken) pair
+     * @param collateralToken Token used for LP liquidity and user collateral (e.g. USDC)
+     * @param priceToken Token whose price is tracked by the oracle (e.g. SEI)
      * @return vaultAddress Vault contract address
      */
-
-    function getVault(address _projectToken) external view returns (address vaultAddress);
+    function getVault(address collateralToken, address priceToken)
+        external
+        view
+        returns (address vaultAddress);
 
     /**
-     * @notice Check if vault is supported for project token
-     * @param _projectToken Project token address
+     * @notice Check if vault is supported for a (collateralToken, priceToken) pair
+     * @param collateralToken Collateral token address
+     * @param priceToken Price token address
      * @return supported Whether vault exists
      */
-    function isVaultSupported(address _projectToken) external view returns (bool supported);
+    function isVaultSupported(address collateralToken, address priceToken)
+        external
+        view
+        returns (bool supported);
 
     // /**
     //  * @notice Check position risk
@@ -47,16 +55,18 @@ interface IVaultManager {
     //     returns (bool canOpen, string memory reason);
 
     /**
-     * @notice Deposit collateral from bet (v1: project token only)
-     * @param _projectToken Project token address
+     * @notice Deposit collateral from bet
+     * @param _priceToken Token whose price is tracked (e.g. SEI)
+     * @param _collateralToken Token used as collateral (e.g. USDC)
      * @param positionId Position ID
-     * @param amount Collateral amount in project tokens
+     * @param amount Collateral amount
      * @param positionSize Position size
      * @param isMarginAdd True if adding margin to existing position
      * @param direction Position direction (1 = LONG, 2 = SHORT)
      */
     function depositFromBet(
-        address _projectToken,
+        address _priceToken,
+        address _collateralToken,
         uint64 positionId,
         uint256 amount,
         uint256 positionSize,
@@ -65,18 +75,25 @@ interface IVaultManager {
     ) external payable;
 
     /**
-     * @notice Execute payout to user (v1: project token only)
-     * @param _projectToken Project token address
+     * @notice Execute payout to user
+     * @param _priceToken Price token address (used to look up vault)
+     * @param _collateralToken Collateral token address (used to look up vault and transfer)
      * @param user User address
-     * @param amount Payout amount in project tokens
+     * @param amount Payout amount
      * @param positionId Position ID for tracking partial payouts
      */
-    function executePayout(address _projectToken, address user, uint256 amount, uint64 positionId)
-        external;
+    function executePayout(
+        address _priceToken,
+        address _collateralToken,
+        address user,
+        uint256 amount,
+        uint64 positionId
+    ) external;
 
     /**
      * @notice Update vault P&L with leverage
-     * @param _projectToken Project token address
+     * @param _priceToken Price token address (used to look up vault)
+     * @param _collateralToken Collateral token address (used to look up vault)
      * @param positionId Position ID (for tracking)
      * @param collateral Collateral amount
      * @param vaultPnL Vault P&L
@@ -85,7 +102,8 @@ interface IVaultManager {
      * @param user User address for event tracking
      */
     function updateVaultPnLWithLeverage(
-        address _projectToken,
+        address _priceToken,
+        address _collateralToken,
         uint64 positionId,
         uint256 collateral,
         int256 vaultPnL,
@@ -96,11 +114,11 @@ interface IVaultManager {
     ) external returns (uint256 closeFee);
 
     /**
-     * @notice Get vault address by project token (alias for getVault)
-     * @param projectToken Project token address
+     * @notice Get vault address by pair key (collateralToken, priceToken)
+     * @param pairKey keccak256(abi.encode(collateralToken, priceToken))
      * @return vaultAddress Vault address
      */
-    function vaultsByProjectToken(address projectToken) external view returns (address vaultAddress);
+    function vaultsByPair(bytes32 pairKey) external view returns (address vaultAddress);
 
     /**
      * @notice Get all vaults
@@ -109,11 +127,21 @@ interface IVaultManager {
     function getAllVaults() external view returns (address[] memory);
 
     /**
-     * @notice Get project token address for a vault
+     * @notice Get price token address for a vault
      * @param vaultAddress Vault address
-     * @return projectToken Project token address
+     * @return priceToken Price token address
      */
-    function vaultProjectToken(address vaultAddress) external view returns (address projectToken);
+    function vaultPriceToken(address vaultAddress) external view returns (address priceToken);
+
+    /**
+     * @notice Get collateral token address for a vault
+     * @param vaultAddress Vault address
+     * @return collateralToken Collateral token address
+     */
+    function vaultCollateralToken(address vaultAddress)
+        external
+        view
+        returns (address collateralToken);
 
     /**
      * @notice Pause factory
@@ -126,16 +154,18 @@ interface IVaultManager {
     function unpause() external;
 
     /**
-     * @notice Pause vault by project token
-     * @param _projectToken Project token address
+     * @notice Pause vault by (collateralToken, priceToken) pair
+     * @param collateralToken Collateral token address
+     * @param priceToken Price token address
      */
-    function pauseVault(address _projectToken) external;
+    function pauseVault(address collateralToken, address priceToken) external;
 
     /**
-     * @notice Unpause vault by project token
-     * @param _projectToken Project token address
+     * @notice Unpause vault by (collateralToken, priceToken) pair
+     * @param collateralToken Collateral token address
+     * @param priceToken Price token address
      */
-    function unpauseVault(address _projectToken) external;
+    function unpauseVault(address collateralToken, address priceToken) external;
 
     /**
      * @notice Pause vault by vault address directly
@@ -197,10 +227,11 @@ interface IVaultManager {
     // ========================================================================
 
     /**
-     * @notice Emergency pause vault by project token (NO TIMELOCK DELAY)
-     * @param _projectToken Project token address
+     * @notice Emergency pause vault by (collateralToken, priceToken) pair (NO TIMELOCK DELAY)
+     * @param collateralToken Collateral token address
+     * @param priceToken Price token address
      */
-    function emergencyPauseVault(address _projectToken) external;
+    function emergencyPauseVault(address collateralToken, address priceToken) external;
 
     /**
      * @notice Emergency pause vault by address (NO TIMELOCK DELAY)
@@ -215,10 +246,11 @@ interface IVaultManager {
     function emergencyBatchPauseVaults(address[] calldata vaults) external;
 
     /**
-     * @notice Emergency unpause vault by project token (NO TIMELOCK DELAY)
-     * @param _projectToken Project token address
+     * @notice Emergency unpause vault by (collateralToken, priceToken) pair (NO TIMELOCK DELAY)
+     * @param collateralToken Collateral token address
+     * @param priceToken Price token address
      */
-    function emergencyUnpauseVault(address _projectToken) external;
+    function emergencyUnpauseVault(address collateralToken, address priceToken) external;
 
     /**
      * @notice Emergency unpause vault by address (NO TIMELOCK DELAY)

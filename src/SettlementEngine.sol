@@ -272,7 +272,8 @@ contract SettlementEngine is
             uint256 cap1 = position.maxProfitCap; // 2× collateral
 
             // Cap 2: % of vault TVL (disabled by default, maxProfitCapBps = 0)
-            uint256 cap2 = _calculateVaultCap(position.projectToken);
+            // position.projectToken = priceToken, position.tokenAddress = collateralToken
+            uint256 cap2 = _calculateVaultCap(position.projectToken, position.tokenAddress);
 
             // Use minimum of two caps (cap2 ignored when 0)
             uint256 maxProfit = cap1;
@@ -511,16 +512,21 @@ contract SettlementEngine is
 
     /**
      * @notice Calculate vault-based profit cap (maxProfitCapBps % of vault TVL)
-     * @param projectToken Project token address
-     * @return vaultCap Cap in tokens (0 if disabled or vault not available)
+     * @param priceToken Token whose price is tracked (e.g. SEI)
+     * @param collateralToken Token used as collateral (e.g. USDC)
+     * @return vaultCap Cap in collateral tokens (0 if disabled or vault not available)
      * @dev Returns 0 when maxProfitCapBps = 0, effectively disabling the TVL-based cap
      */
-    function _calculateVaultCap(address projectToken) internal view returns (uint256) {
+    function _calculateVaultCap(address priceToken, address collateralToken)
+        internal
+        view
+        returns (uint256)
+    {
         if (vaultManager == address(0)) {
             return 0;
         }
 
-        address vaultAddress = IVaultManager(vaultManager).getVault(projectToken);
+        address vaultAddress = IVaultManager(vaultManager).getVault(collateralToken, priceToken);
         if (vaultAddress == address(0)) {
             return 0;
         }

@@ -57,8 +57,8 @@ contract VaultManager is
     /// @notice VaultRewards module address
     address public rewardsModule;
 
-    /// @notice Mapping: projectToken => vault address
-    mapping(address => address) public vaultsByProjectToken;
+    /// @notice Mapping: keccak256(abi.encode(collateralToken, priceToken)) => vault address
+    mapping(bytes32 => address) public vaultsByPair;
 
     /// @notice Array of all vault addresses
     address[] public allVaults;
@@ -83,20 +83,23 @@ contract VaultManager is
     // ========================================================================
 
     event VaultCreated(
-        address indexed projectToken,
+        address indexed priceToken,
+        address indexed collateralToken,
         address indexed vaultAddress,
         bool isBeaconProxy,
         uint256 timestamp
     );
     event ModularVaultCreated(
-        address indexed projectToken,
+        address indexed priceToken,
+        address collateralToken,
         address indexed vaultAddress,
         address indexed coreModule,
         uint256 timestamp
     );
     event CollateralDepositedFromBet(
         address indexed vault,
-        address indexed projectToken,
+        address indexed priceToken,
+        address collateralToken,
         uint256 amount,
         uint256 positionSize,
         uint256 timestamp
@@ -135,7 +138,7 @@ contract VaultManager is
     error VaultNotFound();
     error VaultNotActive();
     error NotPositionManager();
-    error DuplicateProjectToken();
+    error DuplicateVaultPair();
     error DirectTransferNotAllowed();
     error DeploymentFailed();
     error NotAuthorized();
@@ -223,31 +226,33 @@ contract VaultManager is
     // ========================================================================
 
     /**
-     * @notice Create modular vault
-     * @param _projectToken Project token address
+     * @notice Create modular vault for a (collateralToken, priceToken) pair
+     * @param _priceToken Token whose price is tracked by the oracle (e.g. SEI, ETH)
+     * @param _collateralToken Token used for LP liquidity and user collateral (e.g. USDC, USDT)
      * @param _minBetAmount Min bet amount
      * @param _maxBetAmount Max bet amount
      * @param _graduationThreshold Graduation threshold
      * @return vaultAddress Address of the newly created vault
      */
     function createVault(
-        address _projectToken,
+        address _priceToken,
+        address _collateralToken,
         uint256 _minBetAmount,
         uint256 _maxBetAmount,
         uint256 _graduationThreshold
     ) public onlyOwner whenNotPaused returns (address vaultAddress) {
-        if (_projectToken == address(0)) {
-            revert InvalidAddress();
-        }
+        if (_priceToken == address(0)) revert InvalidAddress();
+        if (_collateralToken == address(0)) revert InvalidAddress();
         if (positionManager == address(0)) revert InvalidAddress();
-        if (vaultsByProjectToken[_projectToken] != address(0)) {
-            revert DuplicateProjectToken();
-        }
+
+        bytes32 pairKey = _vaultPairKey(_collateralToken, _priceToken);
+        if (vaultsByPair[pairKey] != address(0)) revert DuplicateVaultPair();
 
         // Create ERC1967 Proxy for VaultRouter
         bytes memory initData = abi.encodeWithSelector(
             VaultRouter.initialize.selector,
-            _projectToken,
+            _priceToken,
+            _collateralToken,
             address(this),
             positionManager,
             accessController,
@@ -268,57 +273,54 @@ contract VaultManager is
         VaultAccessController(accessController).registerVault(vaultAddress);
 
         // Store vault info
-        vaultsByProjectToken[_projectToken] = vaultAddress;
+        vaultsByPair[pairKey] = vaultAddress;
         allVaults.push(vaultAddress);
 
         vaultInfos[vaultAddress] = IVaultManager.VaultInfo({
-            projectToken: _projectToken,
+            priceToken: _priceToken,
+            collateralToken: _collateralToken,
             vaultAddress: vaultAddress,
             deployedAt: block.timestamp,
             isActive: true,
-            isBeaconProxy: false // Modular vault uses ERC1967 proxy
+            isBeaconProxy: false
         });
 
-        emit ModularVaultCreated(_projectToken, vaultAddress, coreModule, block.timestamp);
-        emit VaultCreated(_projectToken, vaultAddress, false, block.timestamp);
+        emit ModularVaultCreated(
+            _priceToken, _collateralToken, vaultAddress, coreModule, block.timestamp
+        );
+        emit VaultCreated(_priceToken, _collateralToken, vaultAddress, false, block.timestamp);
 
         return vaultAddress;
-    }
-
-    /**
-     * @notice Alias for createVault (backward compatibility)
-     */
-    function createVaultWithBeacon(
-        address _projectToken,
-        uint256 _minBetAmount,
-        uint256 _maxBetAmount,
-        uint256 _graduationThreshold
-    ) external onlyOwner whenNotPaused returns (address vaultAddress) {
-        return createVault(_projectToken, _minBetAmount, _maxBetAmount, _graduationThreshold);
     }
 
     /**
      * @notice Batch create vaults
      */
     function batchCreateVaults(
-        address[] calldata projectTokens,
+        address[] calldata priceTokens,
+        address[] calldata collateralTokens,
         uint256[] calldata minBetAmounts,
         uint256[] calldata maxBetAmounts,
         uint256[] calldata graduationThresholds
     ) external onlyOwner whenNotPaused returns (address[] memory vaultAddresses) {
         if (
-            projectTokens.length != minBetAmounts.length
-                || projectTokens.length != maxBetAmounts.length
-                || projectTokens.length != graduationThresholds.length
+            priceTokens.length != collateralTokens.length
+                || priceTokens.length != minBetAmounts.length
+                || priceTokens.length != maxBetAmounts.length
+                || priceTokens.length != graduationThresholds.length
         ) revert LengthMismatch();
 
-        if (projectTokens.length > MAX_BATCH_SIZE) revert BatchTooLarge();
+        if (priceTokens.length > MAX_BATCH_SIZE) revert BatchTooLarge();
 
-        vaultAddresses = new address[](projectTokens.length);
+        vaultAddresses = new address[](priceTokens.length);
 
-        for (uint256 i = 0; i < projectTokens.length; i++) {
+        for (uint256 i = 0; i < priceTokens.length; i++) {
             vaultAddresses[i] = createVault(
-                projectTokens[i], minBetAmounts[i], maxBetAmounts[i], graduationThresholds[i]
+                priceTokens[i],
+                collateralTokens[i],
+                minBetAmounts[i],
+                maxBetAmounts[i],
+                graduationThresholds[i]
             );
         }
 
@@ -333,37 +335,43 @@ contract VaultManager is
      * @notice Deposit collateral from bet
      */
     function depositFromBet(
-        address _projectToken,
+        address _priceToken,
+        address _collateralToken,
         uint64 positionId,
         uint256 amount,
         uint256 positionSize,
         bool isMarginAdd,
         uint8 direction
     ) external payable onlyPositionManager {
-        address vaultAddress = _getVault(_projectToken);
-        IERC20(_projectToken).safeTransferFrom(positionManager, vaultAddress, amount);
+        address vaultAddress = _getVault(_collateralToken, _priceToken);
+        IERC20(_collateralToken).safeTransferFrom(positionManager, vaultAddress, amount);
         IVaultRouter(vaultAddress)
             .depositFromBet(positionId, amount, positionSize, isMarginAdd, direction);
         emit CollateralDepositedFromBet(
-            vaultAddress, _projectToken, amount, positionSize, block.timestamp
+            vaultAddress, _priceToken, _collateralToken, amount, positionSize, block.timestamp
         );
     }
 
     /**
      * @notice Execute payout to user
      */
-    function executePayout(address _projectToken, address user, uint256 amount, uint64 positionId)
-        external
-        onlyPositionManager
-    {
-        IVaultRouter(_getVault(_projectToken)).executePayout(user, amount, positionId);
+    function executePayout(
+        address _priceToken,
+        address _collateralToken,
+        address user,
+        uint256 amount,
+        uint64 positionId
+    ) external onlyPositionManager {
+        IVaultRouter(_getVault(_collateralToken, _priceToken))
+            .executePayout(user, amount, positionId);
     }
 
     /**
      * @notice Update vault P&L
      */
     function updateVaultPnLWithLeverage(
-        address _projectToken,
+        address _priceToken,
+        address _collateralToken,
         uint64 positionId,
         uint256 collateral,
         int256 vaultPnL,
@@ -372,7 +380,7 @@ contract VaultManager is
         address user,
         uint256 payout
     ) external onlyPositionManager returns (uint256 closeFee) {
-        return IVaultRouter(_getVault(_projectToken))
+        return IVaultRouter(_getVault(_collateralToken, _priceToken))
             .updateVaultPnL(positionId, collateral, vaultPnL, positionSize, direction, user, payout);
     }
 
@@ -381,17 +389,17 @@ contract VaultManager is
     // ========================================================================
 
     /**
-     * @notice Pause vault by project token
+     * @notice Pause vault by (collateralToken, priceToken) pair
      */
-    function pauseVault(address _projectToken) external onlyEmergencyRole {
-        IVaultRouter(_getVault(_projectToken)).pause();
+    function pauseVault(address collateralToken, address priceToken) external onlyEmergencyRole {
+        IVaultRouter(_getVault(collateralToken, priceToken)).pause();
     }
 
     /**
-     * @notice Unpause vault by project token
+     * @notice Unpause vault by (collateralToken, priceToken) pair
      */
-    function unpauseVault(address _projectToken) external onlyEmergencyRole {
-        IVaultRouter(_getVault(_projectToken)).unpause();
+    function unpauseVault(address collateralToken, address priceToken) external onlyEmergencyRole {
+        IVaultRouter(_getVault(collateralToken, priceToken)).unpause();
     }
 
     /**
@@ -528,12 +536,14 @@ contract VaultManager is
     // ========================================================================
 
     /**
-     * @notice Emergency pause vault by project token (NO TIMELOCK DELAY)
-     * @param _projectToken Project token address
+     * @notice Emergency pause vault by (collateralToken, priceToken) pair (NO TIMELOCK DELAY)
      * @dev Only addresses with EMERGENCY_ROLE can call this
      */
-    function emergencyPauseVault(address _projectToken) external onlyEmergencyRole {
-        address vault = _getVault(_projectToken);
+    function emergencyPauseVault(address collateralToken, address priceToken)
+        external
+        onlyEmergencyRole
+    {
+        address vault = _getVault(collateralToken, priceToken);
         IVaultRouter(vault).pause();
         emit EmergencyPauseVault(vault, msg.sender, block.timestamp);
     }
@@ -564,12 +574,11 @@ contract VaultManager is
     }
 
     /**
-     * @notice Emergency unpause vault by project token (NO TIMELOCK DELAY)
-     * @param _projectToken Project token address
+     * @notice Emergency unpause vault by (collateralToken, priceToken) pair (NO TIMELOCK DELAY)
      * @dev Only owner can unpause to prevent guardian abuse
      */
-    function emergencyUnpauseVault(address _projectToken) external onlyOwner {
-        address vault = _getVault(_projectToken);
+    function emergencyUnpauseVault(address collateralToken, address priceToken) external onlyOwner {
+        address vault = _getVault(collateralToken, priceToken);
         IVaultRouter(vault).unpause();
         emit EmergencyUnpauseVault(vault, msg.sender, block.timestamp);
     }
@@ -708,12 +717,16 @@ contract VaultManager is
     // VIEW FUNCTIONS
     // ========================================================================
 
-    function getVault(address _projectToken) external view returns (address) {
-        return vaultsByProjectToken[_projectToken];
+    function getVault(address collateralToken, address priceToken) external view returns (address) {
+        return vaultsByPair[_vaultPairKey(collateralToken, priceToken)];
     }
 
-    function isVaultSupported(address _projectToken) external view returns (bool) {
-        return vaultsByProjectToken[_projectToken] != address(0);
+    function isVaultSupported(address collateralToken, address priceToken)
+        external
+        view
+        returns (bool)
+    {
+        return vaultsByPair[_vaultPairKey(collateralToken, priceToken)] != address(0);
     }
 
     function getAllVaults() external view returns (address[] memory) {
@@ -725,8 +738,16 @@ contract VaultManager is
         return allVaults.length;
     }
 
-    function vaultProjectToken(address vaultAddress) external view returns (address projectToken) {
-        return vaultInfos[vaultAddress].projectToken;
+    function vaultPriceToken(address vaultAddress) external view returns (address priceToken) {
+        return vaultInfos[vaultAddress].priceToken;
+    }
+
+    function vaultCollateralToken(address vaultAddress)
+        external
+        view
+        returns (address collateralToken)
+    {
+        return vaultInfos[vaultAddress].collateralToken;
     }
 
     function getActiveVaults() external view returns (address[] memory active) {
@@ -765,8 +786,20 @@ contract VaultManager is
         return new address[](0);
     }
 
-    function _getVault(address _projectToken) internal view returns (address) {
-        address vault = vaultsByProjectToken[_projectToken];
+    function _vaultPairKey(address collateralToken, address priceToken)
+        internal
+        pure
+        returns (bytes32)
+    {
+        return keccak256(abi.encode(collateralToken, priceToken));
+    }
+
+    function _getVault(address collateralToken, address priceToken)
+        internal
+        view
+        returns (address)
+    {
+        address vault = vaultsByPair[_vaultPairKey(collateralToken, priceToken)];
         if (vault == address(0) || vault.code.length == 0) {
             revert VaultNotFound();
         }

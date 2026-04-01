@@ -27,14 +27,16 @@ contract CreateVaultModular is DeployHelper {
 
     /**
      * @notice Create a new vault with default parameters
-     * @param projectToken Project token address
+     * @param priceToken Token whose price is tracked (e.g. SEI)
+     * @param collateralToken Token used for LP and collateral (e.g. USDC)
      */
-    function createVault(address projectToken) public {
+    function createVault(address priceToken, address collateralToken) public {
         vm.startBroadcast(deployer);
 
         console.log("\n===========================================");
         console.log("Creating New Vault (Modular)");
-        console.log("Project Token:", projectToken);
+        console.log("Price Token:", priceToken);
+        console.log("Collateral Token:", collateralToken);
         console.log("===========================================\n");
 
         // Get parameters from env or use defaults
@@ -47,7 +49,8 @@ contract CreateVaultModular is DeployHelper {
         console.log("Graduation Threshold:", graduationThreshold);
 
         // Create vault
-        address vaultAddress = vmgr.createVault(projectToken, minBet, maxBet, graduationThreshold);
+        address vaultAddress =
+            vmgr.createVault(priceToken, collateralToken, minBet, maxBet, graduationThreshold);
 
         console.log("\n[SUCCESS] Vault Created!");
         console.log("Vault Address:", vaultAddress);
@@ -60,13 +63,15 @@ contract CreateVaultModular is DeployHelper {
 
     /**
      * @notice Create a vault with custom parameters
-     * @param projectToken Project token address
+     * @param priceToken Token whose price is tracked (e.g. SEI)
+     * @param collateralToken Token used for LP and collateral (e.g. USDC)
      * @param minBet Minimum bet amount
      * @param maxBet Maximum bet amount
      * @param graduationThreshold Graduation threshold
      */
     function createVaultWithParams(
-        address projectToken,
+        address priceToken,
+        address collateralToken,
         uint256 minBet,
         uint256 maxBet,
         uint256 graduationThreshold
@@ -75,13 +80,15 @@ contract CreateVaultModular is DeployHelper {
 
         console.log("\n===========================================");
         console.log("Creating New Vault (Modular) with Custom Params");
-        console.log("Project Token:", projectToken);
+        console.log("Price Token:", priceToken);
+        console.log("Collateral Token:", collateralToken);
         console.log("Min Bet:", minBet);
         console.log("Max Bet:", maxBet);
         console.log("Graduation Threshold:", graduationThreshold);
         console.log("===========================================\n");
 
-        address vaultAddress = vmgr.createVault(projectToken, minBet, maxBet, graduationThreshold);
+        address vaultAddress =
+            vmgr.createVault(priceToken, collateralToken, minBet, maxBet, graduationThreshold);
 
         console.log("\n[SUCCESS] Vault Created!");
         console.log("Vault Address:", vaultAddress);
@@ -105,15 +112,17 @@ contract CreateVaultModular is DeployHelper {
     }
 
     /**
-     * @notice View vault by project token
-     * @param projectToken Project token address
+     * @notice View vault by (collateralToken, priceToken) pair
+     * @param collateralToken Collateral token address
+     * @param priceToken Price token address
      */
-    function viewVault(address projectToken) public view {
-        address vaultAddress = vmgr.getVault(projectToken);
+    function viewVault(address collateralToken, address priceToken) public view {
+        address vaultAddress = vmgr.getVault(collateralToken, priceToken);
         require(vaultAddress != address(0), "Vault not found");
 
         console.log("\n=== Vault Info ===");
-        console.log("Project Token:", projectToken);
+        console.log("Price Token:", priceToken);
+        console.log("Collateral Token:", collateralToken);
         console.log("Vault Address:", vaultAddress);
         _printVaultInfo(vaultAddress);
     }
@@ -126,7 +135,8 @@ contract CreateVaultModular is DeployHelper {
         VaultRouter vault = VaultRouter(payable(vaultAddress));
 
         console.log("\n--- Vault Details ---");
-        console.log("Project Token:", vault.projectToken());
+        console.log("Price Token:", vault.priceToken());
+        console.log("Collateral Token:", vault.collateralToken());
         console.log("Version:", vault.version());
 
         VaultStorageLib.VaultInfo memory info = vault.vaultInfo();
@@ -151,7 +161,8 @@ contract CreateVaultModular is DeployHelper {
             status = "Inactive";
         }
 
-        console.log("  - Token:", vault.projectToken());
+        console.log("  - Price Token:", vault.priceToken());
+        console.log("  - Collateral Token:", vault.collateralToken());
         console.log("  - Liquidity:", info.totalLiquidity);
         console.log("  - Status:", status);
     }

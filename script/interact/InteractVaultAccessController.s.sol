@@ -222,14 +222,15 @@ contract InteractVaultAccessController is DeployHelper {
     }
 
     /**
-     * @notice Emergency unpause vault by project token
-     * @param projectToken Project token address
+     * @notice Emergency unpause vault by (collateralToken, priceToken) pair
+     * @param collateralToken Collateral token address
+     * @param priceToken Price token address
      * @dev Only callable by DEFAULT_ADMIN_ROLE (Timelock)
      */
-    function emergencyUnpauseVault(address projectToken) public {
+    function emergencyUnpauseVault(address collateralToken, address priceToken) public {
         vm.startBroadcast(deployer);
-        accessController.emergencyUnpauseVault(projectToken);
-        console.log("Emergency unpause executed for token:", projectToken);
+        accessController.emergencyUnpauseVault(collateralToken, priceToken);
+        console.log("Emergency unpause executed for collateral/price pair");
         vm.stopBroadcast();
     }
 

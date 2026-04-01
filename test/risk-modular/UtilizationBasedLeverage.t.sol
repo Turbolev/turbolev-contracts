@@ -78,11 +78,10 @@ contract UtilizationBasedLeverageTest is BaseTestModular {
     function test_LeverageLimit_AtMaxLeverage() public {
         _addLiquidity(liquidityProvider, 100_000 ether); // Large vault
 
-        // Get current max leverage config
-        (,, uint16 tier1MaxLeverage,,) = vault.getLeverageTierConfig();
+        uint16 maxLeverage = vault.getMaxLeverage();
 
         // Position at max leverage should work for large vaults
-        uint8 safeLeverage = uint8(tier1MaxLeverage > 100 ? 100 : tier1MaxLeverage);
+        uint8 safeLeverage = uint8(maxLeverage > 100 ? 100 : maxLeverage);
         vault.checkPositionRisk(100 ether, safeLeverage, 1);
     }
 

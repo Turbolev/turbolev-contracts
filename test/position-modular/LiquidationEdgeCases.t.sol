@@ -33,7 +33,14 @@ contract LiquidationEdgeCasesTest is BaseTestModular {
         vm.startPrank(user1);
         projectToken.approve(address(positionManager), 10 ether);
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), 10 ether, 5, 1, type(uint256).max, block.timestamp + 1 hours, ""
+            address(projectToken),
+            address(projectToken),
+            10 ether,
+            5,
+            1,
+            type(uint256).max,
+            block.timestamp + 1 hours,
+            ""
         );
         vm.stopPrank();
 
@@ -50,6 +57,7 @@ contract LiquidationEdgeCasesTest is BaseTestModular {
         vm.startPrank(user1);
         projectToken.approve(address(positionManager), 10 ether);
         positionManager.openPosition{ value: 0 }(
+            address(projectToken),
             address(projectToken),
             10 ether,
             20,
@@ -73,6 +81,7 @@ contract LiquidationEdgeCasesTest is BaseTestModular {
         vm.startPrank(user1);
         projectToken.approve(address(positionManager), 10 ether);
         positionManager.openPosition{ value: 0 }(
+            address(projectToken),
             address(projectToken),
             10 ether,
             2,
@@ -98,7 +107,14 @@ contract LiquidationEdgeCasesTest is BaseTestModular {
         vm.startPrank(user1);
         projectToken.approve(address(positionManager), 20 ether);
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), 10 ether, 10, 1, type(uint256).max, block.timestamp + 1 hours, ""
+            address(projectToken),
+            address(projectToken),
+            10 ether,
+            10,
+            1,
+            type(uint256).max,
+            block.timestamp + 1 hours,
+            ""
         );
 
         // Add margin to increase safety buffer
@@ -121,6 +137,7 @@ contract LiquidationEdgeCasesTest is BaseTestModular {
         projectToken.approve(address(positionManager), 10 ether);
         positionManager.openPosition{ value: 0 }(
             address(projectToken),
+            address(projectToken),
             10 ether,
             10,
             1, // LONG
@@ -138,6 +155,7 @@ contract LiquidationEdgeCasesTest is BaseTestModular {
         vm.startPrank(user1);
         projectToken.approve(address(positionManager), 10 ether);
         positionManager.openPosition{ value: 0 }(
+            address(projectToken),
             address(projectToken),
             10 ether,
             10,
@@ -162,12 +180,26 @@ contract LiquidationEdgeCasesTest is BaseTestModular {
 
         // Position 1: Low leverage
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), 10 ether, 3, 1, type(uint256).max, block.timestamp + 1 hours, ""
+            address(projectToken),
+            address(projectToken),
+            10 ether,
+            3,
+            1,
+            type(uint256).max,
+            block.timestamp + 1 hours,
+            ""
         );
 
         // Position 2: High leverage (more susceptible)
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), 10 ether, 15, 1, type(uint256).max, block.timestamp + 1 hours, ""
+            address(projectToken),
+            address(projectToken),
+            10 ether,
+            15,
+            1,
+            type(uint256).max,
+            block.timestamp + 1 hours,
+            ""
         );
         vm.stopPrank();
 
@@ -185,7 +217,14 @@ contract LiquidationEdgeCasesTest is BaseTestModular {
         vm.startPrank(user1);
         projectToken.approve(address(positionManager), 10 ether);
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), 10 ether, 10, 1, type(uint256).max, block.timestamp + 1 hours, ""
+            address(projectToken),
+            address(projectToken),
+            10 ether,
+            10,
+            1,
+            type(uint256).max,
+            block.timestamp + 1 hours,
+            ""
         );
         vm.stopPrank();
     }
@@ -200,6 +239,7 @@ contract LiquidationEdgeCasesTest is BaseTestModular {
         vm.startPrank(user1);
         projectToken.approve(address(positionManager), minCollateral);
         positionManager.openPosition{ value: 0 }(
+            address(projectToken),
             address(projectToken),
             minCollateral,
             5,
@@ -218,7 +258,14 @@ contract LiquidationEdgeCasesTest is BaseTestModular {
         vm.startPrank(user1);
         projectToken.approve(address(positionManager), 5 ether);
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), 5 ether, 20, 1, type(uint256).max, block.timestamp + 1 hours, ""
+            address(projectToken),
+            address(projectToken),
+            5 ether,
+            20,
+            1,
+            type(uint256).max,
+            block.timestamp + 1 hours,
+            ""
         );
         vm.stopPrank();
     }
@@ -232,7 +279,14 @@ contract LiquidationEdgeCasesTest is BaseTestModular {
         vm.startPrank(user1);
         projectToken.approve(address(positionManager), 10 ether);
         positionManager.openPosition{ value: 0 }(
-            address(projectToken), 10 ether, 10, 1, type(uint256).max, block.timestamp + 1 hours, ""
+            address(projectToken),
+            address(projectToken),
+            10 ether,
+            10,
+            1,
+            type(uint256).max,
+            block.timestamp + 1 hours,
+            ""
         );
 
         vm.warp(block.timestamp + 61 seconds);
@@ -253,6 +307,7 @@ contract LiquidationEdgeCasesTest is BaseTestModular {
         vm.startPrank(user1);
         projectToken.approve(address(positionManager), collateral);
         positionManager.openPosition{ value: 0 }(
+            address(projectToken),
             address(projectToken),
             collateral,
             leverage,

@@ -60,12 +60,13 @@ contract InteractVaultAdminProxy is Script {
         }
     }
 
-    function checkVault(address projectToken) public view {
-        address vault = adminProxy.getVault(projectToken);
+    function checkVault(address collateralToken, address priceToken) public view {
+        address vault = adminProxy.getVault(collateralToken, priceToken);
         console.log("\n=== Vault Info ===");
-        console.log("Project Token:", projectToken);
+        console.log("Price Token:", priceToken);
+        console.log("Collateral Token:", collateralToken);
         console.log("Vault Address:", vault);
-        console.log("Is Supported:", adminProxy.isVaultSupported(projectToken));
+        console.log("Is Supported:", adminProxy.isVaultSupported(collateralToken, priceToken));
 
         if (vault != address(0)) {
             IVaultRouter v = IVaultRouter(vault);
@@ -86,96 +87,111 @@ contract InteractVaultAdminProxy is Script {
     // VAULT ADMIN OPERATIONS
     // ========================================================================
 
-    function pauseVault(address projectToken) public {
+    function pauseVault(address collateralToken, address priceToken) public {
         console.log("\n=== Pause Vault ===");
-        console.log("Project Token:", projectToken);
+        console.log("Price Token:", priceToken);
 
         vm.startBroadcast(deployer);
-        adminProxy.pauseVault(projectToken);
+        adminProxy.pauseVault(collateralToken, priceToken);
         vm.stopBroadcast();
 
         console.log("[SUCCESS] Vault paused");
     }
 
-    function unpauseVault(address projectToken) public {
+    function unpauseVault(address collateralToken, address priceToken) public {
         console.log("\n=== Unpause Vault ===");
-        console.log("Project Token:", projectToken);
+        console.log("Price Token:", priceToken);
 
         vm.startBroadcast(deployer);
-        adminProxy.unpauseVault(projectToken);
+        adminProxy.unpauseVault(collateralToken, priceToken);
         vm.stopBroadcast();
 
         console.log("[SUCCESS] Vault unpaused");
     }
 
-    function updateVaultParams(address projectToken, uint256 minBet, uint256 maxBet) public {
+    function updateVaultParams(
+        address collateralToken,
+        address priceToken,
+        uint256 minBet,
+        uint256 maxBet
+    ) public {
         console.log("\n=== Update Vault Params ===");
-        console.log("Project Token:", projectToken);
+        console.log("Price Token:", priceToken);
         console.log("Min Bet:", minBet);
         console.log("Max Bet:", maxBet);
 
         vm.startBroadcast(deployer);
-        adminProxy.updateVaultParams(projectToken, minBet, maxBet);
+        adminProxy.updateVaultParams(collateralToken, priceToken, minBet, maxBet);
         vm.stopBroadcast();
 
         console.log("[SUCCESS] Vault params updated");
     }
 
-    function setVaultStakingFee(address projectToken, uint16 feeBps) public {
+    function setVaultStakingFee(address collateralToken, address priceToken, uint16 feeBps) public {
         console.log("\n=== Set Staking Fee ===");
-        console.log("Project Token:", projectToken);
+        console.log("Price Token:", priceToken);
         console.log("Fee (bps):", feeBps);
 
         vm.startBroadcast(deployer);
-        adminProxy.setVaultStakingFeeBps(projectToken, feeBps);
+        adminProxy.setVaultStakingFeeBps(collateralToken, priceToken, feeBps);
         vm.stopBroadcast();
 
         console.log("[SUCCESS] Staking fee updated");
     }
 
-    function setVaultEarlyWithdrawalFee(address projectToken, uint16 feeBps) public {
+    function setVaultEarlyWithdrawalFee(address collateralToken, address priceToken, uint16 feeBps)
+        public
+    {
         console.log("\n=== Set Early Withdrawal Fee ===");
-        console.log("Project Token:", projectToken);
+        console.log("Price Token:", priceToken);
         console.log("Fee (bps):", feeBps);
 
         vm.startBroadcast(deployer);
-        adminProxy.setVaultEarlyWithdrawalFeeBps(projectToken, feeBps);
+        adminProxy.setVaultEarlyWithdrawalFeeBps(collateralToken, priceToken, feeBps);
         vm.stopBroadcast();
 
         console.log("[SUCCESS] Early withdrawal fee updated");
     }
 
-    function setVaultTradingEnabled(address projectToken, bool enabled) public {
+    function setVaultTradingEnabled(address collateralToken, address priceToken, bool enabled)
+        public
+    {
         console.log("\n=== Set Trading Enabled ===");
-        console.log("Project Token:", projectToken);
+        console.log("Price Token:", priceToken);
         console.log("Enabled:", enabled);
 
         vm.startBroadcast(deployer);
-        adminProxy.setVaultTradingEnabled(projectToken, enabled);
+        adminProxy.setVaultTradingEnabled(collateralToken, priceToken, enabled);
         vm.stopBroadcast();
 
         console.log("[SUCCESS] Trading enabled updated");
     }
 
-    function setVaultGraduationThreshold(address projectToken, uint256 threshold) public {
+    function setVaultGraduationThreshold(
+        address collateralToken,
+        address priceToken,
+        uint256 threshold
+    ) public {
         console.log("\n=== Set Graduation Threshold ===");
-        console.log("Project Token:", projectToken);
+        console.log("Price Token:", priceToken);
         console.log("Threshold:", threshold);
 
         vm.startBroadcast(deployer);
-        adminProxy.setVaultGraduationThreshold(projectToken, threshold);
+        adminProxy.setVaultGraduationThreshold(collateralToken, priceToken, threshold);
         vm.stopBroadcast();
 
         console.log("[SUCCESS] Graduation threshold updated");
     }
 
-    function setVaultTreasury(address projectToken, address treasury) public {
+    function setVaultTreasury(address collateralToken, address priceToken, address treasury)
+        public
+    {
         console.log("\n=== Set Treasury ===");
-        console.log("Project Token:", projectToken);
+        console.log("Price Token:", priceToken);
         console.log("Treasury:", treasury);
 
         vm.startBroadcast(deployer);
-        adminProxy.setVaultTreasury(projectToken, treasury);
+        adminProxy.setVaultTreasury(collateralToken, priceToken, treasury);
         vm.stopBroadcast();
 
         console.log("[SUCCESS] Treasury updated");
@@ -192,13 +208,15 @@ contract InteractVaultAdminProxy is Script {
         console.log("[SUCCESS] Treasury updated for all vaults");
     }
 
-    function setVaultImpactEnabled(address projectToken, bool enabled) public {
+    function setVaultImpactEnabled(address collateralToken, address priceToken, bool enabled)
+        public
+    {
         console.log("\n=== Set Impact Enabled ===");
-        console.log("Project Token:", projectToken);
+        console.log("Price Token:", priceToken);
         console.log("Enabled:", enabled);
 
         vm.startBroadcast(deployer);
-        adminProxy.setVaultImpactEnabled(projectToken, enabled);
+        adminProxy.setVaultImpactEnabled(collateralToken, priceToken, enabled);
         vm.stopBroadcast();
 
         console.log("[SUCCESS] Impact enabled updated");
@@ -216,7 +234,8 @@ contract InteractVaultAdminProxy is Script {
     }
 
     function setVaultImpactConfig(
-        address projectToken,
+        address collateralToken,
+        address priceToken,
         uint16 tier1,
         uint16 tier2,
         uint16 tier3,
@@ -224,7 +243,7 @@ contract InteractVaultAdminProxy is Script {
         uint16 tier5
     ) public {
         console.log("\n=== Set Impact Config ===");
-        console.log("Project Token:", projectToken);
+        console.log("Price Token:", priceToken);
         console.log("Tier 1:", tier1);
         console.log("Tier 2:", tier2);
         console.log("Tier 3:", tier3);
@@ -232,19 +251,21 @@ contract InteractVaultAdminProxy is Script {
         console.log("Tier 5:", tier5);
 
         vm.startBroadcast(deployer);
-        adminProxy.setVaultImpactConfig(projectToken, tier1, tier2, tier3, tier4, tier5);
+        adminProxy.setVaultImpactConfig(
+            collateralToken, priceToken, tier1, tier2, tier3, tier4, tier5
+        );
         vm.stopBroadcast();
 
         console.log("[SUCCESS] Impact config updated");
     }
 
-    function withdrawFees(address projectToken, uint256 amount) public {
+    function withdrawFees(address collateralToken, address priceToken, uint256 amount) public {
         console.log("\n=== Withdraw Fees ===");
-        console.log("Project Token:", projectToken);
+        console.log("Price Token:", priceToken);
         console.log("Amount:", amount);
 
         vm.startBroadcast(deployer);
-        adminProxy.withdrawFees(projectToken, amount);
+        adminProxy.withdrawFees(collateralToken, priceToken, amount);
         vm.stopBroadcast();
 
         console.log("[SUCCESS] Fees withdrawn");

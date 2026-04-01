@@ -431,17 +431,17 @@ contract VaultAccessController is
     // ========================================================================
 
     /**
-     * @notice Emergency unpause vault by project token
+     * @notice Emergency unpause vault by (collateralToken, priceToken) pair
      * @dev Only callable by DEFAULT_ADMIN_ROLE (Timelock) to prevent abuse
      */
-    function emergencyUnpauseVault(address projectToken)
+    function emergencyUnpauseVault(address collateralToken, address priceToken)
         external
         nonReentrant
         onlyRole(DEFAULT_ADMIN_ROLE)
     {
         if (vaultManager == address(0)) revert VaultManagerNotSet();
-        IVaultManager(vaultManager).emergencyUnpauseVault(projectToken);
-        emit EmergencyUnpause(projectToken, msg.sender);
+        IVaultManager(vaultManager).emergencyUnpauseVault(collateralToken, priceToken);
+        emit EmergencyUnpause(collateralToken, msg.sender);
     }
 
     /**
