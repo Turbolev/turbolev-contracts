@@ -981,17 +981,22 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
 
     /**
      * @notice Update module address
-     * @dev Only callable by admin via VaultManager or governance
-     *      Requires no pending operations to ensure safe module swap
+     * @dev Only callable by UPGRADER_ROLE or DEFAULT_ADMIN_ROLE.
+     *      vaultManager is also accepted but must additionally hold UPGRADER_ROLE —
+     *      this prevents a compromised vaultManager from silently swapping vault logic
+     *      without explicit upgrade authorization.
+     *      Requires no pending operations to ensure safe module swap.
      */
     function updateModule(bytes4 moduleId, address newModule) external {
-        // Check caller is VaultManager or admin
         VaultStorageLib.CoreStorage storage core = VaultStorageLib.getCoreStorage();
-        if (msg.sender != core.vaultManager) {
-            VaultAccessController ac = VaultAccessController(core.accessController);
-            if (!ac.hasRole(ac.DEFAULT_ADMIN_ROLE(), msg.sender)) {
-                revert NotAuthorized();
-            }
+        VaultAccessController ac = VaultAccessController(core.accessController);
+
+        // All callers (including vaultManager) must hold UPGRADER_ROLE or DEFAULT_ADMIN_ROLE
+        if (
+            !ac.hasRole(ac.UPGRADER_ROLE(), msg.sender)
+                && !ac.hasRole(ac.DEFAULT_ADMIN_ROLE(), msg.sender)
+        ) {
+            revert NotAuthorized();
         }
 
         if (newModule == address(0)) revert InvalidModule();

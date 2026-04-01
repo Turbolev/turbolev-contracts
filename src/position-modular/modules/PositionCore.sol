@@ -228,10 +228,19 @@ contract PositionCore is PositionModuleBase {
         // Check risk limits
         IAssetVault(vaultAddress).checkPositionRisk(positionSize, leverage, direction);
 
+        // A-03 fix: calculate price impact BEFORE depositFromBet so that OI used for
+        // impactFee calculation reflects pre-trade state, not post-trade state.
+        // depositFromBet updates totalLongExposure/totalShortExposure; getExecutionPrice
+        // reads those same values — calling deposit first would cause impactFee to be
+        // computed on OI that already includes this position (over-charges first traders).
+        (uint256 executionPrice, uint256 impactFee, uint256 impactBps, bool isCrowdedSide) =
+            IAssetVault(vaultAddress).getExecutionPrice(openPrice, direction, positionSize);
+
         // Create position
         positionId = core.nextPositionId++;
+        core.openPositionCount++;
 
-        // Transfer collateral to VaultManager
+        // Transfer collateral to VaultManager (updates OI after impact is already calculated)
         IERC20(collateralToken).forceApprove(core.vaultManager, amount);
         IVaultManager(core.vaultManager)
             .depositFromBet(
@@ -271,15 +280,10 @@ contract PositionCore is PositionModuleBase {
         pos.initialMargin = amount;
         pos.addedMargin = 0;
 
-        // Calculate and settle price impact upfront
-        // positionSize (notional) is used so impactFee is consistent with imbalance_ratio
-        (uint256 executionPrice, uint256 impactFee, uint256 impactBps, bool isCrowdedSide) =
-            IAssetVault(vaultAddress).getExecutionPrice(openPrice, direction, positionSize);
-
         pos.executionPrice = executionPrice;
         pos.impactFee = impactFee;
 
-        // Record impact fee in vault (fee stays in vault, reduces effective collateral)
+        // Record impact fee in vault (fee goes to feePool — A-01 fix applied in recordImpactFee)
         if (impactFee > 0) {
             IAssetVault(vaultAddress)
                 .recordImpactFee(
@@ -361,8 +365,11 @@ contract PositionCore is PositionModuleBase {
                 revert OracleFetchFailed(reason);
             }
         } else {
+            // BLN-05 fix: use getPriceChecked (non-view, runs circuit breaker) instead of
+            // getPrice (view, bypasses circuit breaker). All state-changing price fetches
+            // must go through the circuit breaker to prevent settlement at manipulated prices.
             try IPriceFeedManager(core.priceFeedManager)
-                .getPrice(pos.projectToken, maxAge) returns (
+                .getPriceChecked(pos.projectToken, maxAge) returns (
                 uint256 _price, uint256 _publishTime
             ) {
                 closePrice = _price;
@@ -583,6 +590,7 @@ contract PositionCore is PositionModuleBase {
         pos.closePrice = closePrice;
         pos.state = finalState;
         pos.lastModifiedTimestamp = block.timestamp;
+        if (core.openPositionCount > 0) core.openPositionCount--;
 
         emit PositionClosed(
             positionId,

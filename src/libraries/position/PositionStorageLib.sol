@@ -68,6 +68,9 @@ library PositionStorageLib {
         // Position tracking
         uint64 nextPositionId;
         mapping(uint64 => PositionLib.Position) positions;
+        // Open position counter (incremented on open, decremented on close/liquidation)
+        // Used by updateModule to guard against module swaps while positions are active.
+        uint64 openPositionCount;
         // Configuration
         uint256 maintenanceMarginRatio;
         uint8 minLeverage;

@@ -513,11 +513,18 @@ contract VaultCore is VaultModuleBase {
             revert UserMismatch();
         }
 
+        // A-05 fix: use available liquidity (total minus already-reserved pending payouts)
+        // instead of total liquidity. Using totalLiquidity would allow multiple concurrent
+        // payouts to collectively exceed what the vault can actually pay out, causing the
+        // first payout to succeed while later ones silently overcommit vault reserves.
+        uint256 totalPending = core.vaultInfo.totalPendingPayoutAmount;
+        uint256 availableLiquidity = core.vaultInfo.totalLiquidity > totalPending
+            ? core.vaultInfo.totalLiquidity - totalPending
+            : 0;
+
         // Calculate payout
         VaultPayoutLib.PayoutParams memory params = VaultPayoutLib.PayoutParams({
-            totalAmount: amount,
-            collateral: collateral,
-            availableLiquidity: core.vaultInfo.totalLiquidity
+            totalAmount: amount, collateral: collateral, availableLiquidity: availableLiquidity
         });
 
         VaultPayoutLib.PayoutResult memory result = VaultPayoutLib.calculatePayout(params);
@@ -730,13 +737,24 @@ contract VaultCore is VaultModuleBase {
 
     /**
      * @notice Unpause vault
-     * @dev Allowed: VaultManager, VAULT_ADMIN_ROLE, or EMERGENCY_ROLE
+     * @dev Allowed: VaultManager, VAULT_ADMIN_ROLE, or EMERGENCY_ROLE / GUARDIAN_ROLE.
+     *
+     *      Policy (intentional design):
+     *      - EMERGENCY_ROLE and GUARDIAN_ROLE can both pause AND unpause.
+     *      - This enables self-service recovery after an accidental emergency pause
+     *        (e.g. guardian triggered a false-alarm pause and needs to immediately restore service).
+     *      - If governance wants Timelock-only unpause, restrict this function to
+     *        DEFAULT_ADMIN_ROLE only and remove EMERGENCY_ROLE / GUARDIAN_ROLE from here.
+     *
+     *      Risk accepted: an emergency actor could pause → unpause in the same tx,
+     *      effectively bypassing the pause mechanism. Mitigated by the fact that
+     *      EMERGENCY_ROLE is a separate multisig and its actions are monitored on-chain.
      */
     function unpause() external {
         VaultStorageLib.CoreStorage storage core = _core();
         VaultAccessController ac = VaultAccessController(core.accessController);
 
-        // Allow VaultManager, VAULT_ADMIN_ROLE, or EMERGENCY_ROLE
+        // Allow VaultManager, VAULT_ADMIN_ROLE, or EMERGENCY_ROLE / GUARDIAN_ROLE
         if (msg.sender != core.vaultManager) {
             if (!ac.hasRole(ac.VAULT_ADMIN_ROLE(), msg.sender) && !ac.hasEmergencyRole(msg.sender))
             {

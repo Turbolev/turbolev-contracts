@@ -263,6 +263,8 @@ contract SettlementEngine is
             // Full liquidation: vault takes all remaining collateral, user gets nothing
             payout = 0;
             fee = 0;
+            // Vault gains the full collateral (pnl is negative for user on liquidation)
+            vaultPnL = -pnl;
         } else if (won) {
             // Won: User gets collateral + profit (no house edge)
             uint256 profit = uint256(pnl);
@@ -295,6 +297,11 @@ contract SettlementEngine is
 
             payout = position.amount + cappedProfit;
             fee = 0;
+
+            // A-06 fix: vault only loses what it actually pays — cappedProfit, not full pnl.
+            // Using -pnl when profit is capped overstates vault loss and corrupts
+            // lifetimePnL / dailyNetPnL / LP reward distribution.
+            vaultPnL = -int256(cappedProfit);
         } else {
             // Lost: User gets collateral minus loss
             uint256 absLoss = uint256(-pnl); // pnl is negative when user loses
@@ -308,10 +315,9 @@ contract SettlementEngine is
                 payout = position.amount - absLoss;
                 fee = absLoss; // Vault keeps the loss amount
             }
+            // Vault gains the full loss amount
+            vaultPnL = -pnl;
         }
-
-        // Vault P&L = -user P&L (vault loses when user wins, gains when user loses)
-        vaultPnL = -pnl;
 
         // Determine final state
         if (isLiquidation) {

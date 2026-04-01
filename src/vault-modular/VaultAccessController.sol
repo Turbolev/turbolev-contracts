@@ -24,7 +24,9 @@ import "../interfaces/IVaultManager.sol";
  *
  * Emergency Actions:
  * - Any address with GUARDIAN_ROLE or EMERGENCY_ROLE can pause vaults immediately (no confirmation needed)
- * - Unpause requires DEFAULT_ADMIN_ROLE (Timelock)
+ * - Unpause is allowed for VAULT_ADMIN_ROLE, EMERGENCY_ROLE, and GUARDIAN_ROLE to enable
+ *   self-service recovery from accidental emergency pauses (see VaultCore.unpause NatSpec).
+ * - If Timelock-only unpause is required, restrict VaultCore.unpause to DEFAULT_ADMIN_ROLE.
  */
 contract VaultAccessController is
     Initializable,
@@ -91,6 +93,9 @@ contract VaultAccessController is
     event VaultManagerUpdated(address indexed oldManager, address indexed newManager);
     event EmergencyPause(address indexed vault, address indexed caller);
     event EmergencyUnpause(address indexed vault, address indexed caller);
+    /// @notice Emitted when updatePositionManagerRole is called with an oldPositionManager
+    ///         that does not actually hold POSITION_MANAGER_ROLE — indicates state desync.
+    event PositionManagerRoleMismatch(address indexed oldPositionManager);
 
     // ========================================================================
     // ERRORS
@@ -155,7 +160,10 @@ contract VaultAccessController is
      * @notice Update POSITION_MANAGER_ROLE — revoke old, grant new
      * @param oldPositionManager Previous position manager address (revoke role), or address(0) to skip revoke
      * @param newPositionManager New position manager address (grant role)
-     * @dev Only callable by VAULT_ADMIN_ROLE (VaultManager)
+     * @dev Only callable by VAULT_ADMIN_ROLE (VaultManager).
+     *      Defensive check: if oldPositionManager is provided but does NOT have the role,
+     *      emit a warning event instead of silently skipping — helps detect miscalls or
+     *      state desync between VaultManager and AccessController.
      */
     function updatePositionManagerRole(address oldPositionManager, address newPositionManager)
         external
@@ -163,6 +171,9 @@ contract VaultAccessController is
     {
         if (newPositionManager == address(0)) revert InvalidAddress();
         if (oldPositionManager != address(0)) {
+            if (!hasRole(POSITION_MANAGER_ROLE, oldPositionManager)) {
+                emit PositionManagerRoleMismatch(oldPositionManager);
+            }
             _revokeRole(POSITION_MANAGER_ROLE, oldPositionManager);
         }
         _grantRole(POSITION_MANAGER_ROLE, newPositionManager);
