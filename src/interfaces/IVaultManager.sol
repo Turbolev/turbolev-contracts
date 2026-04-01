@@ -91,7 +91,8 @@ interface IVaultManager {
         int256 vaultPnL,
         uint256 positionSize,
         uint8 direction,
-        address user
+        address user,
+        uint256 payout
     ) external returns (uint256 closeFee);
 
     /**

@@ -369,10 +369,11 @@ contract VaultManager is
         int256 vaultPnL,
         uint256 positionSize,
         uint8 direction,
-        address user
+        address user,
+        uint256 payout
     ) external onlyPositionManager returns (uint256 closeFee) {
         return IVaultRouter(_getVault(_projectToken))
-            .updateVaultPnL(positionId, collateral, vaultPnL, positionSize, direction, user);
+            .updateVaultPnL(positionId, collateral, vaultPnL, positionSize, direction, user, payout);
     }
 
     // ========================================================================

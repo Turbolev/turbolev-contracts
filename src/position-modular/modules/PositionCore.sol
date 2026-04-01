@@ -541,9 +541,7 @@ contract PositionCore is PositionModuleBase {
             .processSettlement(positionId, closePrice, isLiquidation);
 
         // No ongoing funding — impact fee was settled upfront at open.
-        uint256 adjustedPayout = payout;
-
-        // Update vault P&L
+        // Pass payout so vault caps closeFee at payout (M-18 fix).
         uint256 closeFee = IVaultManager(core.vaultManager)
             .updateVaultPnLWithLeverage(
                 pos.projectToken,
@@ -552,15 +550,12 @@ contract PositionCore is PositionModuleBase {
                 vaultPnL,
                 pos.positionSize,
                 pos.direction,
-                pos.user
+                pos.user,
+                payout
             );
 
-        // Deduct close fee
-        if (closeFee > 0 && adjustedPayout > closeFee) {
-            adjustedPayout -= closeFee;
-        } else if (closeFee > 0) {
-            adjustedPayout = 0;
-        }
+        // closeFee is already capped at payout by VaultCore, so subtraction is always safe.
+        uint256 adjustedPayout = payout - closeFee;
 
         // Execute payout
         if (adjustedPayout > 0) {

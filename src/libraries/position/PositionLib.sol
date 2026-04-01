@@ -146,11 +146,11 @@ library PositionLib {
         // If MMR = 20%, then liquidation at 80% loss
         uint256 liquidationThreshold = MathLib.BASIS_POINTS - maintenanceMarginRatio;
 
-        // Calculate price deviation percentage.
-        // Integer division truncates: result is floor(liquidationThreshold / leverage).
-        // This marginally favors the protocol by triggering liquidation slightly earlier
-        // than exact math. The deviation is at most (leverage-1)/leverage bps — negligible.
-        uint256 priceDeviationBps = liquidationThreshold / leverage;
+        // Calculate price deviation percentage with round-up to favor the user.
+        // floor(liquidationThreshold / leverage) would trigger liquidation slightly earlier
+        // than the exact math warrants. Rounding up gives the user the full benefit of their
+        // margin, so liquidation only occurs at or beyond the mathematically correct threshold.
+        uint256 priceDeviationBps = MathLib.divRoundUp(liquidationThreshold, leverage);
 
         if (direction == BET_DIRECTION_LONG) {
             // LONG: liquidation when price decreases

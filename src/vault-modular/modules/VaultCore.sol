@@ -595,14 +595,17 @@ contract VaultCore is VaultModuleBase {
         int256 vaultPnL,
         uint256 positionSize,
         uint8 direction,
-        address user
+        address user,
+        uint256 payout
     ) external onlyVaultManagerOrHelper returns (uint256 closeFee) {
         VaultStorageLib.CoreStorage storage core = _core();
         VaultStorageLib.FundingStorage storage funding = _funding();
         VaultStorageLib.RewardsStorage storage rewards = _rewards();
 
-        // Calculate close fee (returned to caller for deduction from payout)
-        closeFee = VaultPayoutLib.calculateCloseFee(collateral, core.feeConfig.closePositionFeeBps);
+        // Calculate close fee, capped at payout so vault never collects more than user has (M-18 fix)
+        uint256 rawCloseFee =
+            VaultPayoutLib.calculateCloseFee(collateral, core.feeConfig.closePositionFeeBps);
+        closeFee = (payout > 0 && rawCloseFee > payout) ? payout : rawCloseFee;
 
         if (closeFee > 0) {
             // Close fee goes to feePool (separate from LP liquidity)
@@ -612,10 +615,10 @@ contract VaultCore is VaultModuleBase {
         }
 
         // Calculate PnL update for lifetime tracking (stats only)
+        // Pass the already-capped closeFee directly to avoid double-capping
         VaultPayoutLib.PnLUpdateParams memory pnlParams = VaultPayoutLib.PnLUpdateParams({
-            collateral: collateral,
+            closeFee: closeFee,
             vaultPnL: vaultPnL,
-            closeFeeBps: core.feeConfig.closePositionFeeBps,
             currentLifetimePnL: core.vaultInfo.lifetimePnL,
             isNegativePnL: core.vaultInfo.isNegativePnL
         });

@@ -206,17 +206,19 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
         int256 vaultPnL,
         uint256 positionSize,
         uint8 direction,
-        address user
+        address user,
+        uint256 payout
     ) external returns (uint256 closeFee) {
         bytes memory result = _delegateToCore(
             abi.encodeWithSignature(
-                "updateVaultPnL(uint64,uint256,int256,uint256,uint8,address)",
+                "updateVaultPnL(uint64,uint256,int256,uint256,uint8,address,uint256)",
                 positionId,
                 collateral,
                 vaultPnL,
                 positionSize,
                 direction,
-                user
+                user,
+                payout
             )
         );
         return abi.decode(result, (uint256));
