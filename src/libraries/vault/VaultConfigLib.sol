@@ -91,6 +91,9 @@ library VaultConfigLib {
     uint16 constant MAX_LEVERAGE_ALLOWED = 1000; // Safety cap for max leverage
     uint16 constant MIN_DIRECTIONAL_EXPOSURE_BPS = 1000; // 10% minimum
     uint16 constant MAX_DIRECTIONAL_EXPOSURE_BPS = 10_000; // 100% maximum
+    /// @notice Hard cap on Total OI multiplier: max 1.5x TVL (15000 bps)
+    /// Prevents admin from disabling the OI cap by setting an arbitrarily large multiplier.
+    uint16 constant MAX_OI_CAP_MULTIPLIER_BPS = 15_000; // 1.5x TVL
 
     // ========================================================================
     // DEFAULT VALUES - UTILIZATION CONFIG (for leverage adjustment)
@@ -289,18 +292,23 @@ library VaultConfigLib {
      * @return valid True if configuration is valid
      */
     function validateOITierConfig(OITierConfig memory config) internal pure returns (bool valid) {
-        // Fixed multiplier must be positive
+        // Fixed multiplier must be positive and within hard cap (max 1.5x TVL)
         if (config.fixedMultiplierBps == 0) return false;
+        if (config.fixedMultiplierBps > MAX_OI_CAP_MULTIPLIER_BPS) return false;
         // If using tiers, they must be in order
         if (config.tier1Threshold > 0 || config.tier2Threshold > 0 || config.tier3Threshold > 0) {
             if (config.tier2Threshold < config.tier1Threshold) return false;
             if (config.tier3Threshold < config.tier2Threshold) return false;
         }
-        // All multipliers must be positive
+        // All tier multipliers must be positive and within hard cap (max 1.5x TVL)
         if (config.tier1MultiplierBps == 0) return false;
+        if (config.tier1MultiplierBps > MAX_OI_CAP_MULTIPLIER_BPS) return false;
         if (config.tier2MultiplierBps == 0) return false;
+        if (config.tier2MultiplierBps > MAX_OI_CAP_MULTIPLIER_BPS) return false;
         if (config.tier3MultiplierBps == 0) return false;
+        if (config.tier3MultiplierBps > MAX_OI_CAP_MULTIPLIER_BPS) return false;
         if (config.tier4MultiplierBps == 0) return false;
+        if (config.tier4MultiplierBps > MAX_OI_CAP_MULTIPLIER_BPS) return false;
         return true;
     }
 

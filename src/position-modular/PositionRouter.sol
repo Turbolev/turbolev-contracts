@@ -53,6 +53,7 @@ contract PositionRouter is Initializable, UUPSUpgradeable {
     error DirectTransferNotAllowed();
     error AccessControllerNotSet();
     error MustPauseBeforeEmergencyUpgrade();
+    error PendingPositionsExist(uint64 openPositionCount);
 
     // ========================================================================
     // MODULE IDs
@@ -121,7 +122,7 @@ contract PositionRouter is Initializable, UUPSUpgradeable {
         revert DirectTransferNotAllowed();
     }
 
-    fallback() external payable {
+    fallback() external {
         revert DirectTransferNotAllowed();
     }
 
@@ -567,16 +568,25 @@ contract PositionRouter is Initializable, UUPSUpgradeable {
 
     /**
      * @notice Update module address
-     * @dev Only callable by admin
+     * @dev Only callable by DEFAULT_ADMIN_ROLE or UPGRADER_ROLE.
+     *      Reverts if there are open positions to prevent mid-flight state corruption
+     *      (mirrors VaultRouter.updateModule pending-operations guard).
      */
     function updateModule(bytes4 moduleId, address newModule) external {
         PositionStorageLib.CoreStorage storage core = PositionStorageLib.getCoreStorage();
         if (core.accessController == address(0)) revert AccessControllerNotSet();
 
         VaultAccessController ac = VaultAccessController(core.accessController);
-        if (!ac.hasRole(ac.DEFAULT_ADMIN_ROLE(), msg.sender)) {
+        if (
+            !ac.hasRole(ac.DEFAULT_ADMIN_ROLE(), msg.sender)
+                && !ac.hasRole(ac.UPGRADER_ROLE(), msg.sender)
+        ) {
             revert NotAuthorized();
         }
+
+        // Guard: reject module swap while positions are open
+        uint64 openCount = core.openPositionCount;
+        if (openCount > 0) revert PendingPositionsExist(openCount);
 
         if (newModule == address(0)) revert InvalidModule();
         if (newModule.code.length == 0) revert InvalidContractAddress(newModule);

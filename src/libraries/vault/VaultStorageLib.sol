@@ -125,6 +125,9 @@ library VaultStorageLib {
         // by topping up just before finalizeDailyReward().
         // Eligibility for new shares uses max(stakedAt, lastTopUpAt).
         uint256 lastTopUpAt;
+        // Accumulator snapshot at the time this LP last had their reward settled.
+        // reward_owed = shares * (rewardPerShareStored - rewardPerSharePaid) / PRECISION
+        uint256 rewardPerSharePaid;
     }
 
     /// @notice Daily snapshot for rewards
@@ -201,21 +204,30 @@ library VaultStorageLib {
 
     /// @custom:storage-location erc7201:boolean.vault.rewards
     struct RewardsStorage {
-        // Daily snapshots
+        // Daily snapshots — kept for storage layout compatibility (no longer written to)
         mapping(uint256 => DailySnapshot) dailySnapshots;
         uint256 currentDay;
+        // dailyNetPnL — kept for storage layout compatibility (no longer used for distribution)
         int256 dailyNetPnL;
         uint256 lastSnapshotDay;
         uint64[] dailyPositionIds;
-        // Claimable rewards per user
+        // Claimable rewards per user (settled but not yet transferred)
         mapping(address => uint256) claimableRewards;
         // Total rewards allocated but not yet claimed — used as cap in claimRewards()
         // to avoid using balanceOf() which includes LP liquidity and collateral.
         uint256 rewardsPool;
-        // Finalization progress
+        // Finalization progress — kept for storage layout compatibility
         uint256 finalizeLPIndex;
-        // True when finalizeDailyReward has started but not yet complete (multi-batch mode)
+        // isFinalizing — kept for storage layout compatibility
         bool isFinalizing;
+        // ── Option D: reward-per-share accumulator ──────────────────────────
+        // Global accumulator: total reward per share ever distributed, scaled by REWARD_PRECISION.
+        // Increases monotonically each time vault profit is realised.
+        uint256 rewardPerShareStored;
+        // Tracks vault profit tokens earmarked for LP rewards but not yet settled into
+        // claimableRewards. Ensures feePool withdrawals cannot overdraw the vault balance.
+        // Decremented when rewards are settled into claimableRewards (rewardsPool).
+        uint256 rewardsFund;
     }
 
     /// @custom:storage-location erc7201:boolean.vault.risk
@@ -314,6 +326,10 @@ library VaultStorageLib {
     uint8 internal constant MAX_PAYOUT_RETRIES = 3;
     uint256 internal constant MAX_DAYS_PER_CALCULATION = 365;
     uint256 internal constant MAX_LPS_PER_FINALIZE = 200;
+    /// @dev Scaling factor for rewardPerShareStored to preserve precision during integer division.
+    uint256 internal constant REWARD_PRECISION = 1e18;
+    /// @dev Dead shares minted to address(0) on first deposit to prevent share inflation attacks.
+    uint256 internal constant MINIMUM_LIQUIDITY = 1000;
 
     // Reentrancy status values
     uint256 internal constant NOT_ENTERED = 1;

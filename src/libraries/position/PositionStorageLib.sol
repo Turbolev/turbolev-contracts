@@ -68,6 +68,9 @@ library PositionStorageLib {
         // Position tracking
         uint64 nextPositionId;
         mapping(uint64 => PositionLib.Position) positions;
+        // Open position counter (incremented on open, decremented on close/liquidation)
+        // Used by updateModule to guard against module swaps while positions are active.
+        uint64 openPositionCount;
         // Configuration
         uint256 maintenanceMarginRatio;
         uint8 minLeverage;
@@ -128,8 +131,9 @@ library PositionStorageLib {
     /// @notice Maximum allowed min position hold time (1 hour)
     uint256 internal constant MAX_MIN_POSITION_HOLD_TIME = 3600;
 
-    /// @notice Maximum allowed price age for oracle validation (1 hour)
-    uint256 internal constant MAX_ALLOWED_PRICE_AGE = 1 hours;
+    /// @notice Maximum allowed price age for oracle validation (60 seconds)
+    /// @dev Tightened from 1 hour to limit cherry-pick window for Pyth pull oracle (R-05)
+    uint256 internal constant MAX_ALLOWED_PRICE_AGE = 60;
 
     // Reentrancy status values
     uint256 internal constant NOT_ENTERED = 1;

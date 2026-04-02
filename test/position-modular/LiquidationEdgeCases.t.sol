@@ -290,6 +290,7 @@ contract LiquidationEdgeCasesTest is BaseTestModular {
         );
 
         vm.warp(block.timestamp + 61 seconds);
+        _refreshPrice();
 
         // User can close position before liquidation threshold is reached
         positionManager.closePosition(1, block.timestamp + 1 hours, "");

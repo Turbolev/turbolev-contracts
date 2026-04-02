@@ -187,6 +187,7 @@ contract SettlementEngineTest is BaseTestModular {
         );
 
         vm.warp(block.timestamp + 61 seconds);
+        _refreshPrice();
 
         uint256 balanceBefore = projectToken.balanceOf(user1);
 
@@ -222,6 +223,7 @@ contract SettlementEngineTest is BaseTestModular {
         );
 
         vm.warp(block.timestamp + 61 seconds);
+        _refreshPrice();
 
         positionManager.closePosition(1, block.timestamp + 1 hours, "");
         vm.stopPrank();
@@ -257,6 +259,7 @@ contract SettlementEngineTest is BaseTestModular {
         );
 
         vm.warp(block.timestamp + 61 seconds);
+        _refreshPrice();
 
         positionManager.closePosition(1, block.timestamp + 1 hours, "");
         vm.stopPrank();
@@ -293,6 +296,7 @@ contract SettlementEngineTest is BaseTestModular {
         vm.stopPrank();
 
         vm.warp(block.timestamp + 61 seconds);
+        _refreshPrice();
 
         // Close all positions
         vm.startPrank(user1);
@@ -337,6 +341,7 @@ contract SettlementEngineTest is BaseTestModular {
         vm.stopPrank();
 
         vm.warp(block.timestamp + 61 seconds);
+        _refreshPrice();
 
         // Both users close
         vm.prank(user1);
@@ -368,6 +373,7 @@ contract SettlementEngineTest is BaseTestModular {
         );
 
         vm.warp(block.timestamp + 61 seconds);
+        _refreshPrice();
 
         positionManager.closePosition(1, block.timestamp + 1 hours, "");
         vm.stopPrank();
@@ -388,6 +394,7 @@ contract SettlementEngineTest is BaseTestModular {
         );
 
         vm.warp(block.timestamp + 61 seconds);
+        _refreshPrice();
 
         positionManager.closePosition(1, block.timestamp + 1 hours, "");
         vm.stopPrank();
@@ -412,6 +419,7 @@ contract SettlementEngineTest is BaseTestModular {
         );
 
         vm.warp(block.timestamp + 61 seconds);
+        _refreshPrice();
 
         positionManager.closePosition(1, block.timestamp + 1 hours, "");
         vm.stopPrank();
@@ -432,6 +440,7 @@ contract SettlementEngineTest is BaseTestModular {
         );
 
         vm.warp(block.timestamp + 61 seconds);
+        _refreshPrice();
 
         positionManager.closePosition(1, block.timestamp + 1 hours, "");
         vm.stopPrank();
@@ -459,6 +468,7 @@ contract SettlementEngineTest is BaseTestModular {
         );
 
         vm.warp(block.timestamp + 61 seconds);
+        _refreshPrice();
 
         positionManager.closePosition(1, block.timestamp + 1 hours, "");
         vm.stopPrank();

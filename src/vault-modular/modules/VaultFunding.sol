@@ -19,9 +19,11 @@ import "../../libraries/vault/VaultConfigLib.sol";
  *
  * Fee Flow:
  *   crowded-side user opens position
- *   → impactFee = collateral * impactBps / 10000
- *   → impactFee stays in vault (added to feePool / vault liquidity)
- *   → user's effective collateral = collateral - impactFee
+ *   → impactFee = positionSize * impactBps / 10000  (notional-based, consistent with imbalance)
+ *   → impactFee credited to feePool (LPs receive skew revenue)
+ *   → totalFeesCollected incremented for accounting
+ *   → betCollateral[positionId] reduced by impactFee (net collateral backing the position)
+ *   → executionPrice stored for display only; PnL calculated from openPrice (mark)
  */
 contract VaultFunding is VaultModuleBase {
     // ========================================================================
@@ -96,12 +98,16 @@ contract VaultFunding is VaultModuleBase {
     }
 
     /**
-     * @notice Record impact fee collected and emit event (called by VaultManager)
+     * @notice Record impact fee collected and route it to feePool (A-01 fix)
+     * @dev Impact fee is a real financial penalty on the crowded side — it must be
+     *      credited to the vault's feePool so LPs actually receive the skew revenue.
+     *      betCollateral for the position is reduced by impactFee so that executePayout
+     *      only pays out net collateral (not the fee portion).
      * @param positionId Position ID
      * @param user User address
      * @param direction Position direction
      * @param markPrice Oracle mark price
-     * @param executionPrice Adjusted execution price
+     * @param executionPrice Adjusted execution price (display only)
      * @param impactBps Applied impact bps
      * @param impactFee Fee amount collected
      * @param isCrowdedSide True if user was on crowded side
@@ -118,6 +124,21 @@ contract VaultFunding is VaultModuleBase {
     ) external nonReentrant onlyPositionManager {
         VaultStorageLib.FundingStorage storage funding = _funding();
         funding.totalImpactFeesCollected += impactFee;
+
+        if (impactFee > 0) {
+            VaultStorageLib.CoreStorage storage core = _core();
+
+            // Route impact fee to feePool so LPs actually receive the skew revenue.
+            core.feePool += impactFee;
+            core.vaultInfo.totalFeesCollected += impactFee;
+
+            // Reduce betCollateral by impactFee so executePayout only pays net collateral.
+            // betCollateral was set to netCollateral (after openFee) in depositFromBet;
+            // subtracting impactFee here gives the true "user's skin in the game".
+            if (core.betCollateral[positionId] >= impactFee) {
+                core.betCollateral[positionId] -= impactFee;
+            }
+        }
 
         emit PriceImpactApplied(
             positionId,
@@ -279,7 +300,7 @@ contract VaultFunding is VaultModuleBase {
         uint16 tier3ImpactBps,
         uint16 tier4ImpactBps,
         uint16 tier5ImpactBps
-    ) external nonReentrant onlyVaultManagerOrHelper {
+    ) external onlyVaultManagerOrHelper {
         VaultStorageLib.FundingStorage storage funding = _funding();
 
         PriceImpactLib.ImpactConfig memory newConfig = PriceImpactLib.ImpactConfig({
@@ -306,7 +327,7 @@ contract VaultFunding is VaultModuleBase {
      * @notice Enable or disable price impact
      * @param enabled True to enable price impact
      */
-    function setImpactEnabled(bool enabled) external nonReentrant onlyVaultManagerOrHelper {
+    function setImpactEnabled(bool enabled) external onlyVaultManagerOrHelper {
         VaultStorageLib.FundingStorage storage funding = _funding();
         funding.impactEnabled = enabled;
         funding.impactConfig.isEnabled = enabled;

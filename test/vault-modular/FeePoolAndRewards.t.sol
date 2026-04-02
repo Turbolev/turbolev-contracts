@@ -34,6 +34,8 @@ contract FeePoolAndRewardsTest is BaseTestModular {
     // Default fee constants (from VaultConfigLib)
     uint16 constant DEFAULT_OPEN_POSITION_FEE_BPS = 5; // 0.05%
     uint16 constant DEFAULT_CLOSE_POSITION_FEE_BPS = 5; // 0.05%
+    // Dead shares seeded on first deposit to prevent share inflation attack (R-11)
+    uint256 constant MINIMUM_LIQUIDITY = 1000;
 
     function setUp() public override {
         super.setUp();
@@ -89,10 +91,12 @@ contract FeePoolAndRewardsTest is BaseTestModular {
         VaultStorageLib.VaultInfo memory infoAfter = vault.vaultInfo();
         uint256 feePoolAfter = vault.feePool();
 
-        // totalLiquidity should only increase by netAmount (not full deposit)
+        // totalLiquidity should only increase by netAmount (not full deposit).
+        // First deposit also seeds MINIMUM_LIQUIDITY dead shares, so add that offset.
+        uint256 deadSharesOffset = infoBefore.totalLiquidity == 0 ? MINIMUM_LIQUIDITY : 0;
         assertEq(
             infoAfter.totalLiquidity,
-            infoBefore.totalLiquidity + expectedNetAmount,
+            infoBefore.totalLiquidity + expectedNetAmount + deadSharesOffset,
             "totalLiquidity should only include netAmount"
         );
 
@@ -190,6 +194,7 @@ contract FeePoolAndRewardsTest is BaseTestModular {
 
         // Wait for min close time
         vm.warp(block.timestamp + 61);
+        mockPyth.setPrice(projectTokenPriceId, 100e8, -8, block.timestamp);
 
         // Close position
         vm.prank(trader1);
@@ -302,8 +307,9 @@ contract FeePoolAndRewardsTest is BaseTestModular {
 
         // Check totalLiquidity unchanged
         VaultStorageLib.VaultInfo memory info = vault.vaultInfo();
-        // totalLiquidity should be (10000 - 100) + (5000 - 50) = 14850
-        uint256 expectedLiquidity = (10_000 ether - 100 ether) + (5000 ether - 50 ether);
+        // totalLiquidity = (10000 - 100) + (5000 - 50) + MINIMUM_LIQUIDITY (dead shares on first deposit)
+        uint256 expectedLiquidity =
+            (10_000 ether - 100 ether) + (5000 ether - 50 ether) + MINIMUM_LIQUIDITY;
         assertEq(info.totalLiquidity, expectedLiquidity, "totalLiquidity should be unchanged");
 
         console.log("Total fees withdrawn:", totalFees);
@@ -351,8 +357,8 @@ contract FeePoolAndRewardsTest is BaseTestModular {
         console.log("  Total liquidity:", infoAfterLp3.totalLiquidity);
         console.log("  Total shares:", infoAfterLp3.totalShares);
 
-        // Verify proportions
-        uint256 totalLiquidity = LP_DEPOSIT_1 + LP_DEPOSIT_2 + LP_DEPOSIT_3;
+        // Verify proportions — add MINIMUM_LIQUIDITY for dead shares seeded on first deposit
+        uint256 totalLiquidity = LP_DEPOSIT_1 + LP_DEPOSIT_2 + LP_DEPOSIT_3 + MINIMUM_LIQUIDITY;
         assertEq(infoAfterLp3.totalLiquidity, totalLiquidity, "Total liquidity should match");
 
         // Share ratios should match deposit ratios (approximately)
@@ -418,6 +424,7 @@ contract FeePoolAndRewardsTest is BaseTestModular {
 
         // Wait for min close time
         vm.warp(block.timestamp + 61);
+        mockPyth.setPrice(projectTokenPriceId, 100e8, -8, block.timestamp);
 
         // All traders close positions
         vm.prank(trader1);
@@ -490,6 +497,7 @@ contract FeePoolAndRewardsTest is BaseTestModular {
 
         // Wait for min close time
         vm.warp(block.timestamp + 61);
+        mockPyth.setPrice(projectTokenPriceId, 98e8, -8, block.timestamp);
 
         // Close position (trader loses)
         vm.prank(trader1);
@@ -513,7 +521,7 @@ contract FeePoolAndRewardsTest is BaseTestModular {
     }
 
     /**
-     * @notice Test rewards are distributed via finalizeDailyReward
+     * @notice Test rewards are distributed via accumulator (Option D — no keeper finalize)
      */
     function test_RewardsDistribution_ViaFinalize() public {
         // Grant keeper role first (via VaultManager which has VAULT_ADMIN_ROLE)
@@ -538,23 +546,20 @@ contract FeePoolAndRewardsTest is BaseTestModular {
         mockPyth.setPrice(projectTokenPriceId, 97e8, -8, block.timestamp);
 
         vm.warp(block.timestamp + 61);
+        mockPyth.setPrice(projectTokenPriceId, 97e8, -8, block.timestamp);
 
         vm.prank(trader1);
         positionManager.closePosition(pos1, 3600, bytes(""));
 
-        // Check dailyNetPnL
+        // Check dailyNetPnL (kept for backward-compat display)
         int256 dailyPnL = vault.dailyNetPnL();
         console.log("Daily Net PnL:", uint256(dailyPnL > 0 ? dailyPnL : -dailyPnL));
         console.log("Is Positive:", dailyPnL > 0);
 
-        // Move to next day and finalize
+        // Move past eligibility period — Option D, no keeper finalize needed
         vm.warp(block.timestamp + 1 days);
 
-        // Finalize daily rewards
-        vm.prank(keeper);
-        vault.finalizeDailyReward();
-
-        // Check claimable rewards for LPs
+        // Check claimable rewards for LPs (accumulator already updated on settlement)
         uint256 lp1Rewards = vault.calculatePendingRewards(lp1);
         uint256 lp2Rewards = vault.calculatePendingRewards(lp2);
 
@@ -593,17 +598,15 @@ contract FeePoolAndRewardsTest is BaseTestModular {
         mockPyth.setPrice(projectTokenPriceId, 97e8, -8, block.timestamp);
 
         vm.warp(block.timestamp + 61);
+        mockPyth.setPrice(projectTokenPriceId, 97e8, -8, block.timestamp);
 
         vm.prank(trader1);
         positionManager.closePosition(pos1, 3600, bytes(""));
 
-        // Move to next day and finalize
+        // Move past eligibility period — Option D, no keeper finalize needed
         vm.warp(block.timestamp + 1 days);
 
-        vm.prank(keeper);
-        vault.finalizeDailyReward();
-
-        // LP withdraws all liquidity
+        // LP withdraws all liquidity — rewards are settled automatically on removeLiquidity
         // First skip lock period
         vm.warp(block.timestamp + 31 days);
 
@@ -662,14 +665,14 @@ contract FeePoolAndRewardsTest is BaseTestModular {
         vm.stopPrank();
 
         vm.warp(block.timestamp + 61);
+        // Refresh price after warp to satisfy circuit breaker (maxDeviationBps = 10%)
+        mockPyth.setPrice(projectTokenPriceId, 100e8, -8, block.timestamp);
 
         vm.prank(trader1);
         positionManager.closePosition(pos1, 3600, bytes(""));
 
-        // Move to next day and finalize rewards to distribute PnL
+        // Move past eligibility period — Option D, accumulator already updated on settlement
         vm.warp(block.timestamp + 1 days);
-        vm.prank(keeper);
-        vault.finalizeDailyReward();
 
         // Record feePool
         uint256 feePoolAfterTrade = vault.feePool();
@@ -696,9 +699,9 @@ contract FeePoolAndRewardsTest is BaseTestModular {
         console.log("Total shares:", info.totalShares);
         console.log("FeePool:", vault.feePool());
 
-        // totalLiquidity should be 0 (no orphaned LP funds)
-        assertEq(info.totalLiquidity, 0, "No orphaned LP funds");
-        assertEq(info.totalShares, 0, "No orphaned shares");
+        // totalLiquidity should equal MINIMUM_LIQUIDITY (dead shares locked at address(0), cannot be withdrawn)
+        assertEq(info.totalLiquidity, MINIMUM_LIQUIDITY, "Only dead shares remain");
+        assertEq(info.totalShares, MINIMUM_LIQUIDITY, "Only dead shares remain");
 
         // LPs claim any rewards
         vm.prank(lp1);
@@ -765,8 +768,12 @@ contract FeePoolAndRewardsTest is BaseTestModular {
         console.log("  FeePool (staking fees):", feePoolAfterDeposits);
 
         // Expected: 100,000 * 0.5% = 500 ether in fees
-        // Liquidity: 100,000 - 500 = 99,500 ether
-        assertEq(afterDeposits.totalLiquidity, 99_500 ether, "Liquidity after deposits");
+        // Liquidity: 100,000 - 500 = 99,500 ether + MINIMUM_LIQUIDITY dead shares
+        assertEq(
+            afterDeposits.totalLiquidity,
+            99_500 ether + MINIMUM_LIQUIDITY,
+            "Liquidity after deposits"
+        );
         assertEq(feePoolAfterDeposits, 500 ether, "FeePool after deposits");
 
         // PHASE 2: Trading
@@ -808,6 +815,8 @@ contract FeePoolAndRewardsTest is BaseTestModular {
         mockPyth.setPrice(projectTokenPriceId, 99e8, -8, block.timestamp); // Price drops 1%
 
         vm.warp(block.timestamp + 61);
+        // Refresh price after warp to satisfy circuit breaker (maxDeviationBps = 10%)
+        mockPyth.setPrice(projectTokenPriceId, 99e8, -8, block.timestamp);
 
         // Close all positions
         vm.prank(trader1);
@@ -827,13 +836,11 @@ contract FeePoolAndRewardsTest is BaseTestModular {
         console.log("  Lifetime PnL:", afterTrades.lifetimePnL);
         console.log("  Is Negative PnL:", afterTrades.isNegativePnL);
 
-        // PHASE 4: Finalize rewards
-        console.log("\nPHASE 4: Finalize Rewards");
+        // PHASE 4: Check rewards (Option D — accumulator updated automatically on settlement)
+        console.log("\nPHASE 4: Check Rewards");
 
+        // Move past eligibility period
         vm.warp(block.timestamp + 1 days);
-
-        vm.prank(keeper);
-        vault.finalizeDailyReward();
 
         uint256 lp1Rewards = vault.calculatePendingRewards(lp1);
         uint256 lp2Rewards = vault.calculatePendingRewards(lp2);
@@ -898,6 +905,7 @@ contract FeePoolAndRewardsTest is BaseTestModular {
 
         uint256 finalFeePool = vault.feePool();
         console.log("  Final feePool:", finalFeePool);
+        console.log("  Vault token balance:", projectToken.balanceOf(address(vault)));
 
         uint256 treasuryBefore = projectToken.balanceOf(treasury);
         vm.prank(address(vaultManager));
@@ -914,9 +922,9 @@ contract FeePoolAndRewardsTest is BaseTestModular {
         console.log("FeePool:", vault.feePool());
         console.log("Vault token balance:", projectToken.balanceOf(address(vault)));
 
-        // Assertions
-        assertEq(finalInfo.totalLiquidity, 0, "No orphaned liquidity");
-        assertEq(finalInfo.totalShares, 0, "No orphaned shares");
+        // Assertions — MINIMUM_LIQUIDITY dead shares remain locked at address(0), cannot be withdrawn
+        assertEq(finalInfo.totalLiquidity, MINIMUM_LIQUIDITY, "Only dead shares remain");
+        assertEq(finalInfo.totalShares, MINIMUM_LIQUIDITY, "Only dead shares remain");
         assertEq(vault.feePool(), 0, "FeePool should be empty");
     }
 }

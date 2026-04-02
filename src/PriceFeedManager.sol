@@ -73,8 +73,9 @@ contract PriceFeedManager is
 
     /// @notice Circuit breaker configuration for extreme price movements
     struct CircuitBreakerConfig {
-        uint256 maxDeviationBps; // Max price deviation in bps (default: 5000 = 50%)
-        uint256 minDeviationWindow; // Time window to check deviation in seconds (default: 60s)
+        uint256 maxDeviationBps; // Soft threshold: max deviation within time window (default: 500 = 5%)
+        uint256 hardMaxDeviationBps; // Hard threshold: absolute max deviation even after timeout (default: 1000 = 10%)
+        uint256 minDeviationWindow; // Time window to check soft deviation in seconds (default: 60s)
         bool enabled; // Whether circuit breaker is enabled
     }
 
@@ -151,7 +152,10 @@ contract PriceFeedManager is
         uint256 timeDelta
     );
     event CircuitBreakerConfigUpdated(
-        uint256 maxDeviationBps, uint256 minDeviationWindow, bool enabled
+        uint256 maxDeviationBps,
+        uint256 hardMaxDeviationBps,
+        uint256 minDeviationWindow,
+        bool enabled
     );
     event CircuitBreakerBypassUpdated(address indexed projectToken, bool bypassed);
     event LastPriceRecordUpdated(address indexed projectToken, uint256 price, uint256 timestamp);
@@ -194,6 +198,7 @@ contract PriceFeedManager is
     // Access Control Errors
     error AccessControllerNotSet();
     error MustPauseBeforeEmergencyUpgrade();
+    error MustPauseBeforeEmergencyAction();
     error NotAuthorized();
 
     // ========================================================================
@@ -237,12 +242,13 @@ contract PriceFeedManager is
      */
     function _initCircuitBreaker() internal {
         circuitBreakerConfig = CircuitBreakerConfig({
-            maxDeviationBps: 5000, // 50% max deviation
-            minDeviationWindow: 60, // Check if within 60 seconds
-            enabled: true // Enabled by default
+            maxDeviationBps: 500, // 5% soft threshold within window
+            hardMaxDeviationBps: 1000, // 10% hard threshold always enforced
+            minDeviationWindow: 60, // 60 second window
+            enabled: true
         });
 
-        emit CircuitBreakerConfigUpdated(5000, 60, true);
+        emit CircuitBreakerConfigUpdated(500, 1000, 60, true);
     }
 
     // ========================================================================
@@ -1144,17 +1150,25 @@ contract PriceFeedManager is
 
     /**
      * @notice Set circuit breaker configuration
-     * @param _maxDeviationBps Maximum allowed deviation in basis points (100 = 1%, 5000 = 50%)
-     * @param _minDeviationWindow Time window for deviation check in seconds
+     * @param _maxDeviationBps Soft threshold: max deviation within time window in bps (100 = 1%)
+     * @param _hardMaxDeviationBps Hard threshold: absolute max deviation even after timeout in bps
+     * @param _minDeviationWindow Time window for soft deviation check in seconds
      * @param _enabled Whether circuit breaker is enabled
+     * @dev Soft threshold must be strictly less than hard threshold.
+     *      Hard threshold is always enforced regardless of time elapsed since last update (R-01 fix).
      */
     function setCircuitBreakerConfig(
         uint256 _maxDeviationBps,
+        uint256 _hardMaxDeviationBps,
         uint256 _minDeviationWindow,
         bool _enabled
     ) external onlyOwner {
-        // Validation: deviation should be between 1% (100 bps) and 90% (9000 bps)
+        // Soft threshold: between 1% (100 bps) and 90% (9000 bps)
         if (_maxDeviationBps < 100 || _maxDeviationBps > 9000) {
+            revert InvalidCircuitBreakerConfig();
+        }
+        // Hard threshold: must be >= soft threshold and <= 90%
+        if (_hardMaxDeviationBps < _maxDeviationBps || _hardMaxDeviationBps > 9000) {
             revert InvalidCircuitBreakerConfig();
         }
         // Min window should be at least 10 seconds
@@ -1164,11 +1178,14 @@ contract PriceFeedManager is
 
         circuitBreakerConfig = CircuitBreakerConfig({
             maxDeviationBps: _maxDeviationBps,
+            hardMaxDeviationBps: _hardMaxDeviationBps,
             minDeviationWindow: _minDeviationWindow,
             enabled: _enabled
         });
 
-        emit CircuitBreakerConfigUpdated(_maxDeviationBps, _minDeviationWindow, _enabled);
+        emit CircuitBreakerConfigUpdated(
+            _maxDeviationBps, _hardMaxDeviationBps, _minDeviationWindow, _enabled
+        );
     }
 
     /**
@@ -1197,6 +1214,10 @@ contract PriceFeedManager is
      *      (getPriceWithUpdate, setPriceFeedConfigWithInit), otherwise an attacker
      *      can gradually shift the baseline by repeatedly calling read functions
      *      with small price movements (M-10).
+     *
+     *      Dual-threshold logic (R-01 fix):
+     *      - Within window:  enforce soft threshold (maxDeviationBps)
+     *      - After timeout:  enforce hard threshold (hardMaxDeviationBps) — never fully bypass
      */
     function _validateCircuitBreaker(address projectToken, uint256 newPrice)
         internal
@@ -1215,15 +1236,14 @@ contract PriceFeedManager is
         }
 
         uint256 timeDelta = block.timestamp - lastRecord.timestamp;
-        if (timeDelta > circuitBreakerConfig.minDeviationWindow) {
-            // Outside time window — accept without deviation check.
-            // Baseline is NOT updated here; only oracle-push paths update it.
-            return true;
-        }
-
         uint256 deviationBps = _calculateDeviationBps(lastRecord.price, newPrice);
 
-        if (deviationBps > circuitBreakerConfig.maxDeviationBps) {
+        // Select threshold based on whether we are inside or outside the soft window
+        uint256 threshold = timeDelta > circuitBreakerConfig.minDeviationWindow
+            ? circuitBreakerConfig.hardMaxDeviationBps  // outside window: hard threshold
+            : circuitBreakerConfig.maxDeviationBps; // inside window: soft threshold
+
+        if (deviationBps > threshold) {
             emit CircuitBreakerTriggered(
                 projectToken, lastRecord.price, newPrice, deviationBps, timeDelta
             );
@@ -1241,6 +1261,10 @@ contract PriceFeedManager is
      * @dev Use ONLY when an actual oracle update has been pushed (getPriceWithUpdate,
      *      setPriceFeedConfigWithInit). Updating the baseline on every read would
      *      allow gradual baseline manipulation (M-10).
+     *
+     *      Dual-threshold logic (R-01 fix):
+     *      - Within window:  enforce soft threshold (maxDeviationBps)
+     *      - After timeout:  enforce hard threshold (hardMaxDeviationBps) — never fully bypass
      */
     function _checkCircuitBreaker(address projectToken, uint256 newPrice)
         internal
@@ -1260,15 +1284,14 @@ contract PriceFeedManager is
         }
 
         uint256 timeDelta = block.timestamp - lastRecord.timestamp;
-        if (timeDelta > circuitBreakerConfig.minDeviationWindow) {
-            // Outside time window — accept and update baseline.
-            _updateLastPriceRecord(projectToken, newPrice);
-            return true;
-        }
-
         uint256 deviationBps = _calculateDeviationBps(lastRecord.price, newPrice);
 
-        if (deviationBps > circuitBreakerConfig.maxDeviationBps) {
+        // Select threshold based on whether we are inside or outside the soft window
+        uint256 threshold = timeDelta > circuitBreakerConfig.minDeviationWindow
+            ? circuitBreakerConfig.hardMaxDeviationBps  // outside window: hard threshold
+            : circuitBreakerConfig.maxDeviationBps; // inside window: soft threshold
+
+        if (deviationBps > threshold) {
             emit CircuitBreakerTriggered(
                 projectToken, lastRecord.price, newPrice, deviationBps, timeDelta
             );
@@ -1349,14 +1372,15 @@ contract PriceFeedManager is
 
         timeSinceLastUpdate = block.timestamp - lastRecord.timestamp;
 
-        // Outside time window - never trips
-        if (timeSinceLastUpdate > circuitBreakerConfig.minDeviationWindow) {
-            return (false, 0, lastRecord.price, timeSinceLastUpdate);
-        }
-
         deviationBps = _calculateDeviationBps(lastRecord.price, newPrice);
-        wouldTrip = deviationBps > circuitBreakerConfig.maxDeviationBps;
         lastPrice = lastRecord.price;
+
+        // Select threshold: soft within window, hard after timeout
+        uint256 threshold = timeSinceLastUpdate > circuitBreakerConfig.minDeviationWindow
+            ? circuitBreakerConfig.hardMaxDeviationBps
+            : circuitBreakerConfig.maxDeviationBps;
+
+        wouldTrip = deviationBps > threshold;
     }
 
     /**
@@ -1376,33 +1400,47 @@ contract PriceFeedManager is
 
     /**
      * @notice Get circuit breaker configuration
-     * @return maxDeviationBps Maximum deviation in basis points
+     * @return maxDeviationBps Soft threshold in basis points (enforced within time window)
+     * @return hardMaxDeviationBps Hard threshold in basis points (always enforced)
      * @return minDeviationWindow Time window in seconds
      * @return enabled Whether circuit breaker is enabled
      */
     function getCircuitBreakerConfig()
         external
         view
-        returns (uint256 maxDeviationBps, uint256 minDeviationWindow, bool enabled)
+        returns (
+            uint256 maxDeviationBps,
+            uint256 hardMaxDeviationBps,
+            uint256 minDeviationWindow,
+            bool enabled
+        )
     {
         return (
             circuitBreakerConfig.maxDeviationBps,
+            circuitBreakerConfig.hardMaxDeviationBps,
             circuitBreakerConfig.minDeviationWindow,
             circuitBreakerConfig.enabled
         );
     }
 
     /**
-     * @notice Admin function to manually set last price record
+     * @notice Emergency function to manually reset the circuit breaker baseline price
      * @param projectToken Token address
-     * @param price Price to set
-     * @dev Use to bootstrap circuit breaker or reset after known manipulation
+     * @param price Price to set as new baseline
+     * @dev Restricted to GUARDIAN_ROLE or EMERGENCY_ROLE (Gnosis Safe multi-sig).
+     *      Contract MUST be paused first to prevent sandwich attacks during baseline reset —
+     *      no position can be opened/closed while paused, so the new baseline cannot be exploited.
      */
-    function setLastPriceRecord(address projectToken, uint256 price)
-        external
-        onlyOwner
-        whenNotPaused
-    {
+    function setLastPriceRecord(address projectToken, uint256 price) external {
+        if (address(accessController) == address(0)) revert AccessControllerNotSet();
+        if (
+            !accessController.hasRole(accessController.GUARDIAN_ROLE(), msg.sender)
+                && !accessController.hasRole(accessController.EMERGENCY_ROLE(), msg.sender)
+        ) {
+            revert NotAuthorized();
+        }
+        if (!paused()) revert MustPauseBeforeEmergencyAction();
+
         if (projectToken == address(0)) revert InvalidAddress();
         if (price == 0) revert InvalidOraclePrice();
 

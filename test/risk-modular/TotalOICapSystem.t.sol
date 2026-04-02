@@ -12,6 +12,8 @@ import "../vault-modular/BaseTestModular.sol";
  *      - Position risk checks with OI limits
  */
 contract TotalOICapSystemTest is BaseTestModular {
+    uint256 constant MINIMUM_LIQUIDITY = 1000;
+
     // ========================================================================
     // SETUP
     // ========================================================================
@@ -157,7 +159,9 @@ contract TotalOICapSystemTest is BaseTestModular {
 
         // Verify initial state
         assertEq(info.totalLeverageExposure, 0, "Initial exposure should be 0");
-        assertEq(info.totalLiquidity, 1000 ether, "Liquidity should be 1000 ether");
+        assertEq(
+            info.totalLiquidity, 1000 ether + MINIMUM_LIQUIDITY, "Liquidity should be 1000 ether"
+        );
     }
 
     // ========================================================================

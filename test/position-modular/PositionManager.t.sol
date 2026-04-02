@@ -218,6 +218,7 @@ contract PositionManagerTest is BaseTestModular {
 
         // Wait minimum hold time
         vm.warp(block.timestamp + 61 seconds);
+        _refreshPrice();
 
         // Close position
         positionManager.closePosition(positionId, block.timestamp + 1 hours, "");
@@ -241,6 +242,7 @@ contract PositionManagerTest is BaseTestModular {
         vm.stopPrank();
 
         vm.warp(block.timestamp + 61 seconds);
+        _refreshPrice();
 
         // User2 tries to close - should fail
         vm.startPrank(user2);

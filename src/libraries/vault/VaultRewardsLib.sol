@@ -219,4 +219,56 @@ library VaultRewardsLib {
     {
         return (MAX_LPS_PER_FINALIZE, MAX_DAYS_PER_CALCULATION);
     }
+
+    // ========================================================================
+    // OPTION D: REWARD-PER-SHARE ACCUMULATOR HELPERS
+    // ========================================================================
+
+    /// @dev Scaling factor — must match VaultStorageLib.REWARD_PRECISION
+    uint256 private constant PRECISION = 1e18;
+
+    /**
+     * @notice Compute the delta to add to rewardPerShareStored when profit is realised.
+     * @param profit      Vault profit for this settlement (must be > 0).
+     * @param totalShares Total LP shares currently outstanding (must be > 0).
+     * @return delta      Amount to add to rewardPerShareStored (scaled by PRECISION).
+     */
+    function computeRewardPerShareDelta(uint256 profit, uint256 totalShares)
+        internal
+        pure
+        returns (uint256 delta)
+    {
+        if (profit == 0 || totalShares == 0) return 0;
+        return (profit * PRECISION) / totalShares;
+    }
+
+    /**
+     * @notice Compute the pending reward for an LP given the current accumulator.
+     * @param userShares            LP's current share balance.
+     * @param rewardPerShareStored  Global accumulator (scaled by PRECISION).
+     * @param rewardPerSharePaid    Accumulator value when LP last settled.
+     * @return reward               Pending reward amount (in collateral token units).
+     */
+    function computePendingReward(
+        uint256 userShares,
+        uint256 rewardPerShareStored,
+        uint256 rewardPerSharePaid
+    ) internal pure returns (uint256 reward) {
+        if (userShares == 0 || rewardPerShareStored <= rewardPerSharePaid) return 0;
+        return (userShares * (rewardPerShareStored - rewardPerSharePaid)) / PRECISION;
+    }
+
+    /**
+     * @notice Check if an LP is eligible for rewards (must have staked for at least 1 day).
+     * @param stakedAt    Timestamp when LP first staked (or last top-up, whichever is later).
+     * @param currentTime Current block.timestamp.
+     * @return eligible   True if the LP has passed the minimum stake period.
+     */
+    function isEligibleAccumulator(uint256 stakedAt, uint256 currentTime)
+        internal
+        pure
+        returns (bool eligible)
+    {
+        return currentTime >= stakedAt + REWARD_MIN_STAKE_PERIOD;
+    }
 }

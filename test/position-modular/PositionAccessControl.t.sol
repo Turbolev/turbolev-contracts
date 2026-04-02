@@ -160,6 +160,7 @@ contract PositionAccessControlTest is BaseTestModular {
         vm.stopPrank();
 
         vm.warp(block.timestamp + 61 seconds);
+        _refreshPrice();
 
         // Pause contract
         vm.prank(mockTimelockController);
@@ -246,6 +247,7 @@ contract PositionAccessControlTest is BaseTestModular {
         vm.stopPrank();
 
         vm.warp(block.timestamp + 61 seconds);
+        _refreshPrice();
 
         // User1 can close
         vm.startPrank(user1);

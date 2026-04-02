@@ -58,6 +58,22 @@ contract MockPyth is IPyth {
     }
 }
 
+contract MockAccessController {
+    mapping(bytes32 => mapping(address => bool)) private _roles;
+
+    bytes32 public constant GUARDIAN_ROLE = keccak256("GUARDIAN_ROLE");
+    bytes32 public constant EMERGENCY_ROLE = keccak256("EMERGENCY_ROLE");
+    bytes32 public constant UPGRADER_ROLE = keccak256("UPGRADER_ROLE");
+
+    function grantRole(bytes32 role, address account) external {
+        _roles[role][account] = true;
+    }
+
+    function hasRole(bytes32 role, address account) external view returns (bool) {
+        return _roles[role][account];
+    }
+}
+
 /**
  * @title PriceFeedManagerTest
  * @notice Tests for PriceFeedManager with Pyth Oracle only
@@ -607,10 +623,20 @@ contract PriceFeedManagerTest is Test {
 
         priceFeedManager.setPriceFeedConfig(token, config);
 
+        // setLastPriceRecord requires accessController, GUARDIAN_ROLE, and paused state
+        MockAccessController mockAC = new MockAccessController();
+        mockAC.grantRole(mockAC.GUARDIAN_ROLE(), owner);
+        mockAC.grantRole(mockAC.UPGRADER_ROLE(), owner);
+        priceFeedManager.setAccessController(address(mockAC));
+        priceFeedManager.pause();
+
         priceFeedManager.setLastPriceRecord(token, 2000e18);
 
         (uint256 lastPrice,) = priceFeedManager.getLastPriceRecord(token);
         assertEq(lastPrice, 2000e18, "Manual price should be set");
+
+        // Unpause to allow getPrice
+        priceFeedManager.unpause();
 
         (uint256 price,) = priceFeedManager.getPrice(token, 3600);
         assertGt(price, 0, "Price should be returned after manual override");

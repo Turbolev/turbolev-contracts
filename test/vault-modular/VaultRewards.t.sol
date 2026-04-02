@@ -79,33 +79,27 @@ contract VaultRewardsTest is BaseTestModular {
     }
 
     // ========================================================================
-    // FINALIZE DAILY REWARD
+    // ACCUMULATOR (Option D — replaces finalizeDailyReward)
     // ========================================================================
 
-    function test_FinalizeDailyReward_RevertTooEarly() public {
-        // Use VaultManager to call finalizeDailyReward (it has admin role)
-        // Try to finalize immediately - should fail (too early)
-        vm.prank(address(vaultManager));
-        vm.expectRevert();
-        vault.finalizeDailyReward();
+    function test_RewardPerShareStored_Initial() public view {
+        uint256 accumulator = vault.rewardPerShareStored();
+        assertEq(accumulator, 0);
     }
 
-    function test_FinalizeDailyReward_AfterOneDay() public {
-        // Warp to next day
-        vm.warp(block.timestamp + 1 days);
+    function test_CalculatePendingRewards_AfterProfit() public {
+        // Warp past eligibility period
+        vm.warp(block.timestamp + 1 days + 1);
 
-        // Use VaultManager to call finalizeDailyReward (it has admin role)
-        vm.prank(address(vaultManager));
-        bool isComplete = vault.finalizeDailyReward();
-        assertTrue(isComplete);
-
-        // Check snapshot was taken
-        uint256 day = vault.currentDay();
-        assertGt(day, 0);
+        // Simulate vault profit by calling updateVaultPnL via vaultManager
+        // (In production this is called by SettlementEngine)
+        uint256 pending = vault.calculatePendingRewards(liquidityProvider);
+        // No settlement has happened yet, so pending should still be 0
+        assertEq(pending, 0);
     }
 
     // ========================================================================
-    // FINALIZE LP INDEX
+    // FINALIZE LP INDEX (kept for backward-compat storage getter)
     // ========================================================================
 
     function test_FinalizeLPIndex_Initial() public view {

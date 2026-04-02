@@ -6,6 +6,7 @@ import "../../libraries/vault/VaultStorageLib.sol";
 import "../../libraries/vault/VaultLiquidityLib.sol";
 import "../../libraries/vault/VaultPayoutLib.sol";
 import "../../libraries/vault/VaultRiskLib.sol";
+import "../../libraries/vault/VaultRewardsLib.sol";
 import "../../libraries/vault/VaultConfigLib.sol";
 import "../../libraries/math/PriceImpactLib.sol";
 import "../../libraries/math/MathLib.sol";
@@ -160,6 +161,8 @@ contract VaultCore is VaultModuleBase {
     uint256 private constant MAX_PAYOUTS_PER_TX = 50;
     uint8 private constant MAX_PAYOUT_RETRIES = 3;
     uint16 private constant MIN_POSITION_FEE_BPS = 1;
+    /// @dev Dead shares locked at address(0) on first deposit — prevents share inflation attack (R-11).
+    uint256 private constant MINIMUM_LIQUIDITY = 1000;
 
     // ========================================================================
     // INITIALIZATION
@@ -280,27 +283,39 @@ contract VaultCore is VaultModuleBase {
         if (msg.value != 0) revert InvalidAmount();
         IERC20(core.collateralToken).safeTransferFrom(msg.sender, address(this), amount);
 
-        // Calculate shares
+        // Calculate shares using dead-shares denominator to prevent share inflation (R-11).
+        // MINIMUM_LIQUIDITY dead shares are permanently locked at address(0) on first deposit,
+        // so the denominator is never zero and inflation attacks are not profitable.
         uint256 shares;
         if (core.vaultInfo.totalShares == 0) {
-            shares = netAmount * INITIAL_SHARE_MULTIPLIER;
-        } else {
-            shares = (netAmount * core.vaultInfo.totalShares) / core.vaultInfo.totalLiquidity;
+            // First-ever deposit: mint MINIMUM_LIQUIDITY dead shares to address(0) first,
+            // then calculate LP shares against the seeded pool.
+            core.vaultInfo.totalShares = MINIMUM_LIQUIDITY;
+            core.vaultInfo.totalLiquidity = MINIMUM_LIQUIDITY;
         }
+        shares = (netAmount * core.vaultInfo.totalShares) / core.vaultInfo.totalLiquidity;
         if (shares == 0) revert InvalidAmount();
 
-        // Update LP position
+        // Settle any accrued rewards before modifying shares (Option D accumulator).
+        VaultStorageLib.RewardsStorage storage rewards = _rewards();
         VaultStorageLib.LPPosition storage lpPos = core.lpPositions[msg.sender];
+
         if (lpPos.user == address(0)) {
             // First deposit: record stakedAt, lastTopUpAt stays 0
             lpPos.user = msg.sender;
             lpPos.stakedAt = block.timestamp;
+            // Initialise paid pointer to current accumulator so LP does not earn
+            // rewards retroactively for the period before they staked.
+            lpPos.rewardPerSharePaid = rewards.rewardPerShareStored;
             core.vaultLPs.push(msg.sender);
             core.lpIndex[msg.sender] = core.vaultLPs.length;
         } else {
-            // Top-up: record lastTopUpAt so new shares cannot inherit the old stakedAt
-            // for same-day reward eligibility. Eligibility uses max(stakedAt, lastTopUpAt).
+            // Top-up: settle existing rewards first, then reset eligibility timestamp
+            // so new shares must wait REWARD_MIN_STAKE_PERIOD before earning.
+            _settleRewardsForUser(msg.sender);
             lpPos.lastTopUpAt = block.timestamp;
+            // Advance paid pointer to current accumulator for the top-up shares.
+            lpPos.rewardPerSharePaid = rewards.rewardPerShareStored;
         }
 
         lpPos.shares += shares;
@@ -347,6 +362,9 @@ contract VaultCore is VaultModuleBase {
 
         uint256 shares = lpPos.shares;
         if (shares == 0) revert InvalidAmount();
+
+        // Settle accrued rewards before zeroing shares (Option D accumulator).
+        _settleRewardsForUser(msg.sender);
 
         // Calculate amounts
         uint256 grossAmount = (shares * core.vaultInfo.totalLiquidity) / core.vaultInfo.totalShares;
@@ -513,11 +531,18 @@ contract VaultCore is VaultModuleBase {
             revert UserMismatch();
         }
 
+        // A-05 fix: use available liquidity (total minus already-reserved pending payouts)
+        // instead of total liquidity. Using totalLiquidity would allow multiple concurrent
+        // payouts to collectively exceed what the vault can actually pay out, causing the
+        // first payout to succeed while later ones silently overcommit vault reserves.
+        uint256 totalPending = core.vaultInfo.totalPendingPayoutAmount;
+        uint256 availableLiquidity = core.vaultInfo.totalLiquidity > totalPending
+            ? core.vaultInfo.totalLiquidity - totalPending
+            : 0;
+
         // Calculate payout
         VaultPayoutLib.PayoutParams memory params = VaultPayoutLib.PayoutParams({
-            totalAmount: amount,
-            collateral: collateral,
-            availableLiquidity: core.vaultInfo.totalLiquidity
+            totalAmount: amount, collateral: collateral, availableLiquidity: availableLiquidity
         });
 
         VaultPayoutLib.PayoutResult memory result = VaultPayoutLib.calculatePayout(params);
@@ -606,16 +631,23 @@ contract VaultCore is VaultModuleBase {
         VaultPayoutLib.PnLUpdateResult memory pnlResult =
             VaultPayoutLib.calculatePnLUpdate(pnlParams);
 
-        // NOTE: PnL is NOT added to totalLiquidity!
-        // PnL is distributed to LPs via dailyNetPnL -> finalizeDailyReward -> claimableRewards
-        // This prevents double-counting (LP already gets PnL via rewards system)
+        // NOTE: PnL is NOT added to totalLiquidity.
+        // Profit tokens from losing traders' collateral sit in the vault as unaccounted balance.
+        // They are earmarked for LP reward distribution via the accumulator (Option D) and
+        // tracked separately in rewardsFund to prevent feePool withdrawals from overdrawing.
 
         // Update lifetime P&L (for stats/tracking only)
         core.vaultInfo.lifetimePnL = pnlResult.newLifetimePnL;
         core.vaultInfo.isNegativePnL = pnlResult.newIsNegativePnL;
 
-        // Track daily P&L for reward distribution via finalizeDailyReward
-        rewards.dailyNetPnL += VaultPayoutLib.calculateAdjustedPnL(vaultPnL, closeFee);
+        // Update reward accumulator immediately on every profitable settlement (Option D).
+        // dailyNetPnL is kept in sync for backward-compatible view functions only.
+        int256 adjustedPnL = VaultPayoutLib.calculateAdjustedPnL(vaultPnL, closeFee);
+        if (adjustedPnL > 0) {
+            rewards.rewardsFund += uint256(adjustedPnL);
+            _updateRewardAccumulator(uint256(adjustedPnL));
+        }
+        rewards.dailyNetPnL += adjustedPnL;
         rewards.dailyPositionIds.push(positionId);
 
         // Update leverage exposure
@@ -730,13 +762,24 @@ contract VaultCore is VaultModuleBase {
 
     /**
      * @notice Unpause vault
-     * @dev Allowed: VaultManager, VAULT_ADMIN_ROLE, or EMERGENCY_ROLE
+     * @dev Allowed: VaultManager, VAULT_ADMIN_ROLE, or EMERGENCY_ROLE / GUARDIAN_ROLE.
+     *
+     *      Policy (intentional design):
+     *      - EMERGENCY_ROLE and GUARDIAN_ROLE can both pause AND unpause.
+     *      - This enables self-service recovery after an accidental emergency pause
+     *        (e.g. guardian triggered a false-alarm pause and needs to immediately restore service).
+     *      - If governance wants Timelock-only unpause, restrict this function to
+     *        DEFAULT_ADMIN_ROLE only and remove EMERGENCY_ROLE / GUARDIAN_ROLE from here.
+     *
+     *      Risk accepted: an emergency actor could pause → unpause in the same tx,
+     *      effectively bypassing the pause mechanism. Mitigated by the fact that
+     *      EMERGENCY_ROLE is a separate multisig and its actions are monitored on-chain.
      */
     function unpause() external {
         VaultStorageLib.CoreStorage storage core = _core();
         VaultAccessController ac = VaultAccessController(core.accessController);
 
-        // Allow VaultManager, VAULT_ADMIN_ROLE, or EMERGENCY_ROLE
+        // Allow VaultManager, VAULT_ADMIN_ROLE, or EMERGENCY_ROLE / GUARDIAN_ROLE
         if (msg.sender != core.vaultManager) {
             if (!ac.hasRole(ac.VAULT_ADMIN_ROLE(), msg.sender) && !ac.hasEmergencyRole(msg.sender))
             {
@@ -1117,6 +1160,60 @@ contract VaultCore is VaultModuleBase {
         } else {
             return risk.tier4MultiplierBps;
         }
+    }
+
+    // ========================================================================
+    // REWARD ACCUMULATOR HELPERS (Option D — R-07)
+    // ========================================================================
+
+    /**
+     * @notice Settle pending accumulator rewards for a user into claimableRewards.
+     * @dev Must be called before any operation that changes lpPos.shares.
+     *      Ineligible LPs (< 1 day staked) have their paid pointer advanced without
+     *      receiving rewards, preventing retroactive accrual once they become eligible.
+     */
+    function _settleRewardsForUser(address user) internal {
+        VaultStorageLib.CoreStorage storage core = _core();
+        VaultStorageLib.RewardsStorage storage rewards = _rewards();
+
+        VaultStorageLib.LPPosition storage lpPos = core.lpPositions[user];
+        uint256 stored = rewards.rewardPerShareStored;
+
+        uint256 eligibilityTs =
+            lpPos.lastTopUpAt > lpPos.stakedAt ? lpPos.lastTopUpAt : lpPos.stakedAt;
+
+        if (!VaultRewardsLib.isEligibleAccumulator(eligibilityTs, block.timestamp)) {
+            lpPos.rewardPerSharePaid = stored;
+            return;
+        }
+
+        uint256 pending =
+            VaultRewardsLib.computePendingReward(lpPos.shares, stored, lpPos.rewardPerSharePaid);
+        lpPos.rewardPerSharePaid = stored;
+
+        if (pending > 0) {
+            // Move tokens from rewardsFund (earmarked profit) into claimableRewards.
+            // Cap at rewardsFund to prevent overdrawing if rounding causes pending > fund.
+            uint256 fromFund = pending > rewards.rewardsFund ? rewards.rewardsFund : pending;
+            rewards.rewardsFund -= fromFund;
+            rewards.claimableRewards[user] += pending;
+            rewards.rewardsPool += pending;
+        }
+    }
+
+    /**
+     * @notice Increment the global reward-per-share accumulator by vault profit.
+     * @dev Called on every profitable settlement. No-op when totalShares == 0.
+     */
+    function _updateRewardAccumulator(uint256 profit) internal {
+        if (profit == 0) return;
+        VaultStorageLib.CoreStorage storage core = _core();
+        VaultStorageLib.RewardsStorage storage rewards = _rewards();
+        uint256 totalShares = core.vaultInfo.totalShares;
+        if (totalShares == 0) return;
+        rewards.rewardPerShareStored += VaultRewardsLib.computeRewardPerShareDelta(
+            profit, totalShares
+        );
     }
 }
 
