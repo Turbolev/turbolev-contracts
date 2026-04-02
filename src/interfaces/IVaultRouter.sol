@@ -147,6 +147,7 @@ interface IVaultRouter {
 
     function claimableRewards(address user) external view returns (uint256);
     function calculatePendingRewards(address user) external view returns (uint256);
+    function rewardPerShareStored() external view returns (uint256);
     function currentDay() external view returns (uint256);
     function lastSnapshotDay() external view returns (uint256);
 

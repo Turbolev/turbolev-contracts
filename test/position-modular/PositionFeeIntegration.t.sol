@@ -97,6 +97,7 @@ contract PositionFeeIntegrationTest is BaseTestModular {
         );
 
         vm.warp(block.timestamp + 61 seconds);
+        _refreshPrice();
 
         uint256 balanceBefore = projectToken.balanceOf(user1);
 

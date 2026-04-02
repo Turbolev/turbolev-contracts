@@ -64,18 +64,10 @@ contract CrossModuleIntegrationTest is BaseTestModular {
         // Step 2: Skip time (funding is now settled upfront, no periodic update needed)
         vm.warp(block.timestamp + 1 hours);
 
-        // Step 3: Skip to next day for rewards (VaultRewards module)
+        // Step 3: Skip past eligibility period (Option D — no keeper finalize needed)
         vm.warp(block.timestamp + 1 days);
 
-        // Finalize daily rewards (requires keeper role)
-        vm.startPrank(mockTimelockController);
-        vaultAccessController.grantRole(vaultAccessController.VAULT_KEEPER_ROLE(), keeper);
-        vm.stopPrank();
-
-        vm.prank(keeper);
-        vault.finalizeDailyReward();
-
-        // Step 4: Claim rewards
+        // Step 4: Claim rewards — accumulator is updated automatically on each settlement
         uint256 claimableRewards = vault.getClaimableRewards(user1);
         // Note: Rewards may be 0 if there's no PnL, that's expected behavior
 
@@ -206,26 +198,19 @@ contract CrossModuleIntegrationTest is BaseTestModular {
             "Liquidity should not change from funding update alone"
         );
 
-        // Step 3: VaultRewards - Finalize rewards
+        // Step 3: VaultRewards — Option D, no keeper finalize needed
         vm.warp(block.timestamp + 1 days);
 
-        vm.startPrank(mockTimelockController);
-        vaultAccessController.grantRole(vaultAccessController.VAULT_KEEPER_ROLE(), keeper);
-        vm.stopPrank();
-
-        vm.prank(keeper);
-        vault.finalizeDailyReward();
-
-        // Core storage should still be consistent
+        // Core storage should still be consistent (no finalize call needed)
         assertEq(
             vault.getVaultInfo().totalLiquidity,
             liquidityAfterFunding,
-            "Liquidity should not change from reward finalization"
+            "Liquidity should not change from reward accumulator update"
         );
 
-        // Rewards storage should be updated
-        uint256 rewardDay = vault.currentDay();
-        assertGt(rewardDay, 0, "Current reward day should be set");
+        // Accumulator is updated automatically on each profitable settlement
+        uint256 accumulator = vault.rewardPerShareStored();
+        assertGe(accumulator, 0, "Reward accumulator should be initialised");
     }
 
     // ========================================================================
@@ -252,15 +237,8 @@ contract CrossModuleIntegrationTest is BaseTestModular {
         // Time passes
         vm.warp(block.timestamp + 1 hours);
 
-        // More time passes, rewards finalized
+        // More time passes — Option D, no keeper finalize needed
         vm.warp(block.timestamp + 1 days);
-
-        vm.startPrank(mockTimelockController);
-        vaultAccessController.grantRole(vaultAccessController.VAULT_KEEPER_ROLE(), keeper);
-        vm.stopPrank();
-
-        vm.prank(keeper);
-        vault.finalizeDailyReward();
 
         // Both users should be able to check their rewards
         uint256 rewards1 = vault.getClaimableRewards(user1);

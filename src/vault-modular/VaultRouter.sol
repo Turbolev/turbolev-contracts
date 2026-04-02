@@ -588,31 +588,14 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
     // ========================================================================
 
     /**
-     * @notice Finalize daily reward
-     */
-    function finalizeDailyReward() external returns (bool isComplete) {
-        bytes memory result = _delegateToRewards(abi.encodeWithSignature("finalizeDailyReward()"));
-        return abi.decode(result, (bool));
-    }
-
-    /**
-     * @notice Finalize daily reward remaining
-     */
-    function finalizeDailyRewardRemaining() external returns (bool isComplete) {
-        bytes memory result =
-            _delegateToRewards(abi.encodeWithSignature("finalizeDailyRewardRemaining()"));
-        return abi.decode(result, (bool));
-    }
-
-    /**
-     * @notice Claim rewards
+     * @notice Claim rewards (Option D — no keeper finalize needed).
      */
     function claimRewards() external {
         _delegateToRewards(abi.encodeWithSignature("claimRewards()"));
     }
 
     /**
-     * @notice Claim rewards with protection
+     * @notice Claim rewards with slippage protection.
      */
     function claimRewardsProtected(uint256 minExpectedRewards) external {
         _delegateToRewards(
@@ -621,48 +604,41 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
     }
 
     /**
-     * @notice Get claimable rewards
+     * @notice Get already-settled claimable rewards for a user.
      */
     function getClaimableRewards(address user) external view returns (uint256) {
         return VaultStorageLib.getRewardsStorage().claimableRewards[user];
     }
 
     /**
-     * @notice Calculate pending rewards
-     * @dev Reads directly from storage instead of delegatecall to avoid staticcall bug
+     * @notice Preview total pending rewards (settled + accrued since last settlement).
+     * @dev Uses accumulator directly — no keeper required (Option D).
      */
     function calculatePendingRewards(address user) external view returns (uint256 pendingRewards) {
         VaultStorageLib.CoreStorage storage core = VaultStorageLib.getCoreStorage();
         VaultStorageLib.RewardsStorage storage rewards = VaultStorageLib.getRewardsStorage();
 
         VaultStorageLib.LPPosition storage lpPos = core.lpPositions[user];
-        if (lpPos.shares == 0) return 0;
 
-        // Start with already claimable rewards
         pendingRewards = rewards.claimableRewards[user];
+        if (lpPos.shares == 0) return pendingRewards;
 
-        // Add potential rewards from current day if positive
-        if (rewards.dailyNetPnL > 0 && core.vaultInfo.totalShares > 0) {
-            uint256 today = VaultRewardsLib.getDayFromTimestamp(block.timestamp);
-            uint256 dayStartTimestamp = VaultRewardsLib.getDayStartTimestamp(today);
-
-            VaultRewardsLib.LPRewardResult memory rewardResult = VaultRewardsLib.calculateLPReward(
-                VaultRewardsLib.RewardCalculationParams({
-                    userShares: lpPos.shares,
-                    totalShares: core.vaultInfo.totalShares,
-                    netPnL: rewards.dailyNetPnL,
-                    stakedAt: lpPos.stakedAt,
-                    dayStartTimestamp: dayStartTimestamp,
-                    lastTopUpAt: lpPos.lastTopUpAt
-                })
-            );
-
-            if (rewardResult.isEligible) {
-                pendingRewards += rewardResult.reward;
-            }
+        uint256 eligibilityTs =
+            lpPos.lastTopUpAt > lpPos.stakedAt ? lpPos.lastTopUpAt : lpPos.stakedAt;
+        if (block.timestamp < eligibilityTs + VaultStorageLib.REWARD_MIN_STAKE_PERIOD) {
+            return pendingRewards;
         }
 
-        return pendingRewards;
+        pendingRewards += VaultRewardsLib.computePendingReward(
+            lpPos.shares, rewards.rewardPerShareStored, lpPos.rewardPerSharePaid
+        );
+    }
+
+    /**
+     * @notice Get the global reward-per-share accumulator value.
+     */
+    function rewardPerShareStored() external view returns (uint256) {
+        return VaultStorageLib.getRewardsStorage().rewardPerShareStored;
     }
 
     // ========================================================================

@@ -8,6 +8,9 @@ import "./BaseTestModular.sol";
  * @notice Tests for VaultRouter - main entry point of modular vault
  */
 contract VaultRouterTest is BaseTestModular {
+    // Dead shares seeded on first deposit to prevent share inflation attack (R-11)
+    uint256 constant MINIMUM_LIQUIDITY = 1000;
+
     // ========================================================================
     // INITIALIZATION TESTS
     // ========================================================================
@@ -53,9 +56,9 @@ contract VaultRouterTest is BaseTestModular {
         assertGt(lpPos.shares, 0);
         assertGt(lpPos.stakedAmount, 0);
 
-        // Check vault info
+        // Check vault info — add MINIMUM_LIQUIDITY for dead shares seeded on first deposit
         VaultStorageLib.VaultInfo memory info = vault.vaultInfo();
-        assertEq(info.totalLiquidity, amount);
+        assertEq(info.totalLiquidity, amount + MINIMUM_LIQUIDITY);
         assertGt(info.totalShares, 0);
     }
 
@@ -89,9 +92,9 @@ contract VaultRouterTest is BaseTestModular {
         vault.addLiquidity(amount2);
         vm.stopPrank();
 
-        // Check vault total
+        // Check vault total — add MINIMUM_LIQUIDITY for dead shares seeded on first deposit
         VaultStorageLib.VaultInfo memory info = vault.vaultInfo();
-        assertEq(info.totalLiquidity, amount1 + amount2);
+        assertEq(info.totalLiquidity, amount1 + amount2 + MINIMUM_LIQUIDITY);
 
         // Check both users have positions
         VaultStorageLib.LPPosition memory lpPos1 = vault.lpPositions(user1);
@@ -212,7 +215,7 @@ contract VaultRouterTest is BaseTestModular {
         _addLiquidity(user1, 1000 ether);
 
         VaultStorageLib.VaultInfo memory info = vault.vaultInfo();
-        assertEq(info.totalLiquidity, 1000 ether);
+        assertEq(info.totalLiquidity, 1000 ether + MINIMUM_LIQUIDITY);
         assertGt(info.totalShares, 0);
         assertGt(info.createdAt, 0);
     }
@@ -238,9 +241,9 @@ contract VaultRouterTest is BaseTestModular {
     function test_GetVaultInfo_Alias() public {
         _addLiquidity(user1, 1000 ether);
 
-        // Test the alias function
+        // Test the alias function — add MINIMUM_LIQUIDITY for dead shares
         VaultStorageLib.VaultInfo memory info = vault.getVaultInfo();
-        assertEq(info.totalLiquidity, 1000 ether);
+        assertEq(info.totalLiquidity, 1000 ether + MINIMUM_LIQUIDITY);
     }
 
     function test_GetVaultParams_Alias() public view {

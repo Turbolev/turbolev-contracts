@@ -13,6 +13,7 @@ contract VaultViewerModularTest is BaseTestModular {
     VaultViewerModular public vaultViewer;
 
     uint256 public constant POSITION_SIZE = 10 ether;
+    uint256 constant MINIMUM_LIQUIDITY = 1000;
 
     function setUp() public override {
         super.setUp();
@@ -44,7 +45,7 @@ contract VaultViewerModularTest is BaseTestModular {
             uint16 currentMultiplierBps
         ) = vaultViewer.getTotalOIBreakdown(address(vault));
 
-        assertEq(tvl, 1000 ether, "TVL should match");
+        assertEq(tvl, 1000 ether + MINIMUM_LIQUIDITY, "TVL should match");
         assertEq(longOI, 0, "Long OI should be 0");
         assertEq(shortOI, 0, "Short OI should be 0");
         assertEq(totalOI, 0, "Total OI should be 0");
@@ -188,7 +189,7 @@ contract VaultViewerModularTest is BaseTestModular {
 
         assertEq(utilizationBps, 0, "Utilization should be 0");
         assertEq(totalOI, 0, "Total OI should be 0");
-        assertEq(tvl, 1000 ether, "TVL should match");
+        assertEq(tvl, 1000 ether + MINIMUM_LIQUIDITY, "TVL should match");
         assertEq(remainingCapacity, tvl, "Remaining capacity should equal TVL");
     }
 
@@ -278,7 +279,7 @@ contract VaultViewerModularTest is BaseTestModular {
         (uint256 utilizationBps, uint256 totalOI, uint256 tvl, uint256 remainingCapacity) =
             vaultViewer.getVaultUtilization(address(vault));
 
-        assertEq(tvl, 1800 ether, "TVL should be sum of all deposits");
+        assertEq(tvl, 1800 ether + MINIMUM_LIQUIDITY, "TVL should be sum of all deposits");
     }
 
     // ========================================================================

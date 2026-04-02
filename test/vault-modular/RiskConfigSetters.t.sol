@@ -74,14 +74,14 @@ contract RiskConfigSettersTest is BaseTestModular {
     function test_SetTotalOITierConfig_Success() public {
         vm.prank(address(vaultManager));
         vault.setTotalOITierConfig(
-            25_000, // totalOIRiskMultiplierBps (2.5x)
+            15_000, // totalOIRiskMultiplierBps (1.5x — max allowed)
             100_000 * 1e18, // tier1Threshold
             500_000 * 1e18, // tier2Threshold
             1_000_000 * 1e18, // tier3Threshold
-            12_000, // tier1MultiplierBps (1.2x)
-            18_000, // tier2MultiplierBps (1.8x)
-            24_000, // tier3MultiplierBps (2.4x)
-            35_000 // tier4MultiplierBps (3.5x)
+            10_000, // tier1MultiplierBps (1.0x)
+            12_000, // tier2MultiplierBps (1.2x)
+            13_000, // tier3MultiplierBps (1.3x)
+            15_000 // tier4MultiplierBps (1.5x — max allowed)
         );
 
         (
@@ -95,14 +95,14 @@ contract RiskConfigSettersTest is BaseTestModular {
             uint16 tier4Multiplier
         ) = vault.getTotalOITierConfig();
 
-        assertEq(fixedMultiplier, 25_000);
+        assertEq(fixedMultiplier, 15_000);
         assertEq(tier1Threshold, 100_000 * 1e18);
         assertEq(tier2Threshold, 500_000 * 1e18);
         assertEq(tier3Threshold, 1_000_000 * 1e18);
-        assertEq(tier1Multiplier, 12_000);
-        assertEq(tier2Multiplier, 18_000);
-        assertEq(tier3Multiplier, 24_000);
-        assertEq(tier4Multiplier, 35_000);
+        assertEq(tier1Multiplier, 10_000);
+        assertEq(tier2Multiplier, 12_000);
+        assertEq(tier3Multiplier, 13_000);
+        assertEq(tier4Multiplier, 15_000);
     }
 
     function test_SetTotalOITierConfig_RevertInvalidThresholdOrder() public {

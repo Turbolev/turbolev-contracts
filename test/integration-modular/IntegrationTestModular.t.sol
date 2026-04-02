@@ -141,6 +141,7 @@ contract IntegrationTestModular is BaseTestModular {
             ""
         );
         vm.warp(block.timestamp + 61 seconds);
+        _refreshPrice();
         positionManager.closePosition(1, block.timestamp + 1 hours, "");
         vm.stopPrank();
 
@@ -228,6 +229,7 @@ contract IntegrationTestModular is BaseTestModular {
         );
 
         vm.warp(block.timestamp + 61 seconds);
+        _refreshPrice();
 
         uint256 balanceBefore = projectToken.balanceOf(trader1);
 
@@ -435,6 +437,7 @@ contract IntegrationTestModular is BaseTestModular {
 
         // 4. Wait for hold time
         vm.warp(block.timestamp + 61 seconds);
+        _refreshPrice();
 
         // 5. Trader closes position
         positionManager.closePosition(1, block.timestamp + 1 hours, "");
@@ -486,6 +489,7 @@ contract IntegrationTestModular is BaseTestModular {
         vm.stopPrank();
 
         vm.warp(block.timestamp + 61 seconds);
+        _refreshPrice();
 
         // Both close
         vm.prank(trader1);
@@ -528,6 +532,7 @@ contract IntegrationTestModular is BaseTestModular {
         vm.stopPrank();
 
         vm.warp(block.timestamp + 61 seconds);
+        _refreshPrice();
 
         vm.prank(trader1);
         positionManager.closePosition(1, block.timestamp + 1 hours, "");
@@ -568,6 +573,7 @@ contract IntegrationTestModular is BaseTestModular {
         vm.stopPrank();
 
         vm.warp(block.timestamp + 61 seconds);
+        _refreshPrice();
 
         // Close all positions
         vm.startPrank(trader1);

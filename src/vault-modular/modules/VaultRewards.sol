@@ -9,35 +9,30 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /**
  * @title VaultRewards
- * @notice Rewards module handling daily snapshots, LP rewards, and claiming
+ * @notice Rewards module — Option D: reward-per-share accumulator.
  * @dev Called via delegatecall from VaultRouter. Uses shared EIP-7201 storage.
  *
- * Responsibilities:
- * - Daily Snapshots: finalizeDailyReward, finalizeDailyRewardRemaining
- * - Reward Claims: claimRewards, claimRewardsProtected
- * - Reward Calculations: calculatePendingRewards, getClaimableRewards
+ * Reward flow (no keeper required):
+ *   1. Each time a position is settled with vault profit, VaultCore calls
+ *      _updateRewardAccumulator() which increments rewardPerShareStored.
+ *   2. LP rewards are settled lazily: on addLiquidity, removeLiquidity, or
+ *      claimRewards the pending reward is computed and moved to claimableRewards.
+ *   3. LP calls claimRewards() to transfer tokens.
+ *
+ * Eligibility: LP must have staked for at least REWARD_MIN_STAKE_PERIOD (1 day)
+ * before they start earning. This prevents front-running large settlements.
  */
 contract VaultRewards is VaultModuleBase {
     using SafeERC20 for IERC20;
 
     // ========================================================================
-    // CONSTANTS
-    // ========================================================================
-
-    uint256 private constant MAX_LPS_PER_FINALIZE = 200;
-
-    // ========================================================================
     // EVENTS
     // ========================================================================
 
-    event DailyRewardFinalized(
-        address indexed vault,
-        uint256 indexed day,
-        uint256 totalLiquidity,
-        uint256 totalShares,
-        int256 netPnL,
-        uint256 timestamp
+    event RewardAccumulatorUpdated(
+        address indexed vault, uint256 profit, uint256 rewardPerShareStored, uint256 timestamp
     );
+    event RewardSettled(address indexed vault, address indexed user, uint256 amount);
     event RewardsClaimed(
         address indexed vault, address indexed user, uint256 amount, uint256 timestamp
     );
@@ -49,170 +44,94 @@ contract VaultRewards is VaultModuleBase {
     // ERRORS
     // ========================================================================
 
-    error DailySnapshotAlreadyProcessed();
-    error SnapshotNotYetProcessed();
-    error TooEarlyForSnapshot();
     error NoRewardsToClaim();
     error InsufficientLiquidity();
     error InsufficientRewards(uint256 actual, uint256 expected);
-    error TransferFailed();
 
     // ========================================================================
-    // DAILY REWARD FINALIZATION
+    // ACCUMULATOR — called by VaultCore on every profitable settlement
     // ========================================================================
 
     /**
-     * @notice Finalize daily rewards and take snapshot
-     * @dev Called by admin/keeper at end of each day (UTC midnight)
-     *      Pre-calculates and stores rewards for all LPs to avoid recalculation on claim
-     * @return isComplete True if all LPs processed in this call
+     * @notice Update the global reward-per-share accumulator.
+     * @dev Must be called by VaultCore (via delegatecall context) whenever vault
+     *      profit is realised. Profit must already be validated > 0 by the caller.
+     * @param profit Vault profit for this settlement (collateral token units).
      */
-    function finalizeDailyReward()
-        external
-        nonReentrant
-        onlyVaultAdminOrKeeper
-        returns (bool isComplete)
-    {
+    function updateRewardAccumulator(uint256 profit) external onlyVaultAdminOrKeeper {
+        _updateRewardAccumulator(profit);
+    }
+
+    function _updateRewardAccumulator(uint256 profit) internal {
+        if (profit == 0) return;
+
         VaultStorageLib.CoreStorage storage core = _core();
         VaultStorageLib.RewardsStorage storage rewards = _rewards();
 
-        // Use library to check if snapshot can be taken
-        (bool canSnapshot, uint256 today) =
-            VaultRewardsLib.canTakeSnapshot(rewards.lastSnapshotDay, block.timestamp);
+        uint256 totalShares = core.vaultInfo.totalShares;
+        if (totalShares == 0) return;
 
-        if (rewards.dailySnapshots[today].isProcessed) revert DailySnapshotAlreadyProcessed();
-        if (!canSnapshot) revert TooEarlyForSnapshot();
+        uint256 delta = VaultRewardsLib.computeRewardPerShareDelta(profit, totalShares);
+        rewards.rewardPerShareStored += delta;
 
-        // Take snapshot
-        VaultStorageLib.DailySnapshot storage snapshot = rewards.dailySnapshots[today];
-        snapshot.day = today;
-        snapshot.totalLiquidity = core.vaultInfo.totalLiquidity;
-        snapshot.totalShares = core.vaultInfo.totalShares;
-        snapshot.netPnL = rewards.dailyNetPnL;
-        snapshot.totalPositionsSettled = core.vaultInfo.totalPositionsSettled;
-        snapshot.isProcessed = true;
-        snapshot.timestamp = block.timestamp;
-
-        // Copy position IDs
-        for (uint256 i = 0; i < rewards.dailyPositionIds.length; i++) {
-            snapshot.positionIds.push(rewards.dailyPositionIds[i]);
-        }
-
-        rewards.finalizeLPIndex = 0;
-        int256 finalizedPnL = rewards.dailyNetPnL;
-
-        if (finalizedPnL > 0 && snapshot.totalShares > 0) {
-            uint256 dayStartTimestamp = VaultRewardsLib.getDayStartTimestamp(today);
-            (uint256 endIndex,) =
-                VaultRewardsLib.calculateBatchIndices(core.vaultLPs.length, 0, MAX_LPS_PER_FINALIZE);
-
-            for (uint256 i = 0; i < endIndex; i++) {
-                address lp = core.vaultLPs[i];
-                VaultStorageLib.LPPosition storage lpPos = core.lpPositions[lp];
-                if (lpPos.shares == 0) continue;
-
-                // Use library to calculate LP reward
-                VaultRewardsLib.LPRewardResult memory rewardResult =
-                    VaultRewardsLib.calculateLPReward(
-                        VaultRewardsLib.RewardCalculationParams({
-                            userShares: lpPos.shares,
-                            totalShares: snapshot.totalShares,
-                            netPnL: finalizedPnL,
-                            stakedAt: lpPos.stakedAt,
-                            dayStartTimestamp: dayStartTimestamp,
-                            lastTopUpAt: lpPos.lastTopUpAt
-                        })
-                    );
-
-                if (rewardResult.isEligible && rewardResult.reward > 0) {
-                    rewards.claimableRewards[lp] += rewardResult.reward;
-                    rewards.rewardsPool += rewardResult.reward;
-                }
-            }
-            rewards.finalizeLPIndex = endIndex;
-        }
-
-        rewards.lastSnapshotDay = today;
-        rewards.currentDay = today;
-        rewards.dailyNetPnL = 0;
-        delete rewards.dailyPositionIds;
-
-        isComplete = core.vaultLPs.length <= MAX_LPS_PER_FINALIZE;
-        rewards.isFinalizing = !isComplete;
-
-        emit DailyRewardFinalized(
-            address(this),
-            today,
-            core.vaultInfo.totalLiquidity,
-            core.vaultInfo.totalShares,
-            finalizedPnL,
-            block.timestamp
+        emit RewardAccumulatorUpdated(
+            address(this), profit, rewards.rewardPerShareStored, block.timestamp
         );
     }
 
+    // ========================================================================
+    // SETTLEMENT HELPERS — called before any shares change
+    // ========================================================================
+
     /**
-     * @notice Finalize daily rewards for remaining LPs (if there are more than MAX_LPS_PER_FINALIZE)
-     * @dev Can be called multiple times to process remaining LPs
-     *      Automatically continues from last processed index
-     * @return isComplete True if all LPs have been processed
+     * @notice Settle pending rewards for a user into claimableRewards.
+     * @dev Must be called before modifying lpPos.shares to avoid incorrect accounting.
+     *      Ineligible LPs (< 1 day staked) have their rewardPerSharePaid fast-forwarded
+     *      to the current accumulator so they do not retroactively earn rewards for the
+     *      period before they became eligible.
      */
-    function finalizeDailyRewardRemaining()
-        external
-        nonReentrant
-        onlyVaultAdminOrKeeper
-        returns (bool isComplete)
-    {
+    function _settleRewards(address user) internal {
         VaultStorageLib.CoreStorage storage core = _core();
         VaultStorageLib.RewardsStorage storage rewards = _rewards();
 
-        uint256 today = VaultRewardsLib.getDayFromTimestamp(block.timestamp);
+        VaultStorageLib.LPPosition storage lpPos = core.lpPositions[user];
+        uint256 stored = rewards.rewardPerShareStored;
 
-        // Snapshot must exist before processing remaining LPs
-        if (!rewards.dailySnapshots[today].isProcessed) {
-            revert SnapshotNotYetProcessed();
+        // Determine effective eligibility timestamp: max(stakedAt, lastTopUpAt)
+        uint256 eligibilityTs =
+            lpPos.lastTopUpAt > lpPos.stakedAt ? lpPos.lastTopUpAt : lpPos.stakedAt;
+
+        if (!VaultRewardsLib.isEligibleAccumulator(eligibilityTs, block.timestamp)) {
+            // Not yet eligible — advance paid pointer so no retroactive accrual
+            lpPos.rewardPerSharePaid = stored;
+            return;
         }
 
-        VaultStorageLib.DailySnapshot storage snapshot = rewards.dailySnapshots[today];
-        int256 finalizedPnL = snapshot.netPnL;
+        uint256 pending =
+            VaultRewardsLib.computePendingReward(lpPos.shares, stored, lpPos.rewardPerSharePaid);
 
-        if (finalizedPnL <= 0 || snapshot.totalShares == 0) return true;
+        lpPos.rewardPerSharePaid = stored;
 
-        // Use library to calculate batch indices
-        (uint256 endIndex, bool complete) = VaultRewardsLib.calculateBatchIndices(
-            core.vaultLPs.length, rewards.finalizeLPIndex, MAX_LPS_PER_FINALIZE
-        );
-
-        if (rewards.finalizeLPIndex >= core.vaultLPs.length) return true;
-
-        uint256 dayStartTimestamp = VaultRewardsLib.getDayStartTimestamp(today);
-
-        for (uint256 i = rewards.finalizeLPIndex; i < endIndex; i++) {
-            address lp = core.vaultLPs[i];
-            VaultStorageLib.LPPosition storage lpPos = core.lpPositions[lp];
-            if (lpPos.shares == 0) continue;
-
-            VaultRewardsLib.LPRewardResult memory rewardResult = VaultRewardsLib.calculateLPReward(
-                VaultRewardsLib.RewardCalculationParams({
-                    userShares: lpPos.shares,
-                    totalShares: snapshot.totalShares,
-                    netPnL: finalizedPnL,
-                    stakedAt: lpPos.stakedAt,
-                    dayStartTimestamp: dayStartTimestamp,
-                    lastTopUpAt: lpPos.lastTopUpAt
-                })
-            );
-
-            if (rewardResult.isEligible && rewardResult.reward > 0) {
-                rewards.claimableRewards[lp] += rewardResult.reward;
-                rewards.rewardsPool += rewardResult.reward;
-            }
+        if (pending > 0) {
+            // Move tokens from rewardsFund (earmarked profit) into claimableRewards.
+            uint256 fromFund = pending > rewards.rewardsFund ? rewards.rewardsFund : pending;
+            rewards.rewardsFund -= fromFund;
+            rewards.claimableRewards[user] += pending;
+            rewards.rewardsPool += pending;
+            emit RewardSettled(address(this), user, pending);
         }
+    }
 
-        rewards.finalizeLPIndex = endIndex;
-        if (complete) {
-            rewards.isFinalizing = false;
-        }
-        return complete;
+    // ========================================================================
+    // EXTERNAL SETTLEMENT HOOKS — called by VaultCore via delegatecall
+    // ========================================================================
+
+    /**
+     * @notice Settle rewards for a user before their shares change (add/remove liquidity).
+     * @dev Exposed so VaultCore can call this via delegatecall before mutating shares.
+     */
+    function settleRewardsForUser(address user) external {
+        _settleRewards(user);
     }
 
     // ========================================================================
@@ -220,58 +139,54 @@ contract VaultRewards is VaultModuleBase {
     // ========================================================================
 
     /**
-     * @notice Claim pending rewards (no slippage protection)
-     * @dev Backward compatible - calls _claimRewardsInternal with minExpectedRewards = 0
+     * @notice Claim pending rewards (no slippage protection).
      */
     function claimRewards() external nonReentrant whenNotPaused {
         _claimRewardsInternal(0);
     }
 
     /**
-     * @notice Claim pending rewards with slippage protection
-     * @param minExpectedRewards Minimum rewards expected (reverts if actual < min)
-     * @dev Added slippage protection to prevent front-running attacks
+     * @notice Claim pending rewards with slippage protection.
+     * @param minExpectedRewards Minimum rewards expected (reverts if actual < min).
      */
     function claimRewardsProtected(uint256 minExpectedRewards) external nonReentrant whenNotPaused {
         _claimRewardsInternal(minExpectedRewards);
     }
 
-    /**
-     * @notice Internal function to claim rewards with optional slippage protection
-     * @param minExpectedRewards Minimum rewards expected (0 = no protection)
-     */
     function _claimRewardsInternal(uint256 minExpectedRewards) internal {
+        // Settle any newly accrued rewards before reading claimableRewards
+        _settleRewards(msg.sender);
+
         VaultStorageLib.CoreStorage storage core = _core();
         VaultStorageLib.RewardsStorage storage rewards = _rewards();
 
-        VaultStorageLib.LPPosition storage lpPos = core.lpPositions[msg.sender];
         uint256 rewardAmount = rewards.claimableRewards[msg.sender];
-
         if (rewardAmount == 0) revert NoRewardsToClaim();
 
-        // Cap against rewardsPool — the accounting variable tracking only tokens
-        // allocated for rewards, excluding LP liquidity, feePool, and betCollateral.
+        // Cap against rewardsPool (accounting) and also against actual vault balance
+        // to handle precision rounding where total settled rewards slightly exceed rewardsFund.
+        uint256 vaultBalance = IERC20(_core().collateralToken).balanceOf(address(this));
+        uint256 availableForRewards =
+            vaultBalance > _core().feePool ? vaultBalance - _core().feePool : 0;
+        uint256 cap =
+            rewards.rewardsPool < availableForRewards ? rewards.rewardsPool : availableForRewards;
         (uint256 actualRewards, bool wasCapped) =
-            VaultRewardsLib.capRewardsAtBalance(rewardAmount, rewards.rewardsPool);
+            VaultRewardsLib.capRewardsAtBalance(rewardAmount, cap);
 
         if (wasCapped) {
             emit RewardsCapped(msg.sender, rewardAmount, actualRewards, block.timestamp);
         }
         if (actualRewards == 0) revert InsufficientLiquidity();
-
-        // Slippage protection - revert if actual rewards less than minimum expected
         if (actualRewards < minExpectedRewards) {
             revert InsufficientRewards(actualRewards, minExpectedRewards);
         }
 
-        // Update state
-        lpPos.lastProcessedDay = rewards.lastSnapshotDay;
+        VaultStorageLib.LPPosition storage lpPos = core.lpPositions[msg.sender];
         lpPos.lastRewardClaim = block.timestamp;
         lpPos.totalRewardsClaimed += actualRewards;
         rewards.claimableRewards[msg.sender] -= actualRewards;
         rewards.rewardsPool -= actualRewards;
 
-        // Transfer
         IERC20(core.collateralToken).safeTransfer(msg.sender, actualRewards);
 
         emit RewardsClaimed(address(this), msg.sender, actualRewards, block.timestamp);
@@ -282,147 +197,80 @@ contract VaultRewards is VaultModuleBase {
     // ========================================================================
 
     /**
-     * @notice Get claimable rewards for a user
-     * @param user User address
-     * @return amount Claimable reward amount
+     * @notice Get already-settled claimable rewards for a user.
      */
     function getClaimableRewards(address user) external view returns (uint256 amount) {
         return _rewards().claimableRewards[user];
     }
 
     /**
-     * @notice Get daily snapshot
-     * @param day Day number
-     * @return snapshot DailySnapshot struct
-     */
-    function getDailySnapshot(uint256 day)
-        external
-        view
-        returns (VaultStorageLib.DailySnapshot memory snapshot)
-    {
-        return _rewards().dailySnapshots[day];
-    }
-
-    /**
-     * @notice Get current day number
-     * @return day Current day
-     */
-    function getCurrentDay() external view returns (uint256 day) {
-        return _rewards().currentDay;
-    }
-
-    /**
-     * @notice Get last snapshot day
-     * @return day Last snapshot day
-     */
-    function getLastSnapshotDay() external view returns (uint256 day) {
-        return _rewards().lastSnapshotDay;
-    }
-
-    /**
-     * @notice Get daily net P&L accumulated
-     * @return pnl Daily net P&L
-     */
-    function getDailyNetPnL() external view returns (int256 pnl) {
-        return _rewards().dailyNetPnL;
-    }
-
-    /**
-     * @notice Get finalize LP index progress
-     * @return index Current finalize index
-     */
-    function getFinalizeLPIndex() external view returns (uint256 index) {
-        return _rewards().finalizeLPIndex;
-    }
-
-    /**
-     * @notice Get daily position IDs
-     * @return positionIds Array of position IDs
-     */
-    function getDailyPositionIds() external view returns (uint64[] memory positionIds) {
-        return _rewards().dailyPositionIds;
-    }
-
-    /**
-     * @notice Calculate pending rewards for a user (preview, not yet finalized)
-     * @param user User address
-     * @return pendingRewards Estimated pending rewards
+     * @notice Preview total pending rewards (settled + accrued since last settlement).
+     * @dev Does not modify state.
      */
     function calculatePendingRewards(address user) external view returns (uint256 pendingRewards) {
         VaultStorageLib.CoreStorage storage core = _core();
         VaultStorageLib.RewardsStorage storage rewards = _rewards();
 
         VaultStorageLib.LPPosition storage lpPos = core.lpPositions[user];
-        if (lpPos.shares == 0) return 0;
 
-        // Start with already claimable rewards
+        // Already settled but not yet claimed
         pendingRewards = rewards.claimableRewards[user];
 
-        // Add potential rewards from current day if positive
-        if (rewards.dailyNetPnL > 0 && core.vaultInfo.totalShares > 0) {
-            uint256 today = VaultRewardsLib.getDayFromTimestamp(block.timestamp);
-            uint256 dayStartTimestamp = VaultRewardsLib.getDayStartTimestamp(today);
+        if (lpPos.shares == 0) return pendingRewards;
 
-            VaultRewardsLib.LPRewardResult memory rewardResult = VaultRewardsLib.calculateLPReward(
-                VaultRewardsLib.RewardCalculationParams({
-                    userShares: lpPos.shares,
-                    totalShares: core.vaultInfo.totalShares,
-                    netPnL: rewards.dailyNetPnL,
-                    stakedAt: lpPos.stakedAt,
-                    dayStartTimestamp: dayStartTimestamp,
-                    lastTopUpAt: lpPos.lastTopUpAt
-                })
-            );
+        uint256 eligibilityTs =
+            lpPos.lastTopUpAt > lpPos.stakedAt ? lpPos.lastTopUpAt : lpPos.stakedAt;
 
-            if (rewardResult.isEligible) {
-                pendingRewards += rewardResult.reward;
-            }
+        if (!VaultRewardsLib.isEligibleAccumulator(eligibilityTs, block.timestamp)) {
+            return pendingRewards;
         }
 
-        return pendingRewards;
+        // Add accrued-but-not-yet-settled portion
+        pendingRewards += VaultRewardsLib.computePendingReward(
+            lpPos.shares, rewards.rewardPerShareStored, lpPos.rewardPerSharePaid
+        );
     }
 
     /**
-     * @notice Get rewards statistics
-     * @return currentDay Current day number
-     * @return lastSnapshotDay Last snapshot day
-     * @return dailyNetPnL Current daily net P&L
-     * @return totalClaimable Total claimable (approximate, for display only)
+     * @notice Get the global reward-per-share accumulator value.
+     */
+    function rewardPerShareStored() external view returns (uint256) {
+        return _rewards().rewardPerShareStored;
+    }
+
+    /**
+     * @notice Get the accumulator value last recorded for a specific LP.
+     */
+    function rewardPerSharePaid(address user) external view returns (uint256) {
+        return _core().lpPositions[user].rewardPerSharePaid;
+    }
+
+    /**
+     * @notice Get rewards statistics.
      */
     function getRewardsStats()
         external
         view
         returns (
-            uint256 currentDay,
-            uint256 lastSnapshotDay,
-            int256 dailyNetPnL,
+            uint256 storedAccumulator,
+            uint256 rewardsPoolBalance,
+            int256 legacyDailyNetPnL,
             uint256 totalClaimable
         )
     {
         VaultStorageLib.RewardsStorage storage rewards = _rewards();
-
-        currentDay = rewards.currentDay;
-        lastSnapshotDay = rewards.lastSnapshotDay;
-        dailyNetPnL = rewards.dailyNetPnL;
-        // Note: totalClaimable would require iterating all users, so we return 0
-        // This is just for struct compatibility
+        storedAccumulator = rewards.rewardPerShareStored;
+        rewardsPoolBalance = rewards.rewardsPool;
+        legacyDailyNetPnL = rewards.dailyNetPnL;
         totalClaimable = 0;
     }
 
     // ========================================================================
-    // STATE GETTERS (for compatibility)
+    // STATE GETTERS (for backward compatibility)
     // ========================================================================
 
     function claimableRewards(address user) external view returns (uint256) {
         return _rewards().claimableRewards[user];
-    }
-
-    function currentDay() external view returns (uint256) {
-        return _rewards().currentDay;
-    }
-
-    function lastSnapshotDay() external view returns (uint256) {
-        return _rewards().lastSnapshotDay;
     }
 
     function dailyNetPnL() external view returns (int256) {
@@ -433,4 +281,3 @@ contract VaultRewards is VaultModuleBase {
         return _rewards().finalizeLPIndex;
     }
 }
-

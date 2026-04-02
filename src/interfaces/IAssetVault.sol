@@ -288,30 +288,12 @@ interface IAssetVault {
     // ========================================================================
 
     /**
-     * @notice Finalize daily rewards and take snapshot
-     * @dev Called by admin bot at end of each day
-     *      Pre-calculates and stores rewards for all LPs
+     * @notice Preview total pending rewards for a user (settled + accrued).
+     * @dev Option D accumulator — no keeper finalize required.
+     * @param user Address of LP.
+     * @return pendingRewards Total pending rewards.
      */
-    function finalizeDailyReward() external;
-
-    /**
-     * @notice Finalize daily rewards for remaining LPs (if there are more than MAX_LPS_PER_FINALIZE)
-     * @dev Can be called multiple times to process remaining LPs
-     *      Automatically continues from last processed index
-     * @return isComplete True if all LPs have been processed
-     */
-    function finalizeDailyRewardRemaining() external returns (bool isComplete);
-
-    /**
-     * @notice Calculate pending rewards for a staker
-     * @param user Address of staker
-     * @return pendingRewards Total pending rewards
-     * @return lastProcessedDay Last day that was processed in this calculation
-     */
-    function calculatePendingRewards(address user)
-        external
-        view
-        returns (uint256 pendingRewards, uint256 lastProcessedDay);
+    function calculatePendingRewards(address user) external view returns (uint256 pendingRewards);
 
     /**
      * @notice Claim pending rewards (processes up to MAX_DAYS_PER_CALCULATION days per call)

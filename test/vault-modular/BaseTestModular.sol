@@ -433,4 +433,20 @@ contract BaseTestModular is Test {
         vm.prank(address(vaultManager));
         vault.setMaxLeverage(50);
     }
+
+    /**
+     * @notice Refresh mock price to current block.timestamp.
+     * @dev Must be called after vm.warp() to satisfy PriceFeedManager circuit breaker
+     *      (maxDeviationBps = 1000 = 10%, minDeviationWindow = 60s).
+     *      Without this, getPriceChecked() reverts with OracleFetchFailed after any warp.
+     * @param price Price to set (e.g. 100e8 for $100 with expo -8)
+     */
+    function _refreshPrice(int64 price) internal {
+        mockPyth.setPrice(projectTokenPriceId, price, -8, block.timestamp);
+    }
+
+    /// @notice Refresh price at $100 (default price used in setUp)
+    function _refreshPrice() internal {
+        _refreshPrice(100e8);
+    }
 }
