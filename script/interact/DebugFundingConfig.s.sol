@@ -58,7 +58,7 @@ contract DebugFundingConfig is Script {
         }
 
         console.log("\n--- Raw Storage Check ---");
-        bytes32 fundingSlot = VaultStorageLib.calculateEIP7201Slot("boolean.vault.funding");
+        bytes32 fundingSlot = VaultStorageLib.calculateEIP7201Slot("turbolev.vault.funding");
         console.log("FundingStorage slot:");
         console.logBytes32(fundingSlot);
 

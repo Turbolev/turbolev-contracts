@@ -14,8 +14,8 @@ contract VaultStorageLibTest is Test {
     // ========================================================================
 
     function test_CalculateEIP7201Slot_FollowsStandard() public pure {
-        // Manual calculation for "boolean.vault.core"
-        string memory namespace = "boolean.vault.core";
+        // Manual calculation for "turbolev.vault.core"
+        string memory namespace = "turbolev.vault.core";
         bytes32 namespaceHash = keccak256(bytes(namespace));
         bytes32 expected =
             keccak256(abi.encode(uint256(namespaceHash) - 1)) & ~bytes32(uint256(0xff));
@@ -26,22 +26,22 @@ contract VaultStorageLibTest is Test {
     }
 
     function test_CalculateEIP7201Slot_LastByteIsZero() public pure {
-        bytes32 slot = VaultStorageLib.calculateEIP7201Slot("boolean.vault.core");
+        bytes32 slot = VaultStorageLib.calculateEIP7201Slot("turbolev.vault.core");
         uint256 lastByte = uint256(slot) & 0xff;
 
         assertEq(lastByte, 0, "Last byte should be 0x00 per EIP-7201");
     }
 
     function test_CalculateEIP7201Slot_DifferentNamespaces_DifferentSlots() public pure {
-        bytes32 slot1 = VaultStorageLib.calculateEIP7201Slot("boolean.vault.core");
-        bytes32 slot2 = VaultStorageLib.calculateEIP7201Slot("boolean.vault.funding");
+        bytes32 slot1 = VaultStorageLib.calculateEIP7201Slot("turbolev.vault.core");
+        bytes32 slot2 = VaultStorageLib.calculateEIP7201Slot("turbolev.vault.funding");
 
         assertTrue(slot1 != slot2, "Different namespaces should produce different slots");
     }
 
     function test_CalculateEIP7201Slot_SameNamespace_SameSlot() public pure {
-        bytes32 slot1 = VaultStorageLib.calculateEIP7201Slot("boolean.vault.core");
-        bytes32 slot2 = VaultStorageLib.calculateEIP7201Slot("boolean.vault.core");
+        bytes32 slot1 = VaultStorageLib.calculateEIP7201Slot("turbolev.vault.core");
+        bytes32 slot2 = VaultStorageLib.calculateEIP7201Slot("turbolev.vault.core");
 
         assertEq(slot1, slot2, "Same namespace should always produce same slot");
     }
@@ -99,27 +99,27 @@ contract VaultStorageLibTest is Test {
     function test_SlotConstants_MatchDynamicFormula() public pure {
         assertEq(
             VaultStorageLib.SLOT_CORE,
-            VaultStorageLib.calculateEIP7201Slot("boolean.vault.core"),
+            VaultStorageLib.calculateEIP7201Slot("turbolev.vault.core"),
             "SLOT_CORE mismatch"
         );
         assertEq(
             VaultStorageLib.SLOT_FUNDING,
-            VaultStorageLib.calculateEIP7201Slot("boolean.vault.funding"),
+            VaultStorageLib.calculateEIP7201Slot("turbolev.vault.funding"),
             "SLOT_FUNDING mismatch"
         );
         assertEq(
             VaultStorageLib.SLOT_REWARDS,
-            VaultStorageLib.calculateEIP7201Slot("boolean.vault.rewards"),
+            VaultStorageLib.calculateEIP7201Slot("turbolev.vault.rewards"),
             "SLOT_REWARDS mismatch"
         );
         assertEq(
             VaultStorageLib.SLOT_RISK,
-            VaultStorageLib.calculateEIP7201Slot("boolean.vault.risk"),
+            VaultStorageLib.calculateEIP7201Slot("turbolev.vault.risk"),
             "SLOT_RISK mismatch"
         );
         assertEq(
             VaultStorageLib.SLOT_ROUTER,
-            VaultStorageLib.calculateEIP7201Slot("boolean.vault.router"),
+            VaultStorageLib.calculateEIP7201Slot("turbolev.vault.router"),
             "SLOT_ROUTER mismatch"
         );
     }
@@ -129,14 +129,14 @@ contract VaultStorageLibTest is Test {
     // ========================================================================
 
     function test_CheckNewNamespaceCollision_NoCollision() public pure {
-        bool hasCollision = VaultStorageLib.checkNewNamespaceCollision("boolean.vault.newmodule");
+        bool hasCollision = VaultStorageLib.checkNewNamespaceCollision("turbolev.vault.newmodule");
 
         assertFalse(hasCollision, "New unique namespace should not collide");
     }
 
     function test_CheckNewNamespaceCollision_ExistingNamespace() public pure {
         // Testing with existing namespace should detect collision
-        bool hasCollision = VaultStorageLib.checkNewNamespaceCollision("boolean.vault.core");
+        bool hasCollision = VaultStorageLib.checkNewNamespaceCollision("turbolev.vault.core");
 
         assertTrue(hasCollision, "Existing namespace should be detected as collision");
     }
@@ -165,8 +165,8 @@ contract VaultStorageLibTest is Test {
     function test_Namespaces_FollowNamingConvention() public pure {
         string[5] memory namespaces = VaultStorageLib.getAllNamespaces();
 
-        // All namespaces should start with "boolean.vault."
-        bytes memory prefix = bytes("boolean.vault.");
+        // All namespaces should start with "turbolev.vault."
+        bytes memory prefix = bytes("turbolev.vault.");
 
         for (uint256 i = 0; i < 5; i++) {
             bytes memory ns = bytes(namespaces[i]);
@@ -174,7 +174,7 @@ contract VaultStorageLibTest is Test {
 
             // Check prefix
             for (uint256 j = 0; j < prefix.length; j++) {
-                assertEq(ns[j], prefix[j], "Namespace should start with 'boolean.vault.'");
+                assertEq(ns[j], prefix[j], "Namespace should start with 'turbolev.vault.'");
             }
         }
     }

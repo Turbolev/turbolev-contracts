@@ -12,7 +12,7 @@ pragma solidity ^0.8.22;
  * - P&L calculations: signedMulBps(amount, pnlBps)
  * - With rounding options: mulBpsRoundUp for user-favorable
  *
- * @custom:security-contact security@boolean.finance
+ * @custom:security-contact security@turbolev.finance
  */
 library MathLib {
     // ========================================================================

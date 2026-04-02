@@ -23,10 +23,10 @@ library PositionStorageLib {
     // ========================================================================
 
     /// @dev Namespace for core position storage
-    string internal constant NAMESPACE_CORE = "boolean.position.core";
+    string internal constant NAMESPACE_CORE = "turbolev.position.core";
 
     /// @dev Namespace for router storage
-    string internal constant NAMESPACE_ROUTER = "boolean.position.router";
+    string internal constant NAMESPACE_ROUTER = "turbolev.position.router";
 
     // ========================================================================
     // EIP-7201 SLOT CALCULATION
@@ -58,7 +58,7 @@ library PositionStorageLib {
     // NAMESPACED STORAGE STRUCTS
     // ========================================================================
 
-    /// @custom:storage-location erc7201:boolean.position.core
+    /// @custom:storage-location erc7201:turbolev.position.core
     struct CoreStorage {
         // External addresses
         address settlementEngine;
@@ -84,7 +84,7 @@ library PositionStorageLib {
         bool paused;
     }
 
-    /// @custom:storage-location erc7201:boolean.position.router
+    /// @custom:storage-location erc7201:turbolev.position.router
     struct RouterStorage {
         // Module addresses
         address coreModule;

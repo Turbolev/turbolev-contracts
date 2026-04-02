@@ -25,19 +25,19 @@ library VaultStorageLib {
     // ========================================================================
 
     /// @dev Namespace for core vault storage (liquidity, LP positions, payouts, fees)
-    string internal constant NAMESPACE_CORE = "boolean.vault.core";
+    string internal constant NAMESPACE_CORE = "turbolev.vault.core";
 
     /// @dev Namespace for price impact storage (OI tracking, impact config)
-    string internal constant NAMESPACE_FUNDING = "boolean.vault.funding";
+    string internal constant NAMESPACE_FUNDING = "turbolev.vault.funding";
 
     /// @dev Namespace for rewards storage (daily snapshots, LP rewards)
-    string internal constant NAMESPACE_REWARDS = "boolean.vault.rewards";
+    string internal constant NAMESPACE_REWARDS = "turbolev.vault.rewards";
 
     /// @dev Namespace for risk storage (exposure caps, OI limits, leverage tiers)
-    string internal constant NAMESPACE_RISK = "boolean.vault.risk";
+    string internal constant NAMESPACE_RISK = "turbolev.vault.risk";
 
     /// @dev Namespace for router storage (module addresses, initialization)
-    string internal constant NAMESPACE_ROUTER = "boolean.vault.router";
+    string internal constant NAMESPACE_ROUTER = "turbolev.vault.router";
 
     // ========================================================================
     // EIP-7201 PRE-CALCULATED STORAGE SLOTS
@@ -52,25 +52,25 @@ library VaultStorageLib {
     //
     // Verified with Foundry script — each value matches the dynamic formula output.
 
-    /// @dev keccak256(abi.encode(uint256(keccak256("boolean.vault.core")) - 1)) & ~bytes32(uint256(0xff))
+    /// @dev keccak256(abi.encode(uint256(keccak256("turbolev.vault.core")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 internal constant SLOT_CORE =
-        0x3bab3d2bc66c78bff4aa78b81fcc5d03d4d59c8b665ee4f5743b86f222016e00;
+        0x603c4e0927d35ba3a7680805f53e57e3fb22ae67dd14ee7342a890d5f73db700;
 
-    /// @dev keccak256(abi.encode(uint256(keccak256("boolean.vault.funding")) - 1)) & ~bytes32(uint256(0xff))
+    /// @dev keccak256(abi.encode(uint256(keccak256("turbolev.vault.funding")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 internal constant SLOT_FUNDING =
-        0xcb3522702985e9e1c3d2da2188ea7c835d0e1df4206c40b688b71fa619ae2f00;
+        0xa957a8c3a2d44592042ee73e0f04a8f9fb7b5f97d5dda1f6e768a63738823500;
 
-    /// @dev keccak256(abi.encode(uint256(keccak256("boolean.vault.rewards")) - 1)) & ~bytes32(uint256(0xff))
+    /// @dev keccak256(abi.encode(uint256(keccak256("turbolev.vault.rewards")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 internal constant SLOT_REWARDS =
-        0x38928cc149c8444bff91ce67af32b1249eaada66b15ef051ce9783c8bdfcc700;
+        0x0b8dacb6c464ef344b8f2626338f6780f7440680aa17b662b8b46cbbf310a100;
 
-    /// @dev keccak256(abi.encode(uint256(keccak256("boolean.vault.risk")) - 1)) & ~bytes32(uint256(0xff))
+    /// @dev keccak256(abi.encode(uint256(keccak256("turbolev.vault.risk")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 internal constant SLOT_RISK =
-        0xd1faa435c2977d09a4b9c958851a78cac82539df9f850fc59ec2969648454400;
+        0xbd6e0d790fe93a9ef5b30f0e6ffb0dc42dab6ddcd023d5a63cf8131a3de74200;
 
-    /// @dev keccak256(abi.encode(uint256(keccak256("boolean.vault.router")) - 1)) & ~bytes32(uint256(0xff))
+    /// @dev keccak256(abi.encode(uint256(keccak256("turbolev.vault.router")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 internal constant SLOT_ROUTER =
-        0x7758f10fb5e47659ba75c2386b09b369f290c8d02772155b8db0ed016488c800;
+        0x6916d5dd510bb57ab669538796b6526b695314478d86363281e0cc0ca9b63400;
 
     /// @notice Dynamic slot calculation — kept for verification purposes only, not used in production.
     function calculateEIP7201Slot(string memory namespace) internal pure returns (bytes32 slot) {
@@ -154,7 +154,7 @@ library VaultStorageLib {
     // NAMESPACED STORAGE STRUCTS
     // ========================================================================
 
-    /// @custom:storage-location erc7201:boolean.vault.core
+    /// @custom:storage-location erc7201:turbolev.vault.core
     struct CoreStorage {
         // External addresses
         address vaultManager;
@@ -190,7 +190,7 @@ library VaultStorageLib {
         bool paused;
     }
 
-    /// @custom:storage-location erc7201:boolean.vault.funding
+    /// @custom:storage-location erc7201:turbolev.vault.funding
     struct FundingStorage {
         // OI exposure tracking (reused slot, same namespace for upgrade safety)
         uint256 totalLongExposure;
@@ -202,7 +202,7 @@ library VaultStorageLib {
         uint256 totalImpactFeesCollected;
     }
 
-    /// @custom:storage-location erc7201:boolean.vault.rewards
+    /// @custom:storage-location erc7201:turbolev.vault.rewards
     struct RewardsStorage {
         // Daily snapshots — kept for storage layout compatibility (no longer written to)
         mapping(uint256 => DailySnapshot) dailySnapshots;
@@ -230,7 +230,7 @@ library VaultStorageLib {
         uint256 rewardsFund;
     }
 
-    /// @custom:storage-location erc7201:boolean.vault.risk
+    /// @custom:storage-location erc7201:turbolev.vault.risk
     struct RiskStorage {
         // Directional exposure cap
         uint16 maxDirectionalExposureBps;
@@ -251,7 +251,7 @@ library VaultStorageLib {
         uint8 maxProfitCapMultiplier;
     }
 
-    /// @custom:storage-location erc7201:boolean.vault.router
+    /// @custom:storage-location erc7201:turbolev.vault.router
     struct RouterStorage {
         // Module addresses
         address coreModule;
