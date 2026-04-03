@@ -79,4 +79,15 @@ interface IPyth {
      * @return price EMA price struct
      */
     function getEmaPrice(bytes32 id) external view returns (Price memory price);
+
+    /**
+     * @notice Get EMA price no older than given age
+     * @param id Price feed ID
+     * @param age Maximum acceptable age in seconds
+     * @return price EMA price struct
+     */
+    function getEmaPriceNoOlderThan(bytes32 id, uint256 age)
+        external
+        view
+        returns (Price memory price);
 }

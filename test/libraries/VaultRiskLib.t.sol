@@ -33,6 +33,7 @@ contract VaultRiskLibTest is Test {
             isPaused: false,
             tradingEnabled: true,
             totalLiquidity: DEFAULT_TVL,
+            availableLiquidity: DEFAULT_TVL, // R3-M-04: availableLiquidity added to struct
             positionSize: 10_000 ether,
             leverage: 10,
             direction: 1, // LONG
@@ -238,12 +239,13 @@ contract VaultRiskLibTest is Test {
     function test_TotalOICap_ZeroTVL() public {
         VaultRiskLib.RiskCheckParams memory params = _defaultParams();
         params.totalLiquidity = 0;
+        params.availableLiquidity = 0; // R3-M-04: NoLiquidityAvailable uses availableLiquidity
         params.positionSize = 1000 ether;
         params.totalLongExposure = 0;
         params.totalShortExposure = 0;
 
-        // With zero TVL, checkPositionRisk reverts with NoLiquidityAvailable()
-        // This check happens before leverage check (line 107-109 in VaultRiskLib.sol)
+        // With zero available liquidity, checkPositionRisk reverts with NoLiquidityAvailable()
+        // before OI / leverage checks (VaultRiskLib.sol)
         vm.expectRevert(VaultRiskLib.NoLiquidityAvailable.selector);
         wrapper.checkPositionRisk(params);
     }

@@ -533,8 +533,9 @@ contract SettlementEngine is
             return 0;
         }
 
-        IAssetVault.VaultInfo memory vaultInfo = IAssetVault(vaultAddress).getVaultInfo();
-        uint256 vaultLiquidity = vaultInfo.totalLiquidity; // Use total LP liquidity for cap calculation
+        // R3-I-03 fix: cap profit against liquidity actually available for vault payouts, not raw
+        // totalLiquidity (which still counts funds reserved for queued payouts and addMargin).
+        uint256 vaultLiquidity = IAssetVault(vaultAddress).getAvailableLiquidity();
 
         if (vaultLiquidity == 0) {
             return 0;

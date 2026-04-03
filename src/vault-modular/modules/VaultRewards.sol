@@ -13,8 +13,8 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
  * @dev Called via delegatecall from VaultRouter. Uses shared EIP-7201 storage.
  *
  * Reward flow (no keeper required):
- *   1. Each time a position is settled with vault profit, VaultCore calls
- *      _updateRewardAccumulator() which increments rewardPerShareStored.
+ *   1. Each time a position is settled with vault profit, VaultCore (same delegatecall
+ *      storage) updates rewardPerShareStored and emits RewardAccumulatorUpdated.
  *   2. LP rewards are settled lazily: on addLiquidity, removeLiquidity, or
  *      claimRewards the pending reward is computed and moved to claimableRewards.
  *   3. LP calls claimRewards() to transfer tokens.
@@ -29,9 +29,6 @@ contract VaultRewards is VaultModuleBase {
     // EVENTS
     // ========================================================================
 
-    event RewardAccumulatorUpdated(
-        address indexed vault, uint256 profit, uint256 rewardPerShareStored, uint256 timestamp
-    );
     event RewardSettled(address indexed vault, address indexed user, uint256 amount);
     event RewardsClaimed(
         address indexed vault, address indexed user, uint256 amount, uint256 timestamp
@@ -47,37 +44,6 @@ contract VaultRewards is VaultModuleBase {
     error NoRewardsToClaim();
     error InsufficientLiquidity();
     error InsufficientRewards(uint256 actual, uint256 expected);
-
-    // ========================================================================
-    // ACCUMULATOR — called by VaultCore on every profitable settlement
-    // ========================================================================
-
-    /**
-     * @notice Update the global reward-per-share accumulator.
-     * @dev Must be called by VaultCore (via delegatecall context) whenever vault
-     *      profit is realised. Profit must already be validated > 0 by the caller.
-     * @param profit Vault profit for this settlement (collateral token units).
-     */
-    function updateRewardAccumulator(uint256 profit) external onlyVaultAdminOrKeeper {
-        _updateRewardAccumulator(profit);
-    }
-
-    function _updateRewardAccumulator(uint256 profit) internal {
-        if (profit == 0) return;
-
-        VaultStorageLib.CoreStorage storage core = _core();
-        VaultStorageLib.RewardsStorage storage rewards = _rewards();
-
-        uint256 totalShares = core.vaultInfo.totalShares;
-        if (totalShares == 0) return;
-
-        uint256 delta = VaultRewardsLib.computeRewardPerShareDelta(profit, totalShares);
-        rewards.rewardPerShareStored += delta;
-
-        emit RewardAccumulatorUpdated(
-            address(this), profit, rewards.rewardPerShareStored, block.timestamp
-        );
-    }
 
     // ========================================================================
     // SETTLEMENT HELPERS — called before any shares change

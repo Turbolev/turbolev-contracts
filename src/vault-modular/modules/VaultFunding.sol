@@ -326,9 +326,17 @@ contract VaultFunding is VaultModuleBase {
     /**
      * @notice Enable or disable price impact
      * @param enabled True to enable price impact
+     * @dev R3-I-02: enabling requires a non-all-zero tier config (same rule as validateConfig).
      */
     function setImpactEnabled(bool enabled) external onlyVaultManagerOrHelper {
         VaultStorageLib.FundingStorage storage funding = _funding();
+        if (enabled) {
+            PriceImpactLib.ImpactConfig memory cfg = funding.impactConfig;
+            cfg.isEnabled = true;
+            if (!PriceImpactLib.validateConfig(cfg)) {
+                revert InvalidParameters();
+            }
+        }
         funding.impactEnabled = enabled;
         funding.impactConfig.isEnabled = enabled;
         emit ImpactEnabledUpdated(enabled);

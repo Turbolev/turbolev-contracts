@@ -20,10 +20,17 @@ contract MockPyth {
     }
 
     mapping(bytes32 => Price) public prices;
+    mapping(bytes32 => Price) public emaPrices;
     uint256 public updateFee = 0.001 ether;
 
     function setPrice(bytes32 id, int64 price, int32 expo) external {
         prices[id] = Price({ price: price, conf: 0, expo: expo, publishTime: block.timestamp });
+        // Default EMA = same as spot unless overridden via setEmaPrice
+        emaPrices[id] = prices[id];
+    }
+
+    function setEmaPrice(bytes32 id, int64 price, int32 expo) external {
+        emaPrices[id] = Price({ price: price, conf: 0, expo: expo, publishTime: block.timestamp });
     }
 
     function getPriceUnsafe(bytes32 id) external view returns (Price memory) {
@@ -36,13 +43,30 @@ contract MockPyth {
         return p;
     }
 
+    function getEmaPrice(bytes32 id) external view returns (Price memory) {
+        return emaPrices[id];
+    }
+
+    function getEmaPriceNoOlderThan(bytes32 id, uint256 age) external view returns (Price memory) {
+        Price memory p = emaPrices[id];
+        require(block.timestamp - p.publishTime <= age, "EMA price too old");
+        return p;
+    }
+
     function getUpdateFee(bytes[] calldata) external view returns (uint256) {
         return updateFee;
     }
 
     function updatePriceFeeds(bytes[] calldata) external payable {
         require(msg.value >= updateFee, "Insufficient fee");
-        // Mock update - trong thực tế sẽ parse updateData
+    }
+
+    function updatePriceFeedsIfNecessary(bytes[] calldata, bytes32[] calldata, uint64[] calldata)
+        external
+        payable { }
+
+    function getPrice(bytes32 id) external view returns (Price memory) {
+        return prices[id];
     }
 }
 
@@ -305,6 +329,165 @@ contract PythOracleTest is Test {
 
     function testSupportsPullMode() public view {
         assertTrue(pythOracle.supportsPullMode(token));
+    }
+
+    // ========================================================================
+    // M-20 FIX: VAA STALENESS WINDOW TESTS (Layer 1)
+    // ========================================================================
+
+    function testSetMaxVaaStaleness() public {
+        pythOracle.setMaxVaaStaleness(60);
+        assertEq(pythOracle.maxVaaStaleness(), 60);
+
+        // Disable by setting 0
+        pythOracle.setMaxVaaStaleness(0);
+        assertEq(pythOracle.maxVaaStaleness(), 0);
+    }
+
+    function testSetMaxVaaStalenessInvalidReverts() public {
+        // Below MIN_VAA_STALENESS (10)
+        vm.expectRevert(PythOracle.InvalidVaaStaleness.selector);
+        pythOracle.setMaxVaaStaleness(5);
+
+        // Above MAX_VAA_STALENESS (3600)
+        vm.expectRevert(PythOracle.InvalidVaaStaleness.selector);
+        pythOracle.setMaxVaaStaleness(7200);
+    }
+
+    function testGetPriceWithUpdatePassesWhenVaaFresh() public {
+        // Enable 60s staleness window
+        pythOracle.setMaxVaaStaleness(60);
+
+        bytes memory updateData = abi.encode(new bytes[](0));
+        vm.deal(address(this), 1 ether);
+
+        // Price was set at block.timestamp (fresh) — should pass
+        (int256 price,) =
+            pythOracle.getPriceWithUpdate{ value: 0.001 ether }(token, 3600, updateData);
+        assertEq(price, 2000e18);
+    }
+
+    function testGetPriceWithUpdateRevertsWhenVaaTooOld() public {
+        // Enable 60s staleness window
+        pythOracle.setMaxVaaStaleness(60);
+
+        // Warp 61 seconds — VAA publishTime is now 61s old
+        vm.warp(block.timestamp + 61);
+
+        bytes memory updateData = abi.encode(new bytes[](0));
+        vm.deal(address(this), 1 ether);
+
+        vm.expectRevert(PythOracle.VaaTooOld.selector);
+        pythOracle.getPriceWithUpdate{ value: 0.001 ether }(token, 3600, updateData);
+    }
+
+    function testGetPriceWithUpdateSkipsVaaWindowWhenDisabled() public {
+        // maxVaaStaleness = 0 (disabled by default)
+        assertEq(pythOracle.maxVaaStaleness(), 0);
+
+        // Warp far into the future — VAA is old but check is disabled
+        vm.warp(block.timestamp + 7200);
+        // Re-set price at new timestamp so maxAge check passes
+        mockPyth.setPrice(priceId, 200_000_000_000, -8);
+
+        bytes memory updateData = abi.encode(new bytes[](0));
+        vm.deal(address(this), 1 ether);
+
+        // Should pass because VAA window check is disabled
+        (int256 price,) =
+            pythOracle.getPriceWithUpdate{ value: 0.001 ether }(token, 3600, updateData);
+        assertEq(price, 2000e18);
+    }
+
+    // ========================================================================
+    // M-20 FIX: EMA DEVIATION GUARD TESTS (Layer 2)
+    // ========================================================================
+
+    function testSetMaxEmaDeviationBps() public {
+        pythOracle.setMaxEmaDeviationBps(300);
+        assertEq(pythOracle.maxEmaDeviationBps(), 300);
+
+        // Disable by setting 0
+        pythOracle.setMaxEmaDeviationBps(0);
+        assertEq(pythOracle.maxEmaDeviationBps(), 0);
+    }
+
+    function testSetMaxEmaDeviationBpsInvalidReverts() public {
+        // Below MIN_EMA_DEVIATION_BPS (10)
+        vm.expectRevert(PythOracle.InvalidEmaDeviationBps.selector);
+        pythOracle.setMaxEmaDeviationBps(5);
+
+        // Above MAX_EMA_DEVIATION_BPS (1000)
+        vm.expectRevert(PythOracle.InvalidEmaDeviationBps.selector);
+        pythOracle.setMaxEmaDeviationBps(1001);
+    }
+
+    function testGetPriceWithUpdatePassesWhenSpotWithinEma() public {
+        // Enable EMA guard: 300 bps = 3%
+        pythOracle.setMaxEmaDeviationBps(300);
+
+        // spot = 2000, ema = 2010 → deviation = 10/2010 ≈ 0.5% < 3% → pass
+        mockPyth.setPrice(priceId, 200_000_000_000, -8); // spot 2000
+        mockPyth.setEmaPrice(priceId, 201_000_000_000, -8); // ema  2010
+
+        bytes memory updateData = abi.encode(new bytes[](0));
+        vm.deal(address(this), 1 ether);
+
+        (int256 price,) =
+            pythOracle.getPriceWithUpdate{ value: 0.001 ether }(token, 3600, updateData);
+        assertEq(price, 2000e18);
+    }
+
+    function testGetPriceWithUpdateRevertsWhenSpotDeviatesFromEma() public {
+        // Enable EMA guard: 300 bps = 3%
+        pythOracle.setMaxEmaDeviationBps(300);
+
+        // spot = 2000, ema = 2100 → deviation = 100/2100 ≈ 4.76% > 3% → revert
+        mockPyth.setPrice(priceId, 200_000_000_000, -8); // spot 2000
+        mockPyth.setEmaPrice(priceId, 210_000_000_000, -8); // ema  2100
+
+        bytes memory updateData = abi.encode(new bytes[](0));
+        vm.deal(address(this), 1 ether);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                PythOracle.EmaDeviationExceeded.selector, uint256(476), uint256(300)
+            )
+        );
+        pythOracle.getPriceWithUpdate{ value: 0.001 ether }(token, 3600, updateData);
+    }
+
+    function testGetPriceWithUpdateSkipsEmaGuardWhenDisabled() public {
+        // maxEmaDeviationBps = 0 (disabled by default)
+        assertEq(pythOracle.maxEmaDeviationBps(), 0);
+
+        // spot = 2000, ema = 2500 → 25% deviation — but guard is off
+        mockPyth.setPrice(priceId, 200_000_000_000, -8);
+        mockPyth.setEmaPrice(priceId, 250_000_000_000, -8);
+
+        bytes memory updateData = abi.encode(new bytes[](0));
+        vm.deal(address(this), 1 ether);
+
+        (int256 price,) =
+            pythOracle.getPriceWithUpdate{ value: 0.001 ether }(token, 3600, updateData);
+        assertEq(price, 2000e18);
+    }
+
+    function testGetPriceWithUpdateBothLayersActive() public {
+        // Enable both layers
+        pythOracle.setMaxVaaStaleness(60);
+        pythOracle.setMaxEmaDeviationBps(300);
+
+        // Fresh VAA, spot within EMA → should pass
+        mockPyth.setPrice(priceId, 200_000_000_000, -8);
+        mockPyth.setEmaPrice(priceId, 201_000_000_000, -8);
+
+        bytes memory updateData = abi.encode(new bytes[](0));
+        vm.deal(address(this), 1 ether);
+
+        (int256 price,) =
+            pythOracle.getPriceWithUpdate{ value: 0.001 ether }(token, 3600, updateData);
+        assertEq(price, 2000e18);
     }
 
     // ========================================================================

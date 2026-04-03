@@ -12,10 +12,17 @@ import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 // Mock Pyth contract
 contract MockPyth is IPyth {
     mapping(bytes32 => Price) private _prices;
+    mapping(bytes32 => Price) private _emaPrices;
     uint256 private _updateFee = 1;
 
     function setPrice(bytes32 priceId, int64 price, int32 expo, uint256 publishTime) external {
         _prices[priceId] = Price({ price: price, conf: 0, expo: expo, publishTime: publishTime });
+        // Default EMA = same as spot unless overridden via setEmaPrice
+        _emaPrices[priceId] = _prices[priceId];
+    }
+
+    function setEmaPrice(bytes32 priceId, int64 price, int32 expo, uint256 publishTime) external {
+        _emaPrices[priceId] = Price({ price: price, conf: 0, expo: expo, publishTime: publishTime });
     }
 
     function setUpdateFee(uint256 fee) external {
@@ -42,7 +49,20 @@ contract MockPyth is IPyth {
     }
 
     function getEmaPrice(bytes32 id) external view override returns (Price memory) {
-        return _prices[id];
+        return _emaPrices[id];
+    }
+
+    function getEmaPriceNoOlderThan(bytes32 id, uint256 maxAge)
+        external
+        view
+        override
+        returns (Price memory)
+    {
+        Price memory p = _emaPrices[id];
+        require(
+            p.publishTime > 0 && (block.timestamp - p.publishTime) <= maxAge, "EMA price too old"
+        );
+        return p;
     }
 
     function updatePriceFeeds(bytes[] calldata) external payable override { }

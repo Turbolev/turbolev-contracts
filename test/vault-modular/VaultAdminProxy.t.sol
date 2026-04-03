@@ -14,7 +14,6 @@ contract VaultAdminProxyTest is BaseTestModular {
 
     // Cache role for gas efficiency and avoid prank issues
     bytes32 public VAULT_ADMIN_ROLE;
-    bytes32 public VAULT_KEEPER_ROLE;
 
     // Events from VaultAdminProxy
     event VaultPaused(address indexed vault, address indexed caller, uint256 timestamp);
@@ -30,7 +29,6 @@ contract VaultAdminProxyTest is BaseTestModular {
 
         // Cache roles to avoid prank consumption issues
         VAULT_ADMIN_ROLE = vaultAccessController.VAULT_ADMIN_ROLE();
-        VAULT_KEEPER_ROLE = vaultAccessController.VAULT_KEEPER_ROLE();
 
         _deployVaultAdminProxy();
     }
@@ -52,10 +50,6 @@ contract VaultAdminProxyTest is BaseTestModular {
         vaultAccessController.addVaultAdminProxy(address(vaultAdminProxy));
         vaultAccessController.grantRole(VAULT_ADMIN_ROLE, owner);
         vm.stopPrank();
-
-        // Grant VAULT_KEEPER_ROLE to keeper
-        vm.prank(owner);
-        vaultAccessController.addVaultKeeper(keeper);
     }
 
     // ========================================================================
@@ -419,13 +413,6 @@ contract VaultAdminProxyTest is BaseTestModular {
         assertTrue(
             vaultAccessController.hasRole(VAULT_ADMIN_ROLE, address(vaultAdminProxy)),
             "VaultAdminProxy should have VAULT_ADMIN_ROLE"
-        );
-    }
-
-    function test_Keeper_HasCorrectRole() public view {
-        assertTrue(
-            vaultAccessController.hasRole(VAULT_KEEPER_ROLE, keeper),
-            "Keeper should have VAULT_KEEPER_ROLE"
         );
     }
 

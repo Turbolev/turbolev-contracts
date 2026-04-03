@@ -16,7 +16,6 @@ import "../interfaces/IVaultManager.sol";
  * - DEFAULT_ADMIN_ROLE: Governance (Timelock) - can manage all roles
  * - VAULT_ADMIN_ROLE: VaultManager, VaultAdminProxy - can configure vaults
  * - POSITION_MANAGER_ROLE: PositionManager contract - can interact with positions
- * - VAULT_KEEPER_ROLE: Vault keeper bots - can update funding, finalize rewards
  * - POSITION_KEEPER_ROLE: Position keeper bots - can process settlements, liquidations
  * - GUARDIAN_ROLE: Emergency guardian (e.g. Gnosis Safe) - can pause vaults immediately
  * - EMERGENCY_ROLE: Emergency multisig - same pause capabilities as GUARDIAN_ROLE
@@ -24,9 +23,10 @@ import "../interfaces/IVaultManager.sol";
  *
  * Emergency Actions:
  * - Any address with GUARDIAN_ROLE or EMERGENCY_ROLE can pause vaults immediately (no confirmation needed)
- * - Unpause is allowed for VAULT_ADMIN_ROLE, EMERGENCY_ROLE, and GUARDIAN_ROLE to enable
- *   self-service recovery from accidental emergency pauses (see VaultCore.unpause NatSpec).
- * - If Timelock-only unpause is required, restrict VaultCore.unpause to DEFAULT_ADMIN_ROLE.
+ * - Unpause via VaultManager requires onlyOwner (Timelock) — R3-M-01 fix to prevent EMERGENCY_ROLE
+ *   from bypassing the EMERGENCY_UNPAUSE_DELAY by routing through VaultManager as msg.sender.
+ * - Direct unpause via VaultRouter/VaultCore enforces a 1-hour delay for EMERGENCY/GUARDIAN actors
+ *   (see VaultCore.unpause NatSpec and VaultStorageLib.EMERGENCY_UNPAUSE_DELAY).
  */
 contract VaultAccessController is
     Initializable,
@@ -43,9 +43,6 @@ contract VaultAccessController is
 
     /// @notice Role for position management (PositionManager)
     bytes32 public constant POSITION_MANAGER_ROLE = keccak256("POSITION_MANAGER_ROLE");
-
-    /// @notice Role for vault keeper operations (funding updates, reward finalization)
-    bytes32 public constant VAULT_KEEPER_ROLE = keccak256("VAULT_KEEPER_ROLE");
 
     /// @notice Role for position keeper operations (process settlements, liquidations)
     bytes32 public constant POSITION_KEEPER_ROLE = keccak256("POSITION_KEEPER_ROLE");
@@ -217,10 +214,8 @@ contract VaultAccessController is
      * @param role Role to grant
      * @param account Account to grant role to
      * @dev DEFAULT_ADMIN_ROLE can grant any vault role.
-     *      VAULT_ADMIN_ROLE can grant vault roles EXCEPT keeper roles
-     *      (VAULT_KEEPER_ROLE, POSITION_KEEPER_ROLE) — prevents privilege escalation
-     *      where a compromised vault admin could promote arbitrary addresses to keeper bots.
-     *      Keeper roles must be granted exclusively by DEFAULT_ADMIN_ROLE (Timelock).
+     *      VAULT_ADMIN_ROLE cannot grant POSITION_KEEPER_ROLE via this per-vault mapping
+     *      (use addPositionKeeper / removePositionKeeper for global position keeper role).
      */
     function grantVaultRole(address vault, bytes32 role, address account) external {
         if (vault == address(0) || account == address(0)) revert InvalidAddress();
@@ -230,7 +225,7 @@ contract VaultAccessController is
             // DEFAULT_ADMIN_ROLE: unrestricted
         } else if (hasRole(VAULT_ADMIN_ROLE, msg.sender)) {
             // VAULT_ADMIN_ROLE: cannot grant keeper roles
-            if (role == VAULT_KEEPER_ROLE || role == POSITION_KEEPER_ROLE) {
+            if (role == POSITION_KEEPER_ROLE) {
                 revert NotAuthorized();
             }
         } else {
@@ -295,13 +290,6 @@ contract VaultAccessController is
      */
     function isPositionManager(address account) external view returns (bool isPositionMgr) {
         return hasRole(POSITION_MANAGER_ROLE, account);
-    }
-
-    /**
-     * @notice Check if account is vault keeper
-     */
-    function isVaultKeeper(address account) external view returns (bool isKeeperResult) {
-        return hasRole(VAULT_KEEPER_ROLE, account);
     }
 
     /**
@@ -373,21 +361,6 @@ contract VaultAccessController is
     function addVaultAdminProxy(address adminProxy) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (adminProxy == address(0)) revert InvalidAddress();
         _grantRole(VAULT_ADMIN_ROLE, adminProxy);
-    }
-
-    /**
-     * @notice Add vault keeper address
-     */
-    function addVaultKeeper(address keeper) external onlyRole(VAULT_ADMIN_ROLE) {
-        if (keeper == address(0)) revert InvalidAddress();
-        _grantRole(VAULT_KEEPER_ROLE, keeper);
-    }
-
-    /**
-     * @notice Remove vault keeper address
-     */
-    function removeVaultKeeper(address keeper) external onlyRole(VAULT_ADMIN_ROLE) {
-        _revokeRole(VAULT_KEEPER_ROLE, keeper);
     }
 
     /**
@@ -512,6 +485,6 @@ contract VaultAccessController is
     // ========================================================================
 
     function version() external pure returns (string memory) {
-        return "2.3.0";
+        return "2.4.0";
     }
 }

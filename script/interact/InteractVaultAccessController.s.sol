@@ -40,7 +40,6 @@ contract InteractVaultAccessController is DeployHelper {
         console.log("DEFAULT_ADMIN_ROLE:", vm.toString(accessController.DEFAULT_ADMIN_ROLE()));
         console.log("VAULT_ADMIN_ROLE:", vm.toString(accessController.VAULT_ADMIN_ROLE()));
         console.log("POSITION_MANAGER_ROLE:", vm.toString(accessController.POSITION_MANAGER_ROLE()));
-        console.log("VAULT_KEEPER_ROLE:", vm.toString(accessController.VAULT_KEEPER_ROLE()));
         console.log("POSITION_KEEPER_ROLE:", vm.toString(accessController.POSITION_KEEPER_ROLE()));
         console.log("EMERGENCY_ROLE:", vm.toString(accessController.EMERGENCY_ROLE()));
         console.log("UPGRADER_ROLE:", vm.toString(accessController.UPGRADER_ROLE()));
@@ -56,7 +55,6 @@ contract InteractVaultAccessController is DeployHelper {
             accessController.hasRole(accessController.VAULT_ADMIN_ROLE(), account)
         );
         console.log("Is Position Manager:", accessController.isPositionManager(account));
-        console.log("Is Vault Keeper:", accessController.isVaultKeeper(account));
         console.log("Is Position Keeper:", accessController.isPositionKeeper(account));
         console.log("Has Emergency Role:", accessController.hasEmergencyRole(account));
         console.log(
@@ -98,28 +96,6 @@ contract InteractVaultAccessController is DeployHelper {
         vm.startBroadcast(deployer);
         accessController.addVaultAdminProxy(adminProxy);
         console.log("VaultAdminProxy added:", adminProxy);
-        vm.stopBroadcast();
-    }
-
-    /**
-     * @notice Add vault keeper
-     * @param keeper Keeper address
-     */
-    function addVaultKeeper(address keeper) public {
-        vm.startBroadcast(deployer);
-        accessController.addVaultKeeper(keeper);
-        console.log("Vault Keeper added:", keeper);
-        vm.stopBroadcast();
-    }
-
-    /**
-     * @notice Remove vault keeper
-     * @param keeper Keeper address
-     */
-    function removeVaultKeeper(address keeper) public {
-        vm.startBroadcast(deployer);
-        accessController.removeVaultKeeper(keeper);
-        console.log("Vault Keeper removed:", keeper);
         vm.stopBroadcast();
     }
 

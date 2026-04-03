@@ -50,7 +50,8 @@ library VaultStorageLib {
     // Formula (EIP-7201):
     //   keccak256(abi.encode(uint256(keccak256("<namespace>")) - 1)) & ~bytes32(uint256(0xff))
     //
-    // Verified with Foundry script — each value matches the dynamic formula output.
+    // Verified in CI: test/libraries/VaultStorageLib.t.sol — test_SlotConstants_MatchDynamicFormula
+    // (each SLOT_* must equal calculateEIP7201Slot(NAMESPACE_*)).
 
     /// @dev keccak256(abi.encode(uint256(keccak256("turbolev.vault.core")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 internal constant SLOT_CORE =
@@ -73,6 +74,8 @@ library VaultStorageLib {
         0x6916d5dd510bb57ab669538796b6526b695314478d86363281e0cc0ca9b63400;
 
     /// @notice Dynamic slot calculation — kept for verification purposes only, not used in production.
+    /// @dev R3-I-01: parity with hardcoded SLOT_* is enforced by Foundry test
+    ///      `test_SlotConstants_MatchDynamicFormula` in test/libraries/VaultStorageLib.t.sol.
     function calculateEIP7201Slot(string memory namespace) internal pure returns (bytes32 slot) {
         bytes32 namespaceHash = keccak256(bytes(namespace));
         slot = keccak256(abi.encode(uint256(namespaceHash) - 1)) & ~bytes32(uint256(0xff));
@@ -101,6 +104,9 @@ library VaultStorageLib {
         bool tradingEnabled;
         uint256 pendingPositions;
         uint256 totalPendingPayoutAmount;
+        // R3-H-01 fix: track margin added via addMargin() separately so that
+        // availableLiquidity correctly excludes committed margin collateral.
+        uint256 totalMarginCollateral;
     }
 
     /// @notice Vault parameters
@@ -180,6 +186,9 @@ library VaultStorageLib {
         mapping(uint64 => address) failedPayoutUsers;
         uint64[] pendingPayoutQueue;
         mapping(uint64 => uint256) betCollateral;
+        // R3-H-01 fix: tracks the total margin added via addMargin() per position,
+        // used to correctly decrement totalMarginCollateral when a position is cleared.
+        mapping(uint64 => uint256) positionMarginCollateral;
         uint256 queueStartIndex;
         // Fees
         FeeConfig feeConfig;
@@ -188,6 +197,9 @@ library VaultStorageLib {
         uint256 reentrancyStatus;
         // Paused state
         bool paused;
+        // Timestamp when vault was last paused — used to enforce EMERGENCY_UNPAUSE_DELAY
+        // so EMERGENCY/GUARDIAN roles cannot pause→unpause atomically to bypass the mechanism.
+        uint256 pausedAt;
     }
 
     /// @custom:storage-location erc7201:turbolev.vault.funding
@@ -322,6 +334,10 @@ library VaultStorageLib {
     uint256 internal constant INITIAL_SHARE_MULTIPLIER = 1e18;
     uint256 internal constant MIN_LOCK_PERIOD = 30 days;
     uint256 internal constant REWARD_MIN_STAKE_PERIOD = 1 days;
+    /// @notice Minimum delay before EMERGENCY_ROLE / GUARDIAN_ROLE can unpause after pausing.
+    /// Prevents atomic pause→unpause that would bypass the emergency pause mechanism.
+    /// UPGRADER_ROLE (Timelock) is exempt — it can unpause immediately at any time.
+    uint256 internal constant EMERGENCY_UNPAUSE_DELAY = 1 hours;
     uint256 internal constant MAX_PAYOUTS_PER_TX = 50;
     uint8 internal constant MAX_PAYOUT_RETRIES = 3;
     uint256 internal constant MAX_DAYS_PER_CALCULATION = 365;

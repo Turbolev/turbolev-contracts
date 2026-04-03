@@ -16,7 +16,6 @@ import "../interfaces/IVaultRouter.sol";
  *
  * Roles:
  * - VAULT_ADMIN_ROLE: Can configure individual vault parameters
- * - VAULT_KEEPER_ROLE: Can perform batch operations (funding updates)
  * - DEFAULT_ADMIN_ROLE: Can update contract configuration
  *
  * This contract replaces VaultManagerHelper for admin operations.
@@ -132,17 +131,6 @@ contract VaultAdminProxy is Initializable, UUPSUpgradeable, ReentrancyGuardUpgra
     }
 
     /**
-     * @notice Check if caller has VAULT_KEEPER_ROLE
-     */
-    modifier onlyVaultKeeper() {
-        VaultAccessController ac = VaultAccessController(accessController);
-        if (!ac.hasRole(ac.VAULT_KEEPER_ROLE(), msg.sender)) {
-            revert NotAuthorized();
-        }
-        _;
-    }
-
-    /**
      * @notice Check if caller has DEFAULT_ADMIN_ROLE
      */
     modifier onlyDefaultAdmin() {
@@ -152,10 +140,6 @@ contract VaultAdminProxy is Initializable, UUPSUpgradeable, ReentrancyGuardUpgra
         }
         _;
     }
-
-    // ========================================================================
-    // BATCH OPERATIONS (VAULT_KEEPER_ROLE)
-    // ========================================================================
 
     // ========================================================================
     // VAULT ADMIN FUNCTIONS (VAULT_ADMIN_ROLE)

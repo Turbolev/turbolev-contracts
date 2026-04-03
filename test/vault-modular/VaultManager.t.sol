@@ -232,7 +232,8 @@ contract VaultManagerModularTest is BaseTestModular {
         vm.prank(mockEmergencyGuardian);
         vaultManager.pauseVault(address(projectToken), address(projectToken));
 
-        vm.prank(mockEmergencyGuardian);
+        // R3-M-01 fix: unpauseVault is now onlyOwner (Timelock) to prevent EMERGENCY_ROLE bypass
+        vm.prank(owner);
         vaultManager.unpauseVault(address(projectToken), address(projectToken));
 
         assertFalse(vault.paused());
@@ -279,7 +280,8 @@ contract VaultManagerModularTest is BaseTestModular {
         vm.prank(mockEmergencyGuardian);
         vaultManager.emergencyPauseAll();
 
-        vm.prank(mockEmergencyGuardian);
+        // R3-M-01 fix: emergencyUnpauseAll is now onlyOwner (Timelock) to prevent EMERGENCY_ROLE bypass
+        vm.prank(owner);
         vaultManager.emergencyUnpauseAll();
 
         assertFalse(vault.paused());

@@ -99,7 +99,7 @@ contract PositionRouter is Initializable, UUPSUpgradeable {
         router.coreModule = _coreModule;
         router.initialized = true;
 
-        // Initialize core module via delegatecall
+        // Initialize core module via delegatecall (PositionCore.initialize is `onlyInitializing`)
         (bool success,) = _coreModule.delegatecall(
             abi.encodeWithSignature(
                 "initialize(address,address,address,address)",

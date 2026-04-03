@@ -87,7 +87,7 @@ interface IAssetVault {
         uint256 positionSize,
         bool isMarginAdd,
         uint8 direction
-    ) external payable;
+    ) external;
 
     /**
      * @notice Execute payout to user
@@ -131,6 +131,11 @@ interface IAssetVault {
      * @notice Get vault info
      */
     function getVaultInfo() external view returns (VaultInfo memory);
+
+    /**
+     * @notice LP liquidity available for new payouts / risk sizing (excludes committed pending payouts and margin)
+     */
+    function getAvailableLiquidity() external view returns (uint256);
 
     /**
      * @notice Get vault parameters

@@ -28,7 +28,6 @@ abstract contract VaultModuleBase {
 
     error NotVaultAdmin();
     error NotPositionManager();
-    error NotKeeper();
     error NotEmergency();
     error NotVaultManagerOrHelper();
     error InvalidAddress();
@@ -79,48 +78,6 @@ abstract contract VaultModuleBase {
         if (msg.sender != core.positionManager) {
             revert NotPositionManager();
         }
-        _;
-    }
-
-    /**
-     * @notice Only vault keeper (for automated vault operations)
-     */
-    modifier onlyVaultKeeper() {
-        VaultStorageLib.CoreStorage storage core = VaultStorageLib.getCoreStorage();
-        if (core.accessController == address(0)) revert InvalidAddress();
-
-        VaultAccessController ac = VaultAccessController(core.accessController);
-        if (!ac.isVaultKeeper(msg.sender)) {
-            revert NotKeeper();
-        }
-        _;
-    }
-
-    /**
-     * @notice Only vault admin OR vault keeper
-     * @dev For automation functions that can be called by either admin or keeper bots
-     */
-    modifier onlyVaultAdminOrKeeper() {
-        VaultStorageLib.CoreStorage storage core = VaultStorageLib.getCoreStorage();
-        if (core.accessController == address(0)) revert InvalidAddress();
-
-        VaultAccessController ac = VaultAccessController(core.accessController);
-        bool isAdmin = ac.isVaultAdmin(address(this), msg.sender);
-        bool isKeeper = ac.isVaultKeeper(msg.sender);
-
-        if (!isAdmin && !isKeeper) {
-            revert NotKeeper();
-        }
-        _;
-    }
-
-    /**
-     * @notice Permissionless or keeper (for funding updates)
-     * @dev Allows anyone to call but keepers get priority
-     */
-    modifier permissionlessOrKeeper() {
-        // Anyone can call - no restriction
-        // Keepers are expected to be more reliable
         _;
     }
 

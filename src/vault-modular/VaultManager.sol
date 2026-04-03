@@ -342,7 +342,8 @@ contract VaultManager is
         uint256 positionSize,
         bool isMarginAdd,
         uint8 direction
-    ) external payable onlyPositionManager {
+    ) external onlyPositionManager {
+        // R3-I-04: not payable — collateral is ERC-20 only; ETH would be stuck with no withdrawal path
         address vaultAddress = _getVault(_collateralToken, _priceToken);
         IERC20(_collateralToken).safeTransferFrom(positionManager, vaultAddress, amount);
         IVaultRouter(vaultAddress)
@@ -397,8 +398,13 @@ contract VaultManager is
 
     /**
      * @notice Unpause vault by (collateralToken, priceToken) pair
+     * @dev R3-M-01 fix: restricted to onlyOwner (Timelock) to prevent EMERGENCY_ROLE from
+     *      bypassing the EMERGENCY_UNPAUSE_DELAY enforced in VaultCore.unpause().
+     *      When VaultManager calls IVaultRouter.unpause(), msg.sender inside VaultCore is
+     *      VaultManager (not the original caller), so the per-role delay check in VaultCore
+     *      would be skipped. Restricting to onlyOwner closes this bypass path.
      */
-    function unpauseVault(address collateralToken, address priceToken) external onlyEmergencyRole {
+    function unpauseVault(address collateralToken, address priceToken) external onlyOwner {
         IVaultRouter(_getVault(collateralToken, priceToken)).unpause();
     }
 
@@ -411,8 +417,9 @@ contract VaultManager is
 
     /**
      * @notice Unpause vault by address
+     * @dev R3-M-01 fix: restricted to onlyOwner (Timelock) — see unpauseVault() for rationale.
      */
-    function unpauseVaultByAddress(address vault) public onlyEmergencyRole {
+    function unpauseVaultByAddress(address vault) public onlyOwner {
         IVaultRouter(vault).unpause();
     }
 
@@ -427,8 +434,9 @@ contract VaultManager is
 
     /**
      * @notice Batch unpause vaults
+     * @dev R3-M-01 fix: restricted to onlyOwner (Timelock) — see unpauseVault() for rationale.
      */
-    function batchUnpauseVaults(address[] calldata vaults) external onlyEmergencyRole {
+    function batchUnpauseVaults(address[] calldata vaults) external onlyOwner {
         for (uint256 i = 0; i < vaults.length; i++) {
             unpauseVaultByAddress(vaults[i]);
         }
@@ -470,8 +478,10 @@ contract VaultManager is
      * @notice Emergency unpause all vaults in a single batch (safe only when vault count is small)
      * @dev Reverts if allVaults.length > MAX_BATCH_SIZE to prevent OOG.
      *      Use emergencyUnpauseBatch() for paginated execution when vault count is large.
+     *      R3-M-01 fix: restricted to onlyOwner (Timelock) to prevent EMERGENCY_ROLE from
+     *      bypassing EMERGENCY_UNPAUSE_DELAY via this batch path.
      */
-    function emergencyUnpauseAll() external onlyEmergencyRole {
+    function emergencyUnpauseAll() external onlyOwner {
         if (allVaults.length > MAX_BATCH_SIZE) revert BatchTooLarge();
         _unpause();
         _unpauseVaultRange(0, allVaults.length);
@@ -484,8 +494,9 @@ contract VaultManager is
      * @param count Number of vaults to process (capped at MAX_BATCH_SIZE)
      * @dev Call repeatedly with increasing startIndex until all vaults are covered.
      *      VaultManager itself is unpaused on the first call (startIndex == 0).
+     *      R3-M-01 fix: restricted to onlyOwner (Timelock) — see emergencyUnpauseAll() for rationale.
      */
-    function emergencyUnpauseBatch(uint256 startIndex, uint256 count) external onlyEmergencyRole {
+    function emergencyUnpauseBatch(uint256 startIndex, uint256 count) external onlyOwner {
         if (count == 0 || count > MAX_BATCH_SIZE) revert BatchTooLarge();
         if (startIndex >= allVaults.length) revert InvalidBatchRange();
 

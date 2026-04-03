@@ -49,11 +49,35 @@ contract PythOracle is
     /// @notice Default operating mode
     OracleType public defaultMode;
 
+    /// @notice Maximum allowed deviation between spot and EMA price (in bps) for pull-mode updates.
+    /// @dev M-20 fix (Layer 2): if |spot - ema| / ema > maxEmaDeviationBps the update is rejected,
+    ///      preventing cherry-picked VAAs whose spot price is far from the ~1h EMA baseline.
+    ///      Set to 0 to disable the EMA guard entirely.
+    uint256 public maxEmaDeviationBps;
+
+    /// @notice Maximum acceptable age of the VAA's publishTime relative to block.timestamp (seconds).
+    /// @dev M-20 fix (Layer 1): narrows the cherry-pick window to at most maxVaaStaleness seconds,
+    ///      regardless of the broader maxAge passed by the caller.
+    ///      Set to 0 to disable the VAA staleness window check.
+    uint256 public maxVaaStaleness;
+
+    /// @notice Minimum allowed maxEmaDeviationBps (0.1%)
+    uint256 public constant MIN_EMA_DEVIATION_BPS = 10;
+
+    /// @notice Maximum allowed maxEmaDeviationBps (10%)
+    uint256 public constant MAX_EMA_DEVIATION_BPS = 1000;
+
+    /// @notice Minimum allowed maxVaaStaleness (10 seconds)
+    uint256 public constant MIN_VAA_STALENESS = 10;
+
+    /// @notice Maximum allowed maxVaaStaleness (1 hour)
+    uint256 public constant MAX_VAA_STALENESS = 3600;
+
     // ========================================================================
     // STORAGE GAP
     // ========================================================================
 
-    uint256[46] private __gap;
+    uint256[44] private __gap;
 
     // ========================================================================
     // EVENTS
@@ -67,6 +91,8 @@ contract PythOracle is
     event MaxPriceAgeUpdated(uint256 oldAge, uint256 newAge);
     event DefaultModeUpdated(OracleType oldMode, OracleType newMode);
     event ETHWithdrawn(address indexed recipient, uint256 amount);
+    event MaxEmaDeviationBpsUpdated(uint256 oldBps, uint256 newBps);
+    event MaxVaaStalenessUpdated(uint256 oldStaleness, uint256 newStaleness);
 
     // ========================================================================
     // ERRORS
@@ -85,6 +111,10 @@ contract PythOracle is
     error ETHTransferFailed();
     error InvalidPriceAge();
     error InvalidExponent();
+    error InvalidEmaDeviationBps();
+    error InvalidVaaStaleness();
+    error VaaTooOld();
+    error EmaDeviationExceeded(uint256 deviationBps, uint256 maxBps);
 
     // ========================================================================
     // CONSTRUCTOR / INITIALIZER
@@ -319,6 +349,11 @@ contract PythOracle is
         } catch {
             needsUpdate = true;
         }
+        // R3-L-01 fix: if price is stale but no updateData was supplied, revert with a
+        // clear error immediately rather than letting getPriceNoOlderThan revert with an
+        // opaque Pyth error that is hard to diagnose from the call stack.
+        if (needsUpdate && updateData.length == 0) revert PriceStale();
+
         // Update if necessary
         if (needsUpdate && updateData.length > 0) {
             bytes[] memory updateDataArray = abi.decode(updateData, (bytes[]));
@@ -335,10 +370,39 @@ contract PythOracle is
             }
         }
 
-        // Get price
+        // Get spot price
         IPyth.Price memory pythPrice = IPyth(pythContract).getPriceNoOlderThan(priceId, maxAge);
 
         if (pythPrice.price <= 0) revert InvalidPrice();
+
+        // M-20 fix Layer 1: VAA publishTime window.
+        // Reject VAAs whose publishTime is older than maxVaaStaleness seconds, regardless of
+        // the broader maxAge passed by the caller. This shrinks the cherry-pick window from
+        // up to 1 hour (maxAge) down to maxVaaStaleness seconds (default 60s), making it
+        // economically infeasible to select a favourable spot price from the recent history.
+        // Disabled when maxVaaStaleness == 0.
+        if (maxVaaStaleness > 0 && block.timestamp - pythPrice.publishTime > maxVaaStaleness) {
+            revert VaaTooOld();
+        }
+
+        // M-20 fix Layer 2: EMA deviation guard.
+        // Read the EMA price from the same on-chain state (updated by updatePriceFeeds above).
+        // If the spot price deviates from the EMA by more than maxEmaDeviationBps, the VAA is
+        // rejected. This catches cherry-picked VAAs that slip through the staleness window
+        // during high-volatility periods.
+        // Disabled when maxEmaDeviationBps == 0.
+        if (maxEmaDeviationBps > 0) {
+            IPyth.Price memory emaPrice =
+                IPyth(pythContract).getEmaPriceNoOlderThan(priceId, maxAge);
+            if (emaPrice.price > 0) {
+                int256 scaledSpot = _scalePythPrice(pythPrice.price, pythPrice.expo);
+                int256 scaledEma = _scalePythPrice(emaPrice.price, emaPrice.expo);
+                uint256 deviationBps = _calcDeviationBps(scaledSpot, scaledEma);
+                if (deviationBps > maxEmaDeviationBps) {
+                    revert EmaDeviationExceeded(deviationBps, maxEmaDeviationBps);
+                }
+            }
+        }
 
         int256 scaledPrice = _scalePythPrice(pythPrice.price, pythPrice.expo);
 
@@ -400,6 +464,18 @@ contract PythOracle is
             // adjustment > 0: multiply (safe — max 10^18, well within int256)
             return price256 * int256(10 ** uint256(adjustment));
         }
+    }
+
+    /**
+     * @notice Calculate absolute deviation between two prices in basis points
+     * @param a First price (18-decimal scaled)
+     * @param b Second price (18-decimal scaled, used as denominator)
+     * @return deviationBps |a - b| / b * 10_000
+     */
+    function _calcDeviationBps(int256 a, int256 b) internal pure returns (uint256 deviationBps) {
+        if (b <= 0) return 0;
+        int256 diff = a > b ? a - b : b - a;
+        return (uint256(diff) * 10_000) / uint256(b);
     }
 
     // ========================================================================
@@ -469,6 +545,34 @@ contract PythOracle is
         OracleType oldMode = defaultMode;
         defaultMode = mode;
         emit DefaultModeUpdated(oldMode, mode);
+    }
+
+    /**
+     * @notice Set maximum EMA deviation threshold for pull-mode price updates (M-20 Layer 2)
+     * @param _bps New threshold in basis points (100 = 1%). Set 0 to disable.
+     * @dev When non-zero, must be in [MIN_EMA_DEVIATION_BPS, MAX_EMA_DEVIATION_BPS].
+     */
+    function setMaxEmaDeviationBps(uint256 _bps) external onlyOwner {
+        if (_bps != 0 && (_bps < MIN_EMA_DEVIATION_BPS || _bps > MAX_EMA_DEVIATION_BPS)) {
+            revert InvalidEmaDeviationBps();
+        }
+        uint256 old = maxEmaDeviationBps;
+        maxEmaDeviationBps = _bps;
+        emit MaxEmaDeviationBpsUpdated(old, _bps);
+    }
+
+    /**
+     * @notice Set maximum VAA staleness window for pull-mode price updates (M-20 Layer 1)
+     * @param _staleness Maximum seconds between VAA publishTime and block.timestamp. Set 0 to disable.
+     * @dev When non-zero, must be in [MIN_VAA_STALENESS, MAX_VAA_STALENESS].
+     */
+    function setMaxVaaStaleness(uint256 _staleness) external onlyOwner {
+        if (_staleness != 0 && (_staleness < MIN_VAA_STALENESS || _staleness > MAX_VAA_STALENESS)) {
+            revert InvalidVaaStaleness();
+        }
+        uint256 old = maxVaaStaleness;
+        maxVaaStaleness = _staleness;
+        emit MaxVaaStalenessUpdated(old, _staleness);
     }
 
     /**

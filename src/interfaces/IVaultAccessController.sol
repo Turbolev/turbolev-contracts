@@ -13,7 +13,6 @@ interface IVaultAccessController {
     function DEFAULT_ADMIN_ROLE() external view returns (bytes32);
     function VAULT_ADMIN_ROLE() external view returns (bytes32);
     function POSITION_MANAGER_ROLE() external view returns (bytes32);
-    function VAULT_KEEPER_ROLE() external view returns (bytes32);
     function POSITION_KEEPER_ROLE() external view returns (bytes32);
     function EMERGENCY_ROLE() external view returns (bytes32);
     function UPGRADER_ROLE() external view returns (bytes32);
@@ -49,13 +48,6 @@ interface IVaultAccessController {
      * @return isPositionMgr True if account is position manager
      */
     function isPositionManager(address account) external view returns (bool isPositionMgr);
-
-    /**
-     * @notice Check if account is vault keeper
-     * @param account Account to check
-     * @return isKeeperResult True if account is vault keeper
-     */
-    function isVaultKeeper(address account) external view returns (bool isKeeperResult);
 
     /**
      * @notice Check if account is position keeper

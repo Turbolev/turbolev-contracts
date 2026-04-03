@@ -38,7 +38,7 @@ contract VaultAccessControllerTest is BaseTestModular {
 
     function test_AccessControllerVersion() public view {
         string memory version = vaultAccessController.version();
-        assertEq(version, "2.3.0");
+        assertEq(version, "2.4.0");
     }
 
     // ========================================================================
@@ -93,10 +93,6 @@ contract VaultAccessControllerTest is BaseTestModular {
         assertFalse(vaultAccessController.isPositionManager(user1));
     }
 
-    function test_IsVaultKeeper() public view {
-        assertFalse(vaultAccessController.isVaultKeeper(user1));
-    }
-
     function test_IsPositionKeeper() public view {
         // admin was granted POSITION_KEEPER_ROLE in BaseTestModular
         assertTrue(vaultAccessController.isPositionKeeper(admin));
@@ -111,35 +107,6 @@ contract VaultAccessControllerTest is BaseTestModular {
     // ========================================================================
     // KEEPER MANAGEMENT TESTS
     // ========================================================================
-
-    function test_AddVaultKeeper() public {
-        address keeper = makeAddr("vaultKeeper");
-
-        vm.prank(address(vaultManager));
-        vaultAccessController.addVaultKeeper(keeper);
-
-        assertTrue(vaultAccessController.isVaultKeeper(keeper));
-    }
-
-    function test_RemoveVaultKeeper() public {
-        address keeper = makeAddr("vaultKeeper");
-
-        vm.prank(address(vaultManager));
-        vaultAccessController.addVaultKeeper(keeper);
-        assertTrue(vaultAccessController.isVaultKeeper(keeper));
-
-        vm.prank(address(vaultManager));
-        vaultAccessController.removeVaultKeeper(keeper);
-        assertFalse(vaultAccessController.isVaultKeeper(keeper));
-    }
-
-    function test_AddVaultKeeper_RevertIfNotAdmin() public {
-        address keeper = makeAddr("vaultKeeper");
-
-        vm.prank(user1);
-        vm.expectRevert();
-        vaultAccessController.addVaultKeeper(keeper);
-    }
 
     function test_AddPositionKeeper() public {
         address keeper = makeAddr("positionKeeper");
@@ -275,7 +242,6 @@ contract VaultAccessControllerTest is BaseTestModular {
     function test_RoleConstants() public view {
         assertEq(vaultAccessController.VAULT_ADMIN_ROLE(), keccak256("VAULT_ADMIN_ROLE"));
         assertEq(vaultAccessController.POSITION_MANAGER_ROLE(), keccak256("POSITION_MANAGER_ROLE"));
-        assertEq(vaultAccessController.VAULT_KEEPER_ROLE(), keccak256("VAULT_KEEPER_ROLE"));
         assertEq(vaultAccessController.POSITION_KEEPER_ROLE(), keccak256("POSITION_KEEPER_ROLE"));
         assertEq(vaultAccessController.EMERGENCY_ROLE(), keccak256("EMERGENCY_ROLE"));
         assertEq(vaultAccessController.GUARDIAN_ROLE(), keccak256("GUARDIAN_ROLE"));

@@ -2,6 +2,7 @@
 pragma solidity ^0.8.22;
 
 import "./BaseTestModular.sol";
+import "../../src/vault-modular/modules/VaultFunding.sol";
 
 /**
  * @title VaultFundingTest
@@ -111,6 +112,42 @@ contract VaultFundingTest is BaseTestModular {
         vault.setImpactConfig(5, 15, 30, 50, 100);
     }
 
+    /// @dev R3-I-02: enabled impact with all-zero tiers must revert (use setImpactEnabled(false))
+    function test_SetImpactConfig_RevertWhenEnabledAndAllTiersZero() public {
+        assertTrue(vault.isImpactEnabled());
+        vm.prank(address(vaultManager));
+        vm.expectRevert(VaultFunding.InvalidParameters.selector);
+        vault.setImpactConfig(0, 0, 0, 0, 0);
+    }
+
+    function test_SetImpactConfig_AllZerosAllowedWhenImpactDisabled() public {
+        vm.prank(address(vaultManager));
+        vault.setImpactEnabled(false);
+
+        vm.prank(address(vaultManager));
+        vault.setImpactConfig(0, 0, 0, 0, 0);
+
+        (uint16 t1, uint16 t2, uint16 t3, uint16 t4, uint16 t5) = vault.getImpactConfig();
+        assertEq(t1, 0);
+        assertEq(t2, 0);
+        assertEq(t3, 0);
+        assertEq(t4, 0);
+        assertEq(t5, 0);
+        assertFalse(vault.isImpactEnabled());
+    }
+
+    function test_SetImpactConfig_Tier1ZeroHigherTiersNonZero_Succeeds() public {
+        vm.prank(address(vaultManager));
+        vault.setImpactConfig(0, 10, 20, 30, 40);
+
+        (uint16 t1, uint16 t2, uint16 t3, uint16 t4, uint16 t5) = vault.getImpactConfig();
+        assertEq(t1, 0);
+        assertEq(t2, 10);
+        assertEq(t3, 20);
+        assertEq(t4, 30);
+        assertEq(t5, 40);
+    }
+
     // ========================================================================
     // SET IMPACT ENABLED
     // ========================================================================
@@ -122,6 +159,15 @@ contract VaultFundingTest is BaseTestModular {
         vault.setImpactEnabled(false);
 
         assertFalse(vault.isImpactEnabled());
+    }
+
+    function test_SetImpactEnabled_RevertReEnableWhenAllTiersZero() public {
+        vm.startPrank(address(vaultManager));
+        vault.setImpactEnabled(false);
+        vault.setImpactConfig(0, 0, 0, 0, 0);
+        vm.expectRevert(VaultFunding.InvalidParameters.selector);
+        vault.setImpactEnabled(true);
+        vm.stopPrank();
     }
 
     function test_SetImpactEnabled_ReEnable() public {

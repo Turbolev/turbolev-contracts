@@ -48,6 +48,10 @@ library VaultRiskLib {
         bool isPaused;
         bool tradingEnabled;
         uint256 totalLiquidity;
+        // R3-M-04 fix: availableLiquidity = totalLiquidity - totalPendingPayoutAmount - totalMarginCollateral.
+        // Directional and OI caps are computed against this value so that committed liquidity
+        // (queued payouts + added margin) is not double-counted when evaluating new positions.
+        uint256 availableLiquidity;
         // Position params
         uint256 positionSize;
         uint16 leverage;
@@ -93,9 +97,9 @@ library VaultRiskLib {
         }
 
         // 3. Check if vault has liquidity
-        // Prevents opening positions when LP has withdrawn all liquidity
-        // Even with leverage = 1x, trader could open huge position and wait in pending payout queue
-        if (params.totalLiquidity == 0) {
+        // R3-M-04 fix: use availableLiquidity (totalLiquidity minus committed funds) so that
+        // positions cannot be opened when all real liquidity is already committed to payouts.
+        if (params.availableLiquidity == 0) {
             revert NoLiquidityAvailable();
         }
 
@@ -118,9 +122,9 @@ library VaultRiskLib {
             revert ExceedsMaxLeverage();
         }
 
-        // 7. Check directional exposure cap
+        // 7. Check directional exposure cap (R3-M-04: use availableLiquidity as the cap base)
         _checkDirectionalExposure(
-            params.totalLiquidity,
+            params.availableLiquidity,
             params.totalLongExposure,
             params.totalShortExposure,
             params.positionSize,
@@ -128,9 +132,9 @@ library VaultRiskLib {
             params.maxDirectionalExposureBps
         );
 
-        // 8. Check total OI cap
+        // 8. Check total OI cap (R3-M-04: use availableLiquidity as the cap base)
         _checkTotalOICap(
-            params.totalLiquidity,
+            params.availableLiquidity,
             params.totalLongExposure,
             params.totalShortExposure,
             params.positionSize,

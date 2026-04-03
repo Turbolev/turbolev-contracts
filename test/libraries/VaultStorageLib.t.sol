@@ -91,36 +91,37 @@ contract VaultStorageLibTest is Test {
     }
 
     // ========================================================================
-    // HARDCODED SLOT CONSTANT VERIFICATION TESTS
-    // Ensures pre-calculated constants match the dynamic EIP-7201 formula.
-    // If any of these fail after an upgrade, the storage layout has changed.
+    // HARDCODED SLOT CONSTANT VERIFICATION TESTS (R3-I-01)
+    // Ensures SLOT_* constants match calculateEIP7201Slot(NAMESPACE_*).
+    // Uses library namespace constants as the single source of truth for strings
+    // so a namespace rename without updating SLOT_* fails CI immediately.
     // ========================================================================
 
     function test_SlotConstants_MatchDynamicFormula() public pure {
         assertEq(
             VaultStorageLib.SLOT_CORE,
-            VaultStorageLib.calculateEIP7201Slot("turbolev.vault.core"),
-            "SLOT_CORE mismatch"
+            VaultStorageLib.calculateEIP7201Slot(VaultStorageLib.NAMESPACE_CORE),
+            "SLOT_CORE mismatch vs NAMESPACE_CORE"
         );
         assertEq(
             VaultStorageLib.SLOT_FUNDING,
-            VaultStorageLib.calculateEIP7201Slot("turbolev.vault.funding"),
-            "SLOT_FUNDING mismatch"
+            VaultStorageLib.calculateEIP7201Slot(VaultStorageLib.NAMESPACE_FUNDING),
+            "SLOT_FUNDING mismatch vs NAMESPACE_FUNDING"
         );
         assertEq(
             VaultStorageLib.SLOT_REWARDS,
-            VaultStorageLib.calculateEIP7201Slot("turbolev.vault.rewards"),
-            "SLOT_REWARDS mismatch"
+            VaultStorageLib.calculateEIP7201Slot(VaultStorageLib.NAMESPACE_REWARDS),
+            "SLOT_REWARDS mismatch vs NAMESPACE_REWARDS"
         );
         assertEq(
             VaultStorageLib.SLOT_RISK,
-            VaultStorageLib.calculateEIP7201Slot("turbolev.vault.risk"),
-            "SLOT_RISK mismatch"
+            VaultStorageLib.calculateEIP7201Slot(VaultStorageLib.NAMESPACE_RISK),
+            "SLOT_RISK mismatch vs NAMESPACE_RISK"
         );
         assertEq(
             VaultStorageLib.SLOT_ROUTER,
-            VaultStorageLib.calculateEIP7201Slot("turbolev.vault.router"),
-            "SLOT_ROUTER mismatch"
+            VaultStorageLib.calculateEIP7201Slot(VaultStorageLib.NAMESPACE_ROUTER),
+            "SLOT_ROUTER mismatch vs NAMESPACE_ROUTER"
         );
     }
 

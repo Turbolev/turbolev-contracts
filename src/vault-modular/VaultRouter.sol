@@ -176,7 +176,7 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
         uint256 positionSize,
         bool isMarginAdd,
         uint8 direction
-    ) external payable {
+    ) external {
         _delegateToCore(
             abi.encodeWithSignature(
                 "depositFromBet(uint64,uint256,uint256,bool,uint8)",
@@ -242,10 +242,18 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
 
         uint16 currentMultiplier = _calculateRiskMultiplier(core.vaultInfo.totalLiquidity, risk);
 
+        // R3-M-04 fix: compute availableLiquidity (excluding committed funds) for risk caps
+        uint256 committed =
+            core.vaultInfo.totalPendingPayoutAmount + core.vaultInfo.totalMarginCollateral;
+        uint256 availableLiquidity = core.vaultInfo.totalLiquidity > committed
+            ? core.vaultInfo.totalLiquidity - committed
+            : 0;
+
         VaultRiskLib.RiskCheckParams memory params = VaultRiskLib.RiskCheckParams({
             isPaused: core.paused,
             tradingEnabled: core.vaultInfo.tradingEnabled,
             totalLiquidity: core.vaultInfo.totalLiquidity,
+            availableLiquidity: availableLiquidity,
             positionSize: positionSize,
             leverage: leverage,
             direction: direction,
@@ -641,6 +649,13 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
         return VaultStorageLib.getRewardsStorage().rewardPerShareStored;
     }
 
+    /**
+     * @notice Tokens reserved for LP reward accounting (see VaultCore.withdrawFees R3-M-02 cap).
+     */
+    function rewardsFund() external view returns (uint256) {
+        return VaultStorageLib.getRewardsStorage().rewardsFund;
+    }
+
     // ========================================================================
     // VIEW FUNCTIONS (Direct Storage Access)
     // ========================================================================
@@ -759,6 +774,18 @@ contract VaultRouter is Initializable, UUPSUpgradeable {
      */
     function getVaultInfo() external view returns (VaultStorageLib.VaultInfo memory) {
         return VaultStorageLib.getCoreStorage().vaultInfo;
+    }
+
+    /**
+     * @notice Available LP liquidity for caps and sizing (R3-I-03: same basis as VaultCore.getAvailableLiquidity)
+     * @dev totalLiquidity minus totalPendingPayoutAmount and totalMarginCollateral
+     */
+    function getAvailableLiquidity() external view returns (uint256) {
+        VaultStorageLib.CoreStorage storage core = VaultStorageLib.getCoreStorage();
+        uint256 total = core.vaultInfo.totalLiquidity;
+        uint256 committed =
+            core.vaultInfo.totalPendingPayoutAmount + core.vaultInfo.totalMarginCollateral;
+        return total > committed ? total - committed : 0;
     }
 
     /**

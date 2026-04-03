@@ -131,9 +131,11 @@ library PositionStorageLib {
     /// @notice Maximum allowed min position hold time (1 hour)
     uint256 internal constant MAX_MIN_POSITION_HOLD_TIME = 3600;
 
-    /// @notice Maximum allowed price age for oracle validation (60 seconds)
-    /// @dev Tightened from 1 hour to limit cherry-pick window for Pyth pull oracle (R-05)
-    uint256 internal constant MAX_ALLOWED_PRICE_AGE = 60;
+    /// @notice Maximum allowed price age for oracle validation (3600 seconds = 1 hour)
+    /// @dev R3-I-05: cap raised from 60s to 3600s so txs stuck in mempool are less likely to revert
+    ///      with `PriceStale` on slower or congested chains. Trade-off: wider window vs pull-oracle
+    ///      cherry-pick (mitigate with PriceFeedManager / protocol-level controls). Prior 60s tied to R-05.
+    uint256 internal constant MAX_ALLOWED_PRICE_AGE = 3600;
 
     // Reentrancy status values
     uint256 internal constant NOT_ENTERED = 1;

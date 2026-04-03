@@ -53,6 +53,7 @@ interface IVaultRouter {
     // ========================================================================
 
     function getVaultInfo() external view returns (VaultInfo memory);
+    function getAvailableLiquidity() external view returns (uint256);
     function getVaultParams() external view returns (VaultParams memory);
     function getLPPosition(address user) external view returns (LPPosition memory);
     function projectToken() external view returns (address);
@@ -148,6 +149,8 @@ interface IVaultRouter {
     function claimableRewards(address user) external view returns (uint256);
     function calculatePendingRewards(address user) external view returns (uint256);
     function rewardPerShareStored() external view returns (uint256);
+    /// @notice Tokens earmarked for LP rewards (withdrawFees caps against balance - rewardsFund per R3-M-02)
+    function rewardsFund() external view returns (uint256);
     function currentDay() external view returns (uint256);
     function lastSnapshotDay() external view returns (uint256);
 
@@ -161,7 +164,7 @@ interface IVaultRouter {
         uint256 positionSize,
         bool isMarginAdd,
         uint8 direction
-    ) external payable;
+    ) external;
 
     function executePayout(address user, uint256 amount, uint64 positionId) external;
 

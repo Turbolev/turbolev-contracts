@@ -61,6 +61,7 @@ abstract contract PositionModuleBase {
     error VaultManagerNotSet();
     error ExcessiveMargin();
     error OracleFetchFailed(bytes reason);
+    error InconsistentLiquidationParams();
 
     // ========================================================================
     // MODIFIERS - ACCESS CONTROL

@@ -384,11 +384,11 @@ contract IntegrationTestModular is BaseTestModular {
         _graduateVault();
         _enableTrading();
 
-        // pauseVault/unpauseVault requires onlyMultisig modifier
-        vm.startPrank(mockEmergencyGuardian);
+        // pauseVault requires EMERGENCY_ROLE; unpauseVault requires onlyOwner (Timelock) — R3-M-01 fix
+        vm.prank(mockEmergencyGuardian);
         vaultManager.pauseVault(address(projectToken), address(projectToken));
+        vm.prank(owner);
         vaultManager.unpauseVault(address(projectToken), address(projectToken));
-        vm.stopPrank();
     }
 
     function test_Admin_PausePositionManager() public {

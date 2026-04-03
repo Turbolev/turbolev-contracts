@@ -63,6 +63,7 @@ interface IVaultManager {
      * @param positionSize Position size
      * @param isMarginAdd True if adding margin to existing position
      * @param direction Position direction (1 = LONG, 2 = SHORT)
+     * @dev Not payable — collateral is ERC-20 only (R3-I-04).
      */
     function depositFromBet(
         address _priceToken,
@@ -72,7 +73,7 @@ interface IVaultManager {
         uint256 positionSize,
         bool isMarginAdd,
         uint8 direction
-    ) external payable;
+    ) external;
 
     /**
      * @notice Execute payout to user
@@ -164,6 +165,7 @@ interface IVaultManager {
      * @notice Unpause vault by (collateralToken, priceToken) pair
      * @param collateralToken Collateral token address
      * @param priceToken Price token address
+     * @dev R3-M-01 fix: restricted to owner (Timelock) only.
      */
     function unpauseVault(address collateralToken, address priceToken) external;
 
@@ -176,6 +178,7 @@ interface IVaultManager {
     /**
      * @notice Unpause vault by vault address directly
      * @param vault Vault address
+     * @dev R3-M-01 fix: restricted to owner (Timelock) only.
      */
     function unpauseVaultByAddress(address vault) external;
 
@@ -188,6 +191,7 @@ interface IVaultManager {
     /**
      * @notice Batch unpause multiple vaults
      * @param vaults Array of vault addresses
+     * @dev R3-M-01 fix: restricted to owner (Timelock) only.
      */
     function batchUnpauseVaults(address[] calldata vaults) external;
 
@@ -223,7 +227,9 @@ interface IVaultManager {
     function reactivateVault(address vault) external;
 
     // ========================================================================
-    // EMERGENCY FUNCTIONS (NO TIMELOCK DELAY)
+    // EMERGENCY FUNCTIONS
+    // Pause: EMERGENCY_ROLE (no delay)
+    // Unpause: owner/Timelock only (R3-M-01 fix)
     // ========================================================================
 
     /**
@@ -246,21 +252,24 @@ interface IVaultManager {
     function emergencyBatchPauseVaults(address[] calldata vaults) external;
 
     /**
-     * @notice Emergency unpause vault by (collateralToken, priceToken) pair (NO TIMELOCK DELAY)
+     * @notice Emergency unpause vault by (collateralToken, priceToken) pair
      * @param collateralToken Collateral token address
      * @param priceToken Price token address
+     * @dev Restricted to owner (Timelock) only.
      */
     function emergencyUnpauseVault(address collateralToken, address priceToken) external;
 
     /**
-     * @notice Emergency unpause vault by address (NO TIMELOCK DELAY)
+     * @notice Emergency unpause vault by address
      * @param vault Vault address
+     * @dev Restricted to owner (Timelock) only.
      */
     function emergencyUnpauseVaultByAddress(address vault) external;
 
     /**
-     * @notice Emergency batch unpause vaults (NO TIMELOCK DELAY)
+     * @notice Emergency batch unpause vaults
      * @param vaults Array of vault addresses
+     * @dev Restricted to owner (Timelock) only.
      */
     function emergencyBatchUnpauseVaults(address[] calldata vaults) external;
 }

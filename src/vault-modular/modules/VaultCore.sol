@@ -116,6 +116,8 @@ contract VaultCore is VaultModuleBase {
     event VaultGraduated(uint256 totalLiquidity, uint256 threshold, uint256 timestamp);
     event Paused(address account);
     event Unpaused(address account);
+    /// @notice Emitted when EMERGENCY/GUARDIAN pauses, showing when they may unpause themselves.
+    event EmergencyPauseRecorded(address indexed caller, uint256 pausedAt, uint256 unlocksAt);
     event FeesWithdrawn(address indexed to, uint256 amount, uint256 timestamp);
     event MaxLeverageUpdated(uint16 oldMaxLeverage, uint16 newMaxLeverage, uint256 timestamp);
     event TotalOITierConfigUpdated(
@@ -132,6 +134,10 @@ contract VaultCore is VaultModuleBase {
     event MaxDirectionalExposureConfigUpdated(uint16 oldBps, uint16 newBps, uint256 timestamp);
     event MaxProfitCapMultiplierUpdated(
         uint8 oldMultiplier, uint8 newMultiplier, uint256 timestamp
+    );
+    /// @notice Emitted when reward-per-share accumulator increases on profitable settlement (Option D).
+    event RewardAccumulatorUpdated(
+        address indexed vault, uint256 profit, uint256 rewardPerShareStored, uint256 timestamp
     );
     event QueueIndexUpdated(uint256 oldIndex, uint256 newIndex, uint256 timestamp);
 
@@ -151,6 +157,8 @@ contract VaultCore is VaultModuleBase {
     error InvalidPositionId();
     error UserMismatch();
     error AlreadyInitialized();
+    /// @notice Emitted when EMERGENCY/GUARDIAN tries to unpause before the short timelock expires.
+    error EmergencyUnpauseDelayNotElapsed(uint256 unlocksAt);
 
     // ========================================================================
     // CONSTANTS
@@ -160,7 +168,6 @@ contract VaultCore is VaultModuleBase {
     uint256 private constant MIN_LOCK_PERIOD = 30 days;
     uint256 private constant MAX_PAYOUTS_PER_TX = 50;
     uint8 private constant MAX_PAYOUT_RETRIES = 3;
-    uint16 private constant MIN_POSITION_FEE_BPS = 1;
     /// @dev Dead shares locked at address(0) on first deposit — prevents share inflation attack (R-11).
     uint256 private constant MINIMUM_LIQUIDITY = 1000;
 
@@ -356,6 +363,19 @@ contract VaultCore is VaultModuleBase {
     /**
      * @notice Remove liquidity from vault
      */
+    /**
+     * @notice Remove all liquidity from the vault
+     * @dev Early withdrawal fee (earlyWithdrawalFeeBps) is only applied when:
+     *      (a) the LP withdraws before their 30-day lock period expires, AND
+     *      (b) the vault has already graduated (reached graduationThreshold).
+     *
+     *      Before graduation, LPs may withdraw at any time without penalty. This is
+     *      intentional: the fee-free window incentivises early liquidity provision
+     *      during the bootstrap phase. The trade-off is that a large LP could withdraw
+     *      just before the graduation threshold is reached, preventing graduation.
+     *      Operators should monitor LP concentration risk during the bootstrap phase.
+     *      (R3-L-02 documentation fix)
+     */
     function removeLiquidity() external nonReentrant whenVaultNotPaused {
         VaultStorageLib.CoreStorage storage core = _core();
         VaultStorageLib.LPPosition storage lpPos = core.lpPositions[msg.sender];
@@ -381,9 +401,12 @@ contract VaultCore is VaultModuleBase {
             netPayout = grossAmount - withdrawalFee;
         }
 
-        uint256 availableLiquidity = core.vaultInfo.totalLiquidity
-            > core.vaultInfo.totalPendingPayoutAmount
-            ? core.vaultInfo.totalLiquidity - core.vaultInfo.totalPendingPayoutAmount
+        // R3-H-01 fix: also exclude totalMarginCollateral (committed margin from addMargin)
+        // so LP withdrawals cannot drain liquidity that backs active positions.
+        uint256 committed =
+            core.vaultInfo.totalPendingPayoutAmount + core.vaultInfo.totalMarginCollateral;
+        uint256 availableLiquidity = core.vaultInfo.totalLiquidity > committed
+            ? core.vaultInfo.totalLiquidity - committed
             : 0;
         if (grossAmount > availableLiquidity) {
             revert InsufficientAvailableLiquidity(grossAmount, availableLiquidity);
@@ -474,6 +497,10 @@ contract VaultCore is VaultModuleBase {
         uint256 oldCollateral = core.betCollateral[positionId];
         if (isMarginAdd) {
             core.betCollateral[positionId] += amount;
+            // R3-H-01 fix: track added margin per-position and globally so that
+            // availableLiquidity correctly excludes committed margin collateral.
+            core.positionMarginCollateral[positionId] += amount;
+            core.vaultInfo.totalMarginCollateral += amount;
         } else {
             core.betCollateral[positionId] = netCollateral;
         }
@@ -576,6 +603,15 @@ contract VaultCore is VaultModuleBase {
         // Clear collateral and emit event
         uint256 clearedCollateral = core.betCollateral[positionId];
         delete core.betCollateral[positionId];
+
+        // R3-H-01 fix: release committed margin from the global tracker
+        uint256 posMargin = core.positionMarginCollateral[positionId];
+        if (posMargin > 0) {
+            core.vaultInfo.totalMarginCollateral = core.vaultInfo.totalMarginCollateral > posMargin
+                ? core.vaultInfo.totalMarginCollateral - posMargin
+                : 0;
+            delete core.positionMarginCollateral[positionId];
+        }
 
         if (clearedCollateral > 0) {
             emit BetCollateralUpdated(positionId, clearedCollateral, 0, false, block.timestamp);
@@ -688,8 +724,22 @@ contract VaultCore is VaultModuleBase {
         // Update positions settled
         core.vaultInfo.totalPositionsSettled++;
 
-        // NOTE: betCollateral is cleared in executePayout(), not here
-        // This allows executePayout() to verify position validity via betCollateral check
+        // When payout == 0 (full loss or liquidation), executePayout() will not be called,
+        // so betCollateral and positionMarginCollateral must be cleared here.
+        // R3-H-01 fix: also release totalMarginCollateral to prevent permanent inflation.
+        if (payout == 0) {
+            delete core.betCollateral[positionId];
+            uint256 posMargin = core.positionMarginCollateral[positionId];
+            if (posMargin > 0) {
+                core.vaultInfo.totalMarginCollateral = core.vaultInfo.totalMarginCollateral
+                    > posMargin
+                    ? core.vaultInfo.totalMarginCollateral - posMargin
+                    : 0;
+                delete core.positionMarginCollateral[positionId];
+            }
+        }
+        // NOTE: when payout > 0, betCollateral is cleared in executePayout() to allow
+        // executePayout() to verify position validity via betCollateral check.
 
         emit VaultPnLUpdated(
             collateral,
@@ -718,10 +768,18 @@ contract VaultCore is VaultModuleBase {
 
         uint16 currentMultiplier = _calculateRiskMultiplier(core.vaultInfo.totalLiquidity);
 
+        // R3-M-04 fix: compute availableLiquidity (excluding committed funds) for risk caps
+        uint256 committed =
+            core.vaultInfo.totalPendingPayoutAmount + core.vaultInfo.totalMarginCollateral;
+        uint256 availableLiquidity = core.vaultInfo.totalLiquidity > committed
+            ? core.vaultInfo.totalLiquidity - committed
+            : 0;
+
         VaultRiskLib.RiskCheckParams memory params = VaultRiskLib.RiskCheckParams({
             isPaused: core.paused,
             tradingEnabled: core.vaultInfo.tradingEnabled,
             totalLiquidity: core.vaultInfo.totalLiquidity,
+            availableLiquidity: availableLiquidity,
             positionSize: positionSize,
             leverage: leverage,
             direction: direction,
@@ -743,49 +801,83 @@ contract VaultCore is VaultModuleBase {
 
     /**
      * @notice Pause vault
-     * @dev Allowed: VaultManager, VAULT_ADMIN_ROLE, or EMERGENCY_ROLE
+     * @dev Allowed: VaultManager, VAULT_ADMIN_ROLE, or EMERGENCY_ROLE / GUARDIAN_ROLE.
+     *      When EMERGENCY_ROLE or GUARDIAN_ROLE pauses, pausedAt is recorded so that
+     *      the short timelock (EMERGENCY_UNPAUSE_DELAY) can be enforced on their unpause path.
+     *      VaultManager and VAULT_ADMIN_ROLE are exempt from the delay (they go through
+     *      governance channels and are not subject to the same compromise risk).
      */
     function pause() external {
         VaultStorageLib.CoreStorage storage core = _core();
         VaultAccessController ac = VaultAccessController(core.accessController);
 
-        // Allow VaultManager, VAULT_ADMIN_ROLE, or EMERGENCY_ROLE
+        bool isEmergencyActor = ac.hasEmergencyRole(msg.sender);
+
+        // Allow VaultManager, VAULT_ADMIN_ROLE, or EMERGENCY_ROLE / GUARDIAN_ROLE
         if (msg.sender != core.vaultManager) {
-            if (!ac.hasRole(ac.VAULT_ADMIN_ROLE(), msg.sender) && !ac.hasEmergencyRole(msg.sender))
-            {
+            if (!ac.hasRole(ac.VAULT_ADMIN_ROLE(), msg.sender) && !isEmergencyActor) {
                 revert NotVaultManagerOrHelper();
             }
         }
+
         _pause();
+
+        // Record pausedAt when an emergency actor pauses so unpause delay can be enforced.
+        if (isEmergencyActor) {
+            core.pausedAt = block.timestamp;
+            uint256 unlocksAt = block.timestamp + VaultStorageLib.EMERGENCY_UNPAUSE_DELAY;
+            emit EmergencyPauseRecorded(msg.sender, block.timestamp, unlocksAt);
+        }
+
         emit Paused(msg.sender);
     }
 
     /**
      * @notice Unpause vault
-     * @dev Allowed: VaultManager, VAULT_ADMIN_ROLE, or EMERGENCY_ROLE / GUARDIAN_ROLE.
+     * @dev Three-tier unpause policy (R3-M-01 fix):
      *
-     *      Policy (intentional design):
-     *      - EMERGENCY_ROLE and GUARDIAN_ROLE can both pause AND unpause.
-     *      - This enables self-service recovery after an accidental emergency pause
-     *        (e.g. guardian triggered a false-alarm pause and needs to immediately restore service).
-     *      - If governance wants Timelock-only unpause, restrict this function to
-     *        DEFAULT_ADMIN_ROLE only and remove EMERGENCY_ROLE / GUARDIAN_ROLE from here.
+     *      Tier 1 — UPGRADER_ROLE (Timelock / governance):
+     *        Can unpause immediately with no delay. This is the normal governance path.
      *
-     *      Risk accepted: an emergency actor could pause → unpause in the same tx,
-     *      effectively bypassing the pause mechanism. Mitigated by the fact that
-     *      EMERGENCY_ROLE is a separate multisig and its actions are monitored on-chain.
+     *      Tier 2 — EMERGENCY_ROLE / GUARDIAN_ROLE (multisig):
+     *        Can unpause only after EMERGENCY_UNPAUSE_DELAY (1 hour) has elapsed since
+     *        the vault was last paused by an emergency actor. This prevents atomic
+     *        pause→unpause that would bypass the emergency pause mechanism entirely,
+     *        while still allowing self-service recovery from accidental false-alarm pauses
+     *        without waiting for a full Timelock cycle.
+     *        If the vault was paused by VaultManager/VAULT_ADMIN_ROLE (pausedAt == 0),
+     *        the delay is not applicable and emergency actors can unpause immediately.
+     *
+     *      Tier 3 — VaultManager / VAULT_ADMIN_ROLE:
+     *        Can unpause immediately (same as before). These roles go through governance
+     *        channels and are not subject to the emergency actor compromise risk.
      */
     function unpause() external {
         VaultStorageLib.CoreStorage storage core = _core();
         VaultAccessController ac = VaultAccessController(core.accessController);
 
-        // Allow VaultManager, VAULT_ADMIN_ROLE, or EMERGENCY_ROLE / GUARDIAN_ROLE
-        if (msg.sender != core.vaultManager) {
-            if (!ac.hasRole(ac.VAULT_ADMIN_ROLE(), msg.sender) && !ac.hasEmergencyRole(msg.sender))
-            {
-                revert NotVaultManagerOrHelper();
+        bool isUpgrader = ac.hasRole(ac.UPGRADER_ROLE(), msg.sender);
+        bool isEmergencyActor = ac.hasEmergencyRole(msg.sender);
+        bool isVaultAdmin = ac.hasRole(ac.VAULT_ADMIN_ROLE(), msg.sender);
+
+        if (!isUpgrader && !isEmergencyActor && !isVaultAdmin && msg.sender != core.vaultManager) {
+            revert NotVaultManagerOrHelper();
+        }
+
+        // Tier 1: UPGRADER_ROLE can always unpause immediately (no delay).
+        if (!isUpgrader) {
+            // Tier 2: EMERGENCY/GUARDIAN must wait EMERGENCY_UNPAUSE_DELAY after an emergency pause.
+            // pausedAt == 0 means vault was paused by VaultManager/VAULT_ADMIN_ROLE — no delay needed.
+            if (isEmergencyActor && core.pausedAt != 0) {
+                uint256 unlocksAt = core.pausedAt + VaultStorageLib.EMERGENCY_UNPAUSE_DELAY;
+                if (block.timestamp < unlocksAt) {
+                    revert EmergencyUnpauseDelayNotElapsed(unlocksAt);
+                }
             }
         }
+
+        // Clear pausedAt on unpause so the delay does not carry over to future pauses.
+        core.pausedAt = 0;
         _unpause();
         emit Unpaused(msg.sender);
     }
@@ -808,11 +900,23 @@ contract VaultCore is VaultModuleBase {
             oldBps = core.feeConfig.earlyWithdrawalFeeBps;
             core.feeConfig.earlyWithdrawalFeeBps = feeBps;
         } else if (feeType == 2) {
-            if (feeBps < MIN_POSITION_FEE_BPS || feeBps > 1000) revert InvalidParameters();
+            // R3-L-05 fix: use VaultConfigLib.MAX_POSITION_FEE_BPS (1%) instead of hardcoded 1000 (10%)
+            if (
+                feeBps < VaultConfigLib.MIN_POSITION_FEE_BPS
+                    || feeBps > VaultConfigLib.MAX_POSITION_FEE_BPS
+            ) {
+                revert InvalidParameters();
+            }
             oldBps = core.feeConfig.openPositionFeeBps;
             core.feeConfig.openPositionFeeBps = feeBps;
         } else if (feeType == 3) {
-            if (feeBps < MIN_POSITION_FEE_BPS || feeBps > 1000) revert InvalidParameters();
+            // R3-L-05 fix: use VaultConfigLib.MAX_POSITION_FEE_BPS (1%) instead of hardcoded 1000 (10%)
+            if (
+                feeBps < VaultConfigLib.MIN_POSITION_FEE_BPS
+                    || feeBps > VaultConfigLib.MAX_POSITION_FEE_BPS
+            ) {
+                revert InvalidParameters();
+            }
             oldBps = core.feeConfig.closePositionFeeBps;
             core.feeConfig.closePositionFeeBps = feeBps;
         } else {
@@ -857,9 +961,19 @@ contract VaultCore is VaultModuleBase {
      */
     function withdrawFees(uint256 amount) external onlyVaultManagerOrHelper nonReentrant {
         VaultStorageLib.CoreStorage storage core = _core();
+        VaultStorageLib.RewardsStorage storage rewards = _rewards();
 
         uint256 toWithdraw = amount == 0 ? core.feePool : amount;
         if (toWithdraw > core.feePool) revert InsufficientLiquidity();
+
+        // R3-M-02 fix: ensure withdrawal cannot overdraw tokens earmarked for LP rewards.
+        // feePool and rewardsFund both sit in the contract's physical token balance.
+        // If accounting ever drifts, cap the withdrawal to (balance - rewardsFund) so that
+        // LP reward tokens are never consumed by fee withdrawals.
+        uint256 contractBalance = IERC20(core.collateralToken).balanceOf(address(this));
+        uint256 safeToWithdraw =
+            contractBalance > rewards.rewardsFund ? contractBalance - rewards.rewardsFund : 0;
+        if (toWithdraw > safeToWithdraw) revert InsufficientLiquidity();
 
         address recipient = core.treasury != address(0) ? core.treasury : msg.sender;
 
@@ -1050,8 +1164,10 @@ contract VaultCore is VaultModuleBase {
     function getAvailableLiquidity() external view returns (uint256) {
         VaultStorageLib.CoreStorage storage core = _core();
         uint256 total = core.vaultInfo.totalLiquidity;
-        uint256 pending = core.vaultInfo.totalPendingPayoutAmount;
-        return total > pending ? total - pending : 0;
+        // R3-H-01 fix: exclude both queued payouts and committed margin collateral
+        uint256 committed =
+            core.vaultInfo.totalPendingPayoutAmount + core.vaultInfo.totalMarginCollateral;
+        return total > committed ? total - committed : 0;
     }
 
     // ========================================================================
@@ -1126,6 +1242,17 @@ contract VaultCore is VaultModuleBase {
             delete core.positionPayouts[positionId];
             delete core.pendingPayoutUsers[positionId];
             delete core.betCollateral[positionId];
+
+            // R3-H-01 fix: release committed margin from the global tracker
+            uint256 posMargin = core.positionMarginCollateral[positionId];
+            if (posMargin > 0) {
+                core.vaultInfo.totalMarginCollateral = core.vaultInfo.totalMarginCollateral
+                    > posMargin
+                    ? core.vaultInfo.totalMarginCollateral - posMargin
+                    : 0;
+                delete core.positionMarginCollateral[positionId];
+            }
+
             core.vaultInfo.pendingPositions--;
             core.vaultInfo.totalPendingPayoutAmount -= amount;
 
@@ -1213,6 +1340,9 @@ contract VaultCore is VaultModuleBase {
         if (totalShares == 0) return;
         rewards.rewardPerShareStored += VaultRewardsLib.computeRewardPerShareDelta(
             profit, totalShares
+        );
+        emit RewardAccumulatorUpdated(
+            address(this), profit, rewards.rewardPerShareStored, block.timestamp
         );
     }
 }

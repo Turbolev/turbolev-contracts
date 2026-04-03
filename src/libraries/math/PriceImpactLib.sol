@@ -269,6 +269,9 @@ library PriceImpactLib {
      * @notice Validate impact configuration
      * @param config Configuration to validate
      * @return isValid True if configuration is valid
+     * @dev R3-I-02: if `isEnabled` is true, at least one tier must be non-zero. Otherwise impact
+     *      is effectively off while the flag reads "on" — use `isEnabled = false` instead.
+     *      When `isEnabled` is false, all-zero tiers are allowed (explicitly disabled impact).
      */
     function validateConfig(ImpactConfig memory config) internal pure returns (bool isValid) {
         if (
@@ -287,6 +290,16 @@ library PriceImpactLib {
                 || config.tier4ImpactBps > config.tier5ImpactBps
         ) {
             return false;
+        }
+
+        if (config.isEnabled) {
+            if (
+                config.tier1ImpactBps == 0 && config.tier2ImpactBps == 0
+                    && config.tier3ImpactBps == 0 && config.tier4ImpactBps == 0
+                    && config.tier5ImpactBps == 0
+            ) {
+                return false;
+            }
         }
 
         return true;

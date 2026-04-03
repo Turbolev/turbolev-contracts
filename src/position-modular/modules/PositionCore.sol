@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.22;
 
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "../PositionModuleBase.sol";
 import "../../libraries/position/PositionLib.sol";
 import "../../libraries/math/MathLib.sol";
@@ -22,10 +23,19 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
  *      - Admin close/liquidation
  *      - Settlement processing
  *      - Admin configuration
+ *
+ * @dev Inherits OpenZeppelin Initializable: `initialize` uses `onlyInitializing` because it runs
+ *      via delegatecall from `PositionRouter.initialize` (which uses `initializer`). Implementation
+ *      is locked with `_disableInitializers()` in the constructor (R3-L-04).
  */
-contract PositionCore is PositionModuleBase {
+contract PositionCore is Initializable, PositionModuleBase {
     using PositionLib for PositionLib.Position;
     using SafeERC20 for IERC20;
+
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
 
     // ========================================================================
     // EVENTS
@@ -106,17 +116,16 @@ contract PositionCore is PositionModuleBase {
 
     /**
      * @notice Initialize core module (called via delegatecall from PositionRouter)
+     * @dev `onlyInitializing` matches OpenZeppelin pattern: only callable while
+     *      `PositionRouter.initialize` is executing (`initializer` sets `_initializing`).
      */
     function initialize(
         address _accessController,
         address _settlementEngine,
         address _vaultManager,
         address _priceFeedManager
-    ) external {
+    ) external onlyInitializing {
         PositionStorageLib.CoreStorage storage core = PositionStorageLib.getCoreStorage();
-
-        // Only allow initialization once
-        if (core.accessController != address(0)) revert InvalidAddress();
 
         if (_accessController == address(0)) revert InvalidAddress();
 
@@ -309,6 +318,9 @@ contract PositionCore is PositionModuleBase {
             );
         }
 
+        // R3-M-03 fix: emit openPrice (mark price used for P&L) not executionPrice
+        // (price-impact-adjusted display price). Indexers and UI read this field as
+        // openPrice; emitting executionPrice caused P&L and liquidation price mismatches.
         emit PositionOpened(
             positionId,
             msg.sender,
@@ -316,7 +328,7 @@ contract PositionCore is PositionModuleBase {
             amount,
             leverage,
             direction,
-            executionPrice,
+            openPrice,
             pos.liquidationPrice,
             positionSize,
             block.timestamp,
@@ -486,6 +498,11 @@ contract PositionCore is PositionModuleBase {
 
     /**
      * @notice Admin force close position
+     * @dev R3-L-06 fix: isLiquidation and closedBy must be consistent.
+     *      isLiquidation == true  ↔  closedBy == LIQUIDATION (1)
+     *      isLiquidation == false ↔  closedBy != LIQUIDATION
+     *      Inconsistent combinations would cause BetLiquidated to be emitted without
+     *      closedBy == LIQUIDATION, or vice versa, misleading off-chain indexers.
      */
     function adminClosePosition(
         uint64 positionId,
@@ -496,6 +513,11 @@ contract PositionCore is PositionModuleBase {
         PositionStorageLib.CoreStorage storage core = PositionStorageLib.getCoreStorage();
 
         if (block.timestamp > deadline) revert DeadlineExpired();
+
+        // Validate consistency between isLiquidation flag and closedBy enum (R3-L-06)
+        bool closedByIsLiquidation = PositionStorageLib.PositionClosedBy(closedBy)
+            == PositionStorageLib.PositionClosedBy.LIQUIDATION;
+        if (isLiquidation != closedByIsLiquidation) revert InconsistentLiquidationParams();
 
         PositionLib.Position storage pos = core.positions[positionId];
         if (pos.user == address(0)) revert PositionNotFound();
