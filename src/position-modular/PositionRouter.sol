@@ -118,8 +118,10 @@ contract PositionRouter is Initializable, UUPSUpgradeable {
     // RECEIVE / FALLBACK
     // ========================================================================
 
+    /// @dev Accept ETH only from PriceFeedManager (refund after getPriceWithUpdate); other senders rejected
     receive() external payable {
-        revert DirectTransferNotAllowed();
+        address pfm = PositionStorageLib.getCoreStorage().priceFeedManager;
+        if (msg.sender != pfm) revert DirectTransferNotAllowed();
     }
 
     fallback() external {
@@ -177,20 +179,23 @@ contract PositionRouter is Initializable, UUPSUpgradeable {
 
     /**
      * @notice Add margin to existing position
+     * @param priceUpdateData Encoded oracle update (e.g. Pyth); empty bytes uses getPriceChecked only
      */
     function addMargin(
         uint64 positionId,
         uint256 marginAmount,
         uint256 maxAcceptablePrice,
-        uint256 deadline
+        uint256 deadline,
+        bytes calldata priceUpdateData
     ) external payable {
         _delegateToCore(
             abi.encodeWithSignature(
-                "addMargin(uint64,uint256,uint256,uint256)",
+                "addMargin(uint64,uint256,uint256,uint256,bytes)",
                 positionId,
                 marginAmount,
                 maxAcceptablePrice,
-                deadline
+                deadline,
+                priceUpdateData
             )
         );
     }

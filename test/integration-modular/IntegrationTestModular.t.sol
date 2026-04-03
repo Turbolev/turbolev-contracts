@@ -260,7 +260,7 @@ contract IntegrationTestModular is BaseTestModular {
         );
 
         // Add margin
-        positionManager.addMargin(1, 5 ether, type(uint256).max, block.timestamp + 1 hours);
+        positionManager.addMargin(1, 5 ether, type(uint256).max, block.timestamp + 1 hours, "");
         vm.stopPrank();
 
         PositionLib.Position memory pos = positionManager.getPosition(1);

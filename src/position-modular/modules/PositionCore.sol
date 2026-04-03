@@ -335,6 +335,7 @@ contract PositionCore is Initializable, PositionModuleBase {
             pricePublishTime
         );
 
+        _refundRemainingEth();
         return positionId;
     }
 
@@ -409,16 +410,20 @@ contract PositionCore is Initializable, PositionModuleBase {
             pricePublishTime,
             PositionStorageLib.PositionClosedBy.USER_REQUESTED
         );
+
+        _refundRemainingEth();
     }
 
     /**
      * @notice Add margin to existing position
+     * @param priceUpdateData Encoded oracle update (e.g. Pyth); empty uses getPriceChecked only
      */
     function addMargin(
         uint64 positionId,
         uint256 marginAmount,
         uint256 maxAcceptablePrice,
-        uint256 deadline
+        uint256 deadline,
+        bytes calldata priceUpdateData
     ) external payable nonReentrant whenNotPaused {
         PositionStorageLib.CoreStorage storage core = PositionStorageLib.getCoreStorage();
 
@@ -440,8 +445,39 @@ contract PositionCore is Initializable, PositionModuleBase {
         // Get current price to verify not liquidated
         if (core.priceFeedManager != address(0)) {
             uint256 maxAge = _calculateMaxAge(deadline);
-            (uint256 currentPrice,) =
-                IPriceFeedManager(core.priceFeedManager).getPriceChecked(pos.projectToken, maxAge);
+            uint256 currentPrice;
+            uint256 pricePublishTime;
+
+            if (priceUpdateData.length > 0) {
+                try IPriceFeedManager(core.priceFeedManager).getPriceWithUpdate{ value: msg.value }(
+                    pos.projectToken, maxAge, priceUpdateData
+                ) returns (
+                    uint256 _price, uint256 _publishTime
+                ) {
+                    currentPrice = _price;
+                    pricePublishTime = _publishTime;
+                } catch (bytes memory reason) {
+                    emit OraclePriceFetchFailed(positionId, pos.projectToken, reason);
+                    revert OracleFetchFailed(reason);
+                }
+            } else {
+                try IPriceFeedManager(core.priceFeedManager)
+                    .getPriceChecked(pos.projectToken, maxAge) returns (
+                    uint256 _price, uint256 _publishTime
+                ) {
+                    currentPrice = _price;
+                    pricePublishTime = _publishTime;
+                } catch (bytes memory reason) {
+                    emit OraclePriceFetchFailed(positionId, pos.projectToken, reason);
+                    revert OracleFetchFailed(reason);
+                }
+            }
+
+            if (currentPrice == 0) revert PriceStale();
+
+            if (block.timestamp > pricePublishTime + maxAge) {
+                revert PriceStale();
+            }
 
             // Check maxAcceptablePrice
             if (maxAcceptablePrice > 0) {
@@ -494,6 +530,8 @@ contract PositionCore is Initializable, PositionModuleBase {
             pos.liquidationPrice,
             block.timestamp
         );
+
+        _refundRemainingEth();
     }
 
     /**
