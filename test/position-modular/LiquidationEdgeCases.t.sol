@@ -118,7 +118,7 @@ contract LiquidationEdgeCasesTest is BaseTestModular {
         );
 
         // Add margin to increase safety buffer
-        positionManager.addMargin(1, 5 ether, type(uint256).max, block.timestamp + 1 hours);
+        positionManager.addMargin(1, 5 ether, type(uint256).max, block.timestamp + 1 hours, "");
         vm.stopPrank();
 
         // Check updated collateral

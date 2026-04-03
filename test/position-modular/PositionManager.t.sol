@@ -275,7 +275,8 @@ contract PositionManagerTest is BaseTestModular {
             1, // positionId
             5 ether, // marginAmount
             type(uint256).max,
-            block.timestamp + 1 hours
+            block.timestamp + 1 hours,
+            ""
         );
         vm.stopPrank();
     }
@@ -300,7 +301,7 @@ contract PositionManagerTest is BaseTestModular {
         vm.startPrank(user2);
         projectToken.approve(address(positionManager), 5 ether);
         vm.expectRevert();
-        positionManager.addMargin(1, 5 ether, type(uint256).max, block.timestamp + 1 hours);
+        positionManager.addMargin(1, 5 ether, type(uint256).max, block.timestamp + 1 hours, "");
         vm.stopPrank();
     }
 

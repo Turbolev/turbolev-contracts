@@ -62,6 +62,7 @@ abstract contract PositionModuleBase {
     error ExcessiveMargin();
     error OracleFetchFailed(bytes reason);
     error InconsistentLiquidationParams();
+    error EthRefundFailed();
 
     // ========================================================================
     // MODIFIERS - ACCESS CONTROL
@@ -200,6 +201,18 @@ abstract contract PositionModuleBase {
         maxAge = deadline - block.timestamp;
         if (maxAge > PositionStorageLib.MAX_ALLOWED_PRICE_AGE) {
             maxAge = PositionStorageLib.MAX_ALLOWED_PRICE_AGE;
+        }
+    }
+
+    /**
+     * @notice Forward any ETH held by the router (e.g. Pyth fee refund from PriceFeedManager) to the caller
+     * @dev Called at end of payable flows; delegatecall context => address(this) is PositionRouter
+     */
+    function _refundRemainingEth() internal {
+        uint256 bal = address(this).balance;
+        if (bal > 0) {
+            (bool sent,) = payable(msg.sender).call{ value: bal }("");
+            if (!sent) revert EthRefundFailed();
         }
     }
 
