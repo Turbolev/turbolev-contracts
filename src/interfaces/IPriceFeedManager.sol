@@ -191,8 +191,8 @@ interface IPriceFeedManager {
      * @return price Settlement price (scaled to 18 decimals)
      * @return publishTime When price was last updated
      * @dev Same as getPrice but also runs the circuit breaker. Use this in all
-     *      state-changing flows (open, close, addMargin, adminClose, settlement)
-     *      that do not have priceUpdateData available.
+     *      state-changing flows (open, close, addMargin, adminClose with empty
+     *      update payload, settlement) that do not pass pull-oracle update data.
      */
     function getPriceChecked(address projectToken, uint256 maxAge)
         external

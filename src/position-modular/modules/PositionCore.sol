@@ -340,6 +340,43 @@ contract PositionCore is Initializable, PositionModuleBase {
     }
 
     /**
+     * @dev Shared mark price resolution for close flows. Caller must ensure priceFeedManager is set.
+     *      Non-empty priceUpdateData uses getPriceWithUpdate (pull oracle); else getPriceChecked.
+     */
+    function _resolveCloseMarkPrice(
+        uint64 positionId,
+        address projectToken,
+        uint256 maxAge,
+        bytes calldata priceUpdateData
+    ) internal returns (uint256 closePrice, uint256 pricePublishTime) {
+        PositionStorageLib.CoreStorage storage core = PositionStorageLib.getCoreStorage();
+
+        if (priceUpdateData.length > 0) {
+            try IPriceFeedManager(core.priceFeedManager).getPriceWithUpdate{ value: msg.value }(
+                projectToken, maxAge, priceUpdateData
+            ) returns (
+                uint256 _price, uint256 _publishTime
+            ) {
+                return (_price, _publishTime);
+            } catch (bytes memory reason) {
+                emit OraclePriceFetchFailed(positionId, projectToken, reason);
+                revert OracleFetchFailed(reason);
+            }
+        }
+        // BLN-05 fix: use getPriceChecked (non-view, runs circuit breaker) instead of
+        // getPrice (view, bypasses circuit breaker). All state-changing price fetches
+        // must go through the circuit breaker to prevent settlement at manipulated prices.
+        try IPriceFeedManager(core.priceFeedManager).getPriceChecked(projectToken, maxAge) returns (
+            uint256 _price, uint256 _publishTime
+        ) {
+            return (_price, _publishTime);
+        } catch (bytes memory reason) {
+            emit OraclePriceFetchFailed(positionId, projectToken, reason);
+            revert OracleFetchFailed(reason);
+        }
+    }
+
+    /**
      * @notice Close position at current mark price (no slippage protection)
      */
     function closePosition(uint64 positionId, uint256 deadline, bytes calldata priceUpdateData)
@@ -361,37 +398,8 @@ contract PositionCore is Initializable, PositionModuleBase {
         uint256 maxAge = _calculateMaxAge(deadline);
         if (core.priceFeedManager == address(0)) revert InvalidAddress();
 
-        // Get current mark price
-        uint256 closePrice;
-        uint256 pricePublishTime;
-
-        if (priceUpdateData.length > 0) {
-            try IPriceFeedManager(core.priceFeedManager).getPriceWithUpdate{ value: msg.value }(
-                pos.projectToken, maxAge, priceUpdateData
-            ) returns (
-                uint256 _price, uint256 _publishTime
-            ) {
-                closePrice = _price;
-                pricePublishTime = _publishTime;
-            } catch (bytes memory reason) {
-                emit OraclePriceFetchFailed(positionId, pos.projectToken, reason);
-                revert OracleFetchFailed(reason);
-            }
-        } else {
-            // BLN-05 fix: use getPriceChecked (non-view, runs circuit breaker) instead of
-            // getPrice (view, bypasses circuit breaker). All state-changing price fetches
-            // must go through the circuit breaker to prevent settlement at manipulated prices.
-            try IPriceFeedManager(core.priceFeedManager)
-                .getPriceChecked(pos.projectToken, maxAge) returns (
-                uint256 _price, uint256 _publishTime
-            ) {
-                closePrice = _price;
-                pricePublishTime = _publishTime;
-            } catch (bytes memory reason) {
-                emit OraclePriceFetchFailed(positionId, pos.projectToken, reason);
-                revert OracleFetchFailed(reason);
-            }
-        }
+        (uint256 closePrice, uint256 pricePublishTime) =
+            _resolveCloseMarkPrice(positionId, pos.projectToken, maxAge, priceUpdateData);
 
         if (closePrice == 0) {
             revert PriceStale();
@@ -536,6 +544,7 @@ contract PositionCore is Initializable, PositionModuleBase {
 
     /**
      * @notice Admin force close position
+     * @param priceUpdateData Encoded oracle update (e.g. Pyth); empty bytes uses getPriceChecked only
      * @dev R3-L-06 fix: isLiquidation and closedBy must be consistent.
      *      isLiquidation == true  ↔  closedBy == LIQUIDATION (1)
      *      isLiquidation == false ↔  closedBy != LIQUIDATION
@@ -546,8 +555,9 @@ contract PositionCore is Initializable, PositionModuleBase {
         uint64 positionId,
         uint256 deadline,
         bool isLiquidation,
-        uint8 closedBy
-    ) external nonReentrant onlyPositionKeeper {
+        uint8 closedBy,
+        bytes calldata priceUpdateData
+    ) external payable nonReentrant onlyPositionKeeper {
         PositionStorageLib.CoreStorage storage core = PositionStorageLib.getCoreStorage();
 
         if (block.timestamp > deadline) revert DeadlineExpired();
@@ -568,8 +578,8 @@ contract PositionCore is Initializable, PositionModuleBase {
         if (core.priceFeedManager == address(0)) revert InvalidAddress();
         uint256 maxAge = _calculateMaxAge(deadline);
         (uint256 closePrice, uint256 pricePublishTime) =
-            IPriceFeedManager(core.priceFeedManager).getPriceChecked(pos.projectToken, maxAge);
-        if (closePrice == 0) revert InvalidPrice();
+            _resolveCloseMarkPrice(positionId, pos.projectToken, maxAge, priceUpdateData);
+        if (closePrice == 0) revert PriceStale();
 
         if (isLiquidation) {
             emit BetLiquidated(positionId, pos.user, closePrice, block.timestamp);
@@ -582,6 +592,8 @@ contract PositionCore is Initializable, PositionModuleBase {
             pricePublishTime,
             PositionStorageLib.PositionClosedBy(closedBy)
         );
+
+        _refundRemainingEth();
     }
 
     // ========================================================================

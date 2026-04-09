@@ -202,20 +202,23 @@ contract PositionRouter is Initializable, UUPSUpgradeable {
 
     /**
      * @notice Admin force close position
+     * @param priceUpdateData Encoded oracle update (e.g. Pyth); empty bytes uses getPriceChecked only
      */
     function adminClosePosition(
         uint64 positionId,
         uint256 deadline,
         bool isLiquidation,
-        PositionStorageLib.PositionClosedBy closedBy
-    ) external {
+        PositionStorageLib.PositionClosedBy closedBy,
+        bytes calldata priceUpdateData
+    ) external payable {
         _delegateToCore(
             abi.encodeWithSignature(
-                "adminClosePosition(uint64,uint256,bool,uint8)",
+                "adminClosePosition(uint64,uint256,bool,uint8,bytes)",
                 positionId,
                 deadline,
                 isLiquidation,
-                uint8(closedBy)
+                uint8(closedBy),
+                priceUpdateData
             )
         );
     }
